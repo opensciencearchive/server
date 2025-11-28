@@ -1,11 +1,19 @@
-from dishka import AsyncContainer, make_async_container
-from dishka.integrations.fastapi import FastapiProvider, setup_dishka
+from contextlib import asynccontextmanager
+from dishka.integrations.fastapi import setup_dishka
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logfire
 
+from osa.application.di import create_container
 from osa.config import Config
+from osa.domain.shadow.api.rest import router as shadow_router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await app.state.dishka_container.close()
 
 
 def create_app() -> FastAPI:
@@ -16,6 +24,7 @@ def create_app() -> FastAPI:
         title=config.server.name,
         description=config.server.description,
         version=config.server.version,
+        lifespan=lifespan,
     )
 
     # Instrument FastAPI for automatic tracing of HTTP requests
@@ -44,11 +53,11 @@ def create_app() -> FastAPI:
     )
 
     # Setup dependency injection
-    setup_dishka(app_instance, container)
+    container = create_container()
+    setup_dishka(container, app_instance)
 
     # Register routes
-    for module in modules:
-        app_instance.include_router(module.api.rest.router)
+    app_instance.include_router(shadow_router)
 
     # TODO: Add error handlers
 

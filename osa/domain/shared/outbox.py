@@ -1,4 +1,3 @@
-
 from abc import ABC, abstractmethod
 from typing import NewType
 from uuid import UUID
@@ -9,6 +8,7 @@ from osa.domain.shared.event import Event
 
 
 OutboxMessageId = NewType("OutboxMessageId", UUID)
+
 
 class OutboxMessage(BaseModel, ABC):
     id: OutboxMessageId

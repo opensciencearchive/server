@@ -2,7 +2,7 @@ import abc
 import re
 from typing import ClassVar, Generic, Literal, Optional, Self, TypeGuard, TypeVar
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 # TODO: test this

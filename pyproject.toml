@@ -8,11 +8,13 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "alembic>=1.17.2",
     "dishka>=1.7.2",
     "fastapi>=0.121.1",
     "logfire[fastapi,httpx,sqlalchemy]>=4.14.2",
     "pydantic>=2.12.4",
     "pydantic-settings>=2.12.0",
+    "sqlalchemy>=2.0.44",
 ]
 
 [project.scripts]

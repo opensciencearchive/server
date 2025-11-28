@@ -2,12 +2,15 @@ import logfire
 
 from osa.domain.deposition.service.deposition import DepositionService
 from osa.domain.shared.command import Command, CommandHandler, Result
+from osa.domain.shared.model.srn import DepositionSRN
 
 
-class SubmitDeposition(Command): ...
+class SubmitDeposition(Command):
+    srn: DepositionSRN
 
 
-class DepositionSubmitted(Result): ...
+class DepositionSubmitted(Result):
+    pass
 
 
 class SubmitDepositionHandler(CommandHandler[SubmitDeposition, DepositionSubmitted]):
