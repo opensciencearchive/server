@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from osa.domain.shared.model.srn import EventSRN
 
@@ -13,8 +13,8 @@ class Event(BaseModel, ABC):
 E = TypeVar("E", bound=Event)
 
 
-class EventListener(BaseModel, Generic[E], ABC):
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+class EventListener(Generic[E], ABC):
+    """Base class for event listeners."""
 
     @abstractmethod
     async def handle(self, event: E) -> None:

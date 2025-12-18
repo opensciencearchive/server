@@ -5,10 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from osa.config import Config
 from osa.domain.deposition.port.repository import DepositionRepository
-from osa.domain.deposition.port.storage import StoragePort
 from osa.domain.shadow.port.repository import ShadowRepository
 from osa.domain.validation.port.repository import TraitRepository, ValidationRunRepository
-from osa.infrastructure.persistence.adapter.storage import LocalStorageAdapter
 from osa.infrastructure.persistence.database import (
     create_db_engine,
     create_session_factory,
@@ -47,14 +45,9 @@ class PersistenceProvider(Provider):
     shadow_repo = provide(
         PostgresShadowRepository, scope=Scope.REQUEST, provides=ShadowRepository
     )
-    
+
     dep_repo = provide(
         PostgresDepositionRepository, scope=Scope.REQUEST, provides=DepositionRepository
-    )
-    
-    # Infrastructure Adapters
-    storage = provide(
-        LocalStorageAdapter, scope=Scope.REQUEST, provides=StoragePort
     )
 
     # Validation repositories

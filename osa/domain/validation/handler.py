@@ -12,7 +12,8 @@ from osa.domain.validation.model import RunStatus
 class ValidationHandler(EventListener[DepositionSubmittedEvent]):
     """Stub handler that simulates validation. Replace with real ValidationService wiring."""
 
-    event_bus: EventBus
+    def __init__(self, event_bus: EventBus) -> None:
+        self.event_bus = event_bus
 
     async def handle(self, event: DepositionSubmittedEvent) -> None:
         with logfire.span("ValidationHandler"):
