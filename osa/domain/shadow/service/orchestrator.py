@@ -1,6 +1,7 @@
 import uuid
 
 import logfire
+
 from osa.domain.deposition.command.create import (
     CreateDeposition,
     CreateDepositionHandler,
@@ -14,9 +15,7 @@ from osa.domain.shadow.model.aggregate import ShadowId, ShadowRequest
 from osa.domain.shadow.model.value import ShadowStatus
 from osa.domain.shadow.port.ingestion import IngestionPort
 from osa.domain.shadow.port.repository import ShadowRepository
-
-
-from osa.domain.shared.model.srn import DepositionProfileSRN
+from osa.domain.shared.model.srn import ConventionSRN
 
 
 class ShadowOrchestrator:
@@ -35,19 +34,20 @@ class ShadowOrchestrator:
         self.upload_file_handler = upload_file_handler
         self.submit_dep_handler = submit_dep_handler
 
-    def start_workflow(self, url: str, profile_srn: str) -> ShadowId:
+    async def start_workflow(self, url: str, convention_srn: str) -> ShadowId:
         shadow_id = ShadowId(str(uuid.uuid4()))
 
-        # Parse profile SRN
-        # In real app, we might validate it exists in registry here or in CommandHandler
-        profile_srn_obj = DepositionProfileSRN.parse(profile_srn)
+        # Parse convention SRN
+        convention_srn_obj = ConventionSRN.parse(convention_srn)
+        if not isinstance(convention_srn_obj, ConventionSRN):
+            raise ValueError("provided convention SRN is not a ConventionSRN")
 
         # 1. Create Request Record
         req = ShadowRequest(
             id=shadow_id,
             status=ShadowStatus.PENDING,
             source_url=url,
-            profile_srn=profile_srn_obj,
+            convention_srn=convention_srn_obj,
         )
         self.repo.save_request(req)
 
@@ -59,8 +59,8 @@ class ShadowOrchestrator:
             ingest_result = self.ingestion.ingest(url)
 
             # 3. Create Deposition (Core)
-            create_cmd = CreateDeposition(profile_srn=profile_srn_obj)
-            dep_result = self.create_dep_handler.run(create_cmd)
+            create_cmd = CreateDeposition(convention_srn=convention_srn_obj)
+            dep_result = await self.create_dep_handler.run(create_cmd)
 
             # Update request with deposition ID
             req.deposition_id = dep_result.srn
@@ -76,7 +76,9 @@ class ShadowOrchestrator:
 
             # 5. Submit
             submit_cmd = SubmitDeposition(srn=dep_result.srn)
-            self.submit_dep_handler.run(submit_cmd)
+            await self.submit_dep_handler.run(
+                submit_cmd
+            )  # TODO: Make this class (and similar) async!
 
             # 6. Update Status (to Validating)
             # Note: Actual validating status might be set by listener or polling,

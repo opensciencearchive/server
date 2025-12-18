@@ -7,11 +7,33 @@ import logfire
 
 from osa.application.di import create_container
 from osa.config import Config
+from osa.domain.deposition.event.submitted import DepositionSubmittedEvent
 from osa.domain.shadow.api.rest import router as shadow_router
+from osa.domain.shadow.event.listener import ValidationCompletedListener
+from osa.domain.shared.port.event_bus import EventBus
+from osa.domain.validation.event.validation_completed import ValidationCompleted
+from osa.domain.validation.handler import ValidationHandler
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Wire up event listeners
+    container = app.state.dishka_container
+    event_bus = await container.get(EventBus)
+    
+    # 1. Validation Domain listens for DepositionSubmitted
+    validation_handler = await container.get(ValidationHandler)
+    # Cast to concrete InMemoryEventBus to access subscribe, or update protocol.
+    # For prototype, assuming InMemoryEventBus or checking method existence.
+    if hasattr(event_bus, "subscribe"):
+        event_bus.subscribe(DepositionSubmittedEvent, validation_handler.handle)
+        
+        # 2. Shadow Domain listens for ValidationCompleted
+        shadow_listener = await container.get(ValidationCompletedListener)
+        event_bus.subscribe(ValidationCompleted, shadow_listener.handle)
+        
+        logfire.info("Event listeners wired up")
+
     yield
     await app.state.dishka_container.close()
 

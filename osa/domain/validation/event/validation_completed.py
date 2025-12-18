@@ -1,8 +1,12 @@
-from typing import Any
 from osa.domain.shared.event import Event
-from osa.domain.shared.model.srn import DepositionSRN
+from osa.domain.shared.model.srn import DepositionSRN, ValidationRunSRN
+from osa.domain.validation.model import CheckResult, RunStatus
 
 
 class ValidationCompleted(Event):
-    deposition_id: DepositionSRN
-    summary: dict[str, Any]  # Placeholder for actual summary object
+    """Emitted when validation finishes for a deposition."""
+
+    validation_run_srn: ValidationRunSRN
+    deposition_srn: DepositionSRN
+    status: RunStatus
+    results: list[CheckResult]

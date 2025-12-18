@@ -3,7 +3,7 @@ from typing import Any, Dict
 from osa.domain.shadow.model.aggregate import ShadowId, ShadowRequest
 from osa.domain.shadow.model.report import ShadowReport
 from osa.domain.shadow.model.value import ShadowStatus
-from osa.domain.shared.model.srn import DepositionSRN, DepositionProfileSRN
+from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
 
 
 def row_to_shadow_request(row: Dict[str, Any]) -> ShadowRequest:
@@ -14,7 +14,7 @@ def row_to_shadow_request(row: Dict[str, Any]) -> ShadowRequest:
         id=ShadowId(row["id"]),
         status=ShadowStatus(row["status"]),
         source_url=row["source_url"],
-        profile_srn=DepositionProfileSRN.parse(row["profile_srn"]),
+        convention_srn=ConventionSRN.parse(row["profile_srn"]),
         deposition_id=DepositionSRN.parse(dep_id_str) if dep_id_str else None,
     )
 
@@ -25,11 +25,8 @@ def shadow_request_to_dict(req: ShadowRequest) -> Dict[str, Any]:
         "id": req.id,
         "status": req.status.value,
         "source_url": req.source_url,
-        "profile_srn": str(req.profile_srn),
+        "profile_srn": str(req.convention_srn),
         "deposition_id": str(req.deposition_id) if req.deposition_id else None,
-        # created_at/updated_at handled by server defaults usually,
-        # but ideally passed if we track them in aggregate.
-        # Aggregate doesn't have them currently.
     }
 
 

@@ -17,7 +17,6 @@ class EventListener(BaseModel, Generic[E], ABC):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     @abstractmethod
-    def handle(self, event: E) -> None: ...
+    async def handle(self, event: E) -> None:
+        ...
 
-
-class EventBus(ABC): ...

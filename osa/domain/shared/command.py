@@ -1,19 +1,33 @@
-from abc import ABC, abstractmethod
-from typing import Generic, TypeVar
+from abc import ABCMeta, abstractmethod
+from dataclasses import dataclass
+from typing import Generic, TypeVar, dataclass_transform
+
 from pydantic import BaseModel
 
 
-# TODO: should we colocate data with behaviour, on the same class?
-class Command(BaseModel, ABC): ...
+class Command(BaseModel): ...
 
 
-class Result(BaseModel, ABC): ...
+class Result(BaseModel): ...
 
 
 C = TypeVar("C", bound=Command)
 R = TypeVar("R", bound=Result)
 
 
-class CommandHandler(Generic[C, R], ABC):
+@dataclass_transform()
+class _CommandHandlerMeta(ABCMeta):
+    """Metaclass that combines ABC with auto-dataclass for subclasses."""
+
+    def __new__(mcs, name: str, bases: tuple, namespace: dict):
+        cls = super().__new__(mcs, name, bases, namespace)
+        if any(isinstance(b, mcs) for b in bases):
+            return dataclass(cls)  # type: ignore[return-value]
+        return cls
+
+
+class CommandHandler(Generic[C, R], metaclass=_CommandHandlerMeta):
+    """Base class for command handlers. Subclasses are automatically dataclasses."""
+
     @abstractmethod
-    def run(self, cmd: C) -> R: ...
+    async def run(self, cmd: C) -> R: ...

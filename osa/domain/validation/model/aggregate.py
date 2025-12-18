@@ -1,11 +1,17 @@
-from pydantic import Field
+from datetime import datetime
+
 from osa.domain.shared.model.aggregate import Aggregate
-from osa.domain.shared.model.srn import SRN, Semver
-from osa.domain.validation.model.entity import GuaranteeValidator
+from osa.domain.shared.model.srn import TraitSRN
+from osa.domain.validation.model.value import TraitStatus, Validator
 
 
-class SemanticGuarantee(Aggregate):
-    id: SRN
-    semver: Semver
-    _schema: str = Field(alias="schema")  # switch to SchemaId type, avoiding primitives
-    validator: GuaranteeValidator
+class Trait(Aggregate):
+    """A verifiable assertion about data, coupled 1:1 with its OCI validator."""
+
+    srn: TraitSRN
+    slug: str
+    name: str
+    description: str
+    validator: Validator
+    status: TraitStatus = TraitStatus.DRAFT
+    created_at: datetime
