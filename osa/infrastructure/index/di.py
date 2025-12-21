@@ -1,8 +1,10 @@
 """Dependency injection provider for index backends."""
+from osa.util.di.scope import Scope
 
-from dishka import Provider, Scope, provide
+from dishka import Provider, provide
 
 from osa.config import Config
+from osa.domain.index.model.registry import IndexRegistry
 from osa.infrastructure.index.vector.backend import VectorStorageBackend
 from osa.sdk.index.backend import StorageBackend
 
@@ -11,11 +13,11 @@ class IndexProvider(Provider):
     """Provides configured index backends."""
 
     @provide(scope=Scope.APP)
-    def get_backends(self, config: Config) -> dict[str, StorageBackend]:
+    def get_backends(self, config: Config) -> IndexRegistry:
         """Build all configured index backends.
 
         Returns:
-            Dictionary mapping index names to their backend instances.
+            Registry of index backends.
         """
         backends: dict[str, StorageBackend] = {}
 
@@ -26,4 +28,4 @@ class IndexProvider(Provider):
             # elif idx_config.backend == "keyword":
             #     backends[name] = KeywordStorageBackend(name, idx_config.config)
 
-        return backends
+        return IndexRegistry(backends)

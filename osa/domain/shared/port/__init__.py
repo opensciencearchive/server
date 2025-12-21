@@ -1,4 +1,4 @@
 from .base import Port
-from .event_bus import EventBus
+from .event_repository import EventRepository
 
-__all__ = ["Port", "EventBus"]
+__all__ = ["Port", "EventRepository"]

@@ -1,10 +1,12 @@
 import logfire
+from uuid import uuid4
 
 from osa.domain.deposition.event.submitted import DepositionSubmittedEvent
 from osa.domain.deposition.service.deposition import DepositionService
 from osa.domain.shared.command import Command, CommandHandler, Result
+from osa.domain.shared.event import EventId
 from osa.domain.shared.model.srn import DepositionSRN
-from osa.domain.shared.port.event_bus import EventBus
+from osa.domain.shared.outbox import Outbox
 
 
 class SubmitDeposition(Command):
@@ -17,23 +19,21 @@ class DepositionSubmitted(Result):
 
 class SubmitDepositionHandler(CommandHandler[SubmitDeposition, DepositionSubmitted]):
     deposition_service: DepositionService
-    event_bus: EventBus
+    outbox: Outbox
 
     async def run(self, cmd: SubmitDeposition) -> DepositionSubmitted:
         with logfire.span("SubmitDeposition"):
             # TODO: Domain logic via service (state transition)
             # self.deposition_service.submit(cmd.srn)
-            
-            # Publish Event
-            # Note: Ideally this happens in the Service or Aggregate, 
-            # or via Outbox. For prototype, publishing here is fine.
-            from osa.domain.shared.model.srn import EventSRN
+
+            # Append event to outbox for reliable delivery
             event = DepositionSubmittedEvent(
-                srn=EventSRN.parse("urn:osa:mock:evt:submitted"),  # Mock SRN
-                deposition_id=cmd.srn
+                id=EventId(uuid4()),
+                deposition_id=cmd.srn,
+                metadata={},  # Empty metadata for direct submission (not from ingest)
             )
-            await self.event_bus.publish(event)
-            
-            logfire.info("Deposition submitted event published", deposition_id=str(cmd.srn))
+            await self.outbox.append(event)
+
+            logfire.info("Deposition submitted event saved to outbox", deposition_id=str(cmd.srn))
 
             return DepositionSubmitted()

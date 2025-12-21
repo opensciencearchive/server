@@ -19,10 +19,12 @@ class DeleteDepositionFilesHandler(
     repository: DepositionRepository
     storage: StoragePort
 
-    def run(self, cmd: DeleteDepositionFiles) -> DepositionFilesDeleted:
+    async def run(self, cmd: DeleteDepositionFiles) -> DepositionFilesDeleted:
         with logfire.span("DeleteDepositionFiles"):
             # 1. Load deposition
-            dep = self.repository.get(cmd.srn)
+            dep = await self.repository.get(cmd.srn)
+            if dep is None:
+                raise ValueError(f"Deposition not found: {cmd.srn}")
 
             # 2. Clear files from aggregate (domain logic)
             dep.remove_all_files()
@@ -31,6 +33,6 @@ class DeleteDepositionFilesHandler(
             self.storage.delete_files_for_deposition(cmd.srn)
 
             # 4. Persist changes
-            self.repository.save(dep)
+            await self.repository.save(dep)
 
             return DepositionFilesDeleted()

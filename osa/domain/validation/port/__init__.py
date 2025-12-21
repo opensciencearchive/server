@@ -1,7 +1,4 @@
-from osa.domain.validation.port.repository import (
-    TraitRepository,
-    ValidationRunRepository,
-)
+from osa.domain.validation.port.repository import ValidationRunRepository
 from osa.domain.validation.port.runner import (
     ResourceLimits,
     ValidationInputs,
@@ -11,7 +8,6 @@ from osa.domain.validation.port.runner import (
 
 __all__ = [
     "ResourceLimits",
-    "TraitRepository",
     "ValidationInputs",
     "ValidationRunRepository",
     "ValidatorOutput",

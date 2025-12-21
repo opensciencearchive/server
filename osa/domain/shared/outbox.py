@@ -1,28 +1,41 @@
-from abc import ABC, abstractmethod
-from typing import NewType
-from uuid import UUID
+"""Outbox - domain service for reliable event delivery."""
 
-from pydantic import BaseModel
+from datetime import UTC, datetime
+from typing import TypeVar
 
-from osa.domain.shared.event import Event
+from osa.domain.shared.event import Event, EventId
+from osa.domain.shared.port.event_repository import EventRepository
+from osa.domain.shared.service import Service
 
-
-OutboxMessageId = NewType("OutboxMessageId", UUID)
-
-
-class OutboxMessage(BaseModel, ABC):
-    id: OutboxMessageId
+E = TypeVar("E", bound=Event)
 
 
-class Outbox(ABC):
-    @abstractmethod
-    async def add(self, event: Event): ...
+class Outbox(Service):
+    """Domain service for reliable event delivery via the transactional outbox pattern.
 
-    @abstractmethod
-    async def fetch_batch(self, limit: int = 100) -> list[OutboxMessage]: ...
+    Wraps EventRepository with delivery semantics. Business code uses this
+    to append events and query event history. The BackgroundWorker uses this
+    to fetch pending events and mark them as delivered/failed.
+    """
 
-    @abstractmethod
-    async def mark_delivered(self, msg_id: OutboxMessageId): ...
+    _repo: EventRepository
 
-    @abstractmethod
-    async def mark_failed(self, msg_id: OutboxMessageId, reason: str): ...
+    async def append(self, event: Event) -> None:
+        """Add an event to the outbox for delivery."""
+        await self._repo.save(event, status="pending")
+
+    async def fetch_pending(self, limit: int = 100) -> list[Event]:
+        """Fetch events awaiting delivery."""
+        return await self._repo.find_pending(limit)
+
+    async def mark_delivered(self, event_id: EventId) -> None:
+        """Mark an event as successfully delivered."""
+        await self._repo.update_status(event_id, status="delivered")
+
+    async def mark_failed(self, event_id: EventId, error: str) -> None:
+        """Mark an event as failed with an error message."""
+        await self._repo.update_status(event_id, status="failed", error=error)
+
+    async def find_latest(self, event_type: type[E]) -> E | None:
+        """Find the most recent event of a given type."""
+        return await self._repo.find_latest_by_type(event_type)

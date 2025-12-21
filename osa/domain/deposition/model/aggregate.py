@@ -1,35 +1,19 @@
-from typing import Generic, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 
 from osa.domain.deposition.model.value import DepositionFile, DepositionStatus
 from osa.domain.shared.model.aggregate import Aggregate
-from osa.domain.shared.model.srn import (
-    ConventionSRN,
-    DepositionSRN,
-    RecordSRN,
-    SchemaSRN,
-    TraitSRN,
-    VocabSRN,
-)
+from osa.domain.shared.model.srn import DepositionSRN, RecordSRN
 
 T = TypeVar("T")
 
 
 class Deposition(Aggregate, Generic[T]):
     srn: DepositionSRN
-    convention_srn: ConventionSRN
     status: DepositionStatus
-    payload: T
+    metadata: T
     files: list[DepositionFile] = []
-    record_srn: Optional[RecordSRN] = None
+    record_srn: RecordSRN | None = None
+    provenance: dict[str, Any] = {}  # Ingestor info, source tracking
 
     def remove_all_files(self) -> None:
         self.files = []
-
-
-class Convention(Aggregate):
-    """Bundle of schema + traits + vocabularies for submission."""
-
-    srn: ConventionSRN
-    schema_srn: SchemaSRN
-    trait_srns: list[TraitSRN]
-    vocab_srns: list[VocabSRN] = []

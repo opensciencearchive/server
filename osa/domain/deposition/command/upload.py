@@ -17,7 +17,7 @@ class FileUploaded(Result):
 
 
 class UploadFileHandler(CommandHandler[UploadFile, FileUploaded]):
-    def run(self, cmd: UploadFile) -> FileUploaded:
+    async def run(self, cmd: UploadFile) -> FileUploaded:
         with logfire.span("UploadFile"):
             # TODO: Implement actual file storage logic
             logfire.info("File uploaded", filename=cmd.filename)

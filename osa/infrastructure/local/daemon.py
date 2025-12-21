@@ -69,12 +69,14 @@ class DaemonManager:
         self,
         host: str = "0.0.0.0",
         port: int = 8000,
+        config_file: str | None = None,
     ) -> ServerInfo:
         """Start the server in the background.
 
         Args:
             host: Host to bind to.
             port: Port to bind to.
+            config_file: Path to YAML config file.
 
         Returns:
             ServerInfo with status and PID.
@@ -96,10 +98,28 @@ class DaemonManager:
 
         self._paths.ensure_directories()
 
-        # Start server as subprocess (wipe log on each start)
-        log_file = self._paths.server_log.open("w")
+        # Lazy imports - only load heavy deps when actually starting server
+        from osa.config import Config
+        from osa.infrastructure.persistence.migrate import run_migrations
 
-        # Use uvicorn directly via subprocess
+        # Load config and run migrations
+        if config_file:
+            os.environ["OSA_CONFIG_FILE"] = config_file
+        app_config = Config()
+
+        if app_config.database.auto_migrate:
+            print("Running database migrations...")
+            run_migrations(app_config.database.url)
+            print("Migrations complete.")
+
+        # Build environment with config file and log path
+        env = os.environ.copy()
+        if config_file:
+            env["OSA_CONFIG_FILE"] = config_file
+        # Pass log file path for the app to configure logging directly
+        env["OSA_LOG_FILE"] = str(self._paths.server_log)
+
+        # Use uvicorn directly via subprocess (app handles its own logging to file)
         process = subprocess.Popen(
             [
                 sys.executable,
@@ -111,9 +131,10 @@ class DaemonManager:
                 "--port",
                 str(port),
             ],
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             start_new_session=True,  # Detach from terminal
+            env=env,
         )
 
         # Write server state

@@ -1,6 +1,4 @@
-from typing import Optional
-
-from sqlalchemy import select, insert, update
+from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.deposition.model.aggregate import Deposition
@@ -36,7 +34,7 @@ class PostgresDepositionRepository(DepositionRepository):
         await self.session.execute(stmt)
         await self.session.flush()
 
-    async def get(self, srn: DepositionSRN) -> Optional[Deposition]:
+    async def get(self, srn: DepositionSRN) -> Deposition | None:
         stmt = select(depositions_table).where(depositions_table.c.srn == str(srn))
         result = await self.session.execute(stmt)
         row = result.mappings().first()

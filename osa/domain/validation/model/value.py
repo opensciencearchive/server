@@ -3,12 +3,6 @@ from enum import StrEnum
 from osa.domain.shared.model.value import ValueObject
 
 
-class TraitStatus(StrEnum):
-    DRAFT = "draft"
-    ACTIVE = "active"
-    DEPRECATED = "deprecated"
-
-
 class RunStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"

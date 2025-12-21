@@ -1,7 +1,2 @@
-from osa.domain.validation.command.register_trait import (
-    RegisterTrait,
-    RegisterTraitHandler,
-    TraitRegistered,
-)
-
-__all__ = ["RegisterTrait", "RegisterTraitHandler", "TraitRegistered"]
+# Validation commands (placeholder for future commands)
+__all__: list[str] = []

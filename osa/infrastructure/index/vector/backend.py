@@ -17,10 +17,11 @@ class VectorStorageBackend:
         self._config = config
         self._model = SentenceTransformer(config.embedding.model.value)
 
-        # Ensure persist directory exists
-        config.persist_dir.mkdir(parents=True, exist_ok=True)
+        # Expand ~ to home directory and ensure persist directory exists
+        persist_dir = config.persist_dir.expanduser()
+        persist_dir.mkdir(parents=True, exist_ok=True)
 
-        self._client = chromadb.PersistentClient(path=str(config.persist_dir))
+        self._client = chromadb.PersistentClient(path=str(persist_dir))
         self._collection = self._client.get_or_create_collection(
             name=name,
             metadata={"hnsw:space": "cosine"},

@@ -1,12 +1,13 @@
 from typing import AsyncIterable
 
-from dishka import Scope, provide
+from dishka import provide
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from osa.config import Config
 from osa.domain.deposition.port.repository import DepositionRepository
-from osa.domain.shadow.port.repository import ShadowRepository
-from osa.domain.validation.port.repository import TraitRepository, ValidationRunRepository
+from osa.domain.record.port.repository import RecordRepository
+from osa.domain.shared.port.event_repository import EventRepository
+from osa.domain.validation.port.repository import ValidationRunRepository
 from osa.infrastructure.persistence.database import (
     create_db_engine,
     create_session_factory,
@@ -14,16 +15,21 @@ from osa.infrastructure.persistence.database import (
 from osa.infrastructure.persistence.repository.deposition import (
     PostgresDepositionRepository,
 )
-from osa.infrastructure.persistence.repository.shadow import PostgresShadowRepository
+from osa.infrastructure.persistence.repository.event import (
+    SQLAlchemyEventRepository,
+)
+from osa.infrastructure.persistence.repository.record import (
+    PostgresRecordRepository,
+)
 from osa.infrastructure.persistence.repository.validation import (
-    PostgresTraitRepository,
     PostgresValidationRunRepository,
 )
 from osa.util.di.base import Provider
+from osa.util.di.scope import Scope
 
 
 class PersistenceProvider(Provider):
-    # Factories require method syntax
+    # APP-scoped factories
     @provide(scope=Scope.APP)
     def get_engine(self, config: Config) -> AsyncEngine:
         return create_db_engine(config)
@@ -34,26 +40,24 @@ class PersistenceProvider(Provider):
     ) -> async_sessionmaker[AsyncSession]:
         return create_session_factory(engine)
 
-    @provide(scope=Scope.REQUEST)
+    # UOW-scoped session (one per unit of work)
+    @provide(scope=Scope.UOW)
     async def get_session(
         self, session_factory: async_sessionmaker[AsyncSession]
     ) -> AsyncIterable[AsyncSession]:
         async with session_factory() as session:
             yield session
 
-    # Repositories
-    shadow_repo = provide(
-        PostgresShadowRepository, scope=Scope.REQUEST, provides=ShadowRepository
-    )
-
+    # UOW-scoped repositories
     dep_repo = provide(
-        PostgresDepositionRepository, scope=Scope.REQUEST, provides=DepositionRepository
+        PostgresDepositionRepository, scope=Scope.UOW, provides=DepositionRepository
     )
-
-    # Validation repositories
-    trait_repo = provide(
-        PostgresTraitRepository, scope=Scope.REQUEST, provides=TraitRepository
+    record_repo = provide(
+        PostgresRecordRepository, scope=Scope.UOW, provides=RecordRepository
     )
     validation_run_repo = provide(
-        PostgresValidationRunRepository, scope=Scope.REQUEST, provides=ValidationRunRepository
+        PostgresValidationRunRepository, scope=Scope.UOW, provides=ValidationRunRepository
+    )
+    event_repo = provide(
+        SQLAlchemyEventRepository, scope=Scope.UOW, provides=EventRepository
     )

@@ -3,15 +3,15 @@ from datetime import datetime
 from pydantic import Field
 
 from osa.domain.shared.model.entity import Entity
-from osa.domain.shared.model.srn import TraitSRN, ValidationRunSRN
+from osa.domain.shared.model.srn import ValidationRunSRN
 from osa.domain.shared.model.value import ValueObject
 from osa.domain.validation.model.value import CheckStatus, RunStatus
 
 
 class CheckResult(ValueObject):
-    """Result of validating a single trait."""
+    """Result of a single validation check."""
 
-    trait_srn: str
+    check_id: str
     validator_digest: str
     status: CheckStatus
     message: str | None = None
@@ -19,10 +19,9 @@ class CheckResult(ValueObject):
 
 
 class ValidationRun(Entity):
-    """Execution of validation against a set of traits."""
+    """Execution of validation checks."""
 
     srn: ValidationRunSRN
-    trait_srns: list[TraitSRN] = Field(default_factory=list)
     status: RunStatus = RunStatus.PENDING
     results: list[CheckResult] = Field(default_factory=list)
     started_at: datetime | None = None

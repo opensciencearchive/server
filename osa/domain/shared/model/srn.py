@@ -101,8 +101,6 @@ class ResourceType(str, Enum):
     rec = "rec"
     dep = "dep"
     schema = "schema"
-    trait = "trait"
-    conv = "conv"
     vocab = "vocab"
     snap = "snap"
     evt = "evt"
@@ -230,16 +228,6 @@ class RecordSRN(SRN):
 
 class SchemaSRN(SRN):
     type: ResourceType = Field(default=ResourceType.schema, frozen=True)
-    version: Semver  # type: ignore
-
-
-class TraitSRN(SRN):
-    type: ResourceType = Field(default=ResourceType.trait, frozen=True)
-    version: Semver  # type: ignore
-
-
-class ConventionSRN(SRN):
-    type: ResourceType = Field(default=ResourceType.conv, frozen=True)
     version: Semver  # type: ignore
 
 

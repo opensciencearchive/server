@@ -14,9 +14,9 @@ class LocalStorageAdapter(StoragePort):
         self.base_path.mkdir(parents=True, exist_ok=True)
 
     def _get_dep_path(self, deposition_id: DepositionSRN) -> Path:
-        # Structure: /tmp/osa_storage/{node}/{local_id}/
+        # Structure: /tmp/osa_storage/{domain}/{id}/
         # Using safe string representation
-        safe_id = f"{deposition_id.node.root}_{deposition_id.local.root}"
+        safe_id = f"{deposition_id.domain.root}_{deposition_id.id.root}"
         return self.base_path / safe_id
 
     def delete_files_for_deposition(self, deposition_id: DepositionSRN) -> None:

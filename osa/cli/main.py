@@ -1,14 +1,19 @@
-"""Main CLI application."""
+"""Main CLI application using Cyclopts.
 
-import typer
+The CLI is a thin HTTP client - it talks to the server via REST API.
+No internal DI needed since all business logic lives in the server.
+"""
 
-from osa.cli.commands import search, server
+import cyclopts
 
-app = typer.Typer(
+from osa.cli.commands import admin, config, search, server
+
+app = cyclopts.App(
     name="osa",
     help="Open Science Archive - CLI",
-    no_args_is_help=True,
 )
 
-app.add_typer(server.app, name="server")
-app.add_typer(search.app, name="search")
+app.command(server.app, name="server")
+app.command(search.app, name="search")
+app.command(config.app, name="config")
+app.command(admin.app, name="admin")

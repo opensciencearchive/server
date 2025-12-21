@@ -1,8 +1,10 @@
 """Dependency injection provider for ingestors."""
+from osa.util.di.scope import Scope
 
-from dishka import Provider, Scope, provide
+from dishka import Provider, provide
 
 from osa.config import Config
+from osa.domain.ingest.model.registry import IngestorRegistry
 from osa.infrastructure.ingest.geo.ingestor import GEOIngestor
 from osa.sdk.ingest.ingestor import Ingestor
 
@@ -11,11 +13,11 @@ class IngestProvider(Provider):
     """Provides configured ingestors."""
 
     @provide(scope=Scope.APP)
-    def get_ingestors(self, config: Config) -> dict[str, Ingestor]:
+    def get_ingestors(self, config: Config) -> IngestorRegistry:
         """Build all configured ingestors.
 
         Returns:
-            Dictionary mapping ingestor names to their instances.
+            Registry of ingestors.
         """
         ingestors: dict[str, Ingestor] = {}
 
@@ -26,4 +28,4 @@ class IngestProvider(Provider):
                 case _:
                     raise ValueError(f"Unknown ingestor type: {ing_config.ingestor}")
 
-        return ingestors
+        return IngestorRegistry(ingestors)

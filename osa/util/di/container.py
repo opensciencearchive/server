@@ -1,9 +1,9 @@
 """Dependency injection container."""
 
 from dishka import AsyncContainer, make_async_container
-from dishka.integrations.fastapi import FastapiProvider, setup_dishka
 
 from osa.util.di.base import PROVIDERS, get_provider
+from osa.util.di.fastapi import setup_dishka
 
 
 def create_container() -> AsyncContainer:
@@ -16,8 +16,7 @@ def create_container() -> AsyncContainer:
     """
     # Get provider instances - all are instantiated without arguments
     provider_instances = [get_provider(base, use_mock=False)() for base in PROVIDERS]
-    # Include FastapiProvider for proper integration with FastAPI
-    return make_async_container(*provider_instances, FastapiProvider())
+    return make_async_container(*provider_instances)
 
 
 def setup_di(app, container: AsyncContainer) -> None:

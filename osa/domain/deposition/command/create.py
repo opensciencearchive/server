@@ -1,12 +1,14 @@
+from typing import Any
+
 import logfire
 
 from osa.domain.deposition.service.deposition import DepositionService
 from osa.domain.shared.command import Command, CommandHandler, Result
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+from osa.domain.shared.model.srn import DepositionSRN
 
 
 class CreateDeposition(Command):
-    convention_srn: ConventionSRN
+    metadata: dict[str, Any] = {}
 
 
 class DepositionCreated(Result):
