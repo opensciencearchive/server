@@ -14,7 +14,7 @@ from osa.domain.validation.model import RunStatus
 logger = logging.getLogger(__name__)
 
 
-class ValidationListener(EventListener[DepositionSubmittedEvent]):
+class ValidateNewDeposition(EventListener[DepositionSubmittedEvent]):
     """Runs validation on depositions. 0 validators = instant pass."""
 
     outbox: Outbox

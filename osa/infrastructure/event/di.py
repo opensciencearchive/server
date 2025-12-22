@@ -6,13 +6,13 @@ from dishka import AsyncContainer, provide
 
 from osa.config import Config
 from osa.domain.curation.listener import AutoApproveCurationTool
-from osa.domain.index.listener import IndexProjector
-from osa.domain.ingest.listener import IngestListener, InitialIngestListener
+from osa.domain.index.listener import ProjectNewRecordToIndexes
+from osa.domain.ingest.listener import IngestFromUpstream, TriggerInitialIngestion
 from osa.domain.ingest.schedule import IngestSchedule
-from osa.domain.record.listener import RecordCreationListener
+from osa.domain.record.listener import ConvertDepositionToRecord
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.event_repository import EventRepository
-from osa.domain.validation.listener import ValidationListener
+from osa.domain.validation.listener import ValidateNewDeposition
 from osa.infrastructure.event.worker import (
     BackgroundWorker,
     ScheduleConfig,
@@ -27,12 +27,12 @@ logger = logging.getLogger(__name__)
 
 # All event listeners - single source of truth
 LISTENER_TYPES: Subscriptions = Subscriptions([
-    InitialIngestListener,
-    IngestListener,
-    ValidationListener,
+    TriggerInitialIngestion,
+    IngestFromUpstream,
+    ValidateNewDeposition,
     AutoApproveCurationTool,
-    RecordCreationListener,
-    IndexProjector,
+    ConvertDepositionToRecord,
+    ProjectNewRecordToIndexes,
 ])
 
 

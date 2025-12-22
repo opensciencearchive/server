@@ -16,7 +16,7 @@ from osa.domain.shared.outbox import Outbox
 logger = logging.getLogger(__name__)
 
 
-class IngestListener(EventListener[IngestRequested]):
+class IngestFromUpstream(EventListener[IngestRequested]):
     """Pulls from upstream source and creates depositions."""
 
     ingestors: IngestorRegistry

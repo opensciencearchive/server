@@ -16,7 +16,7 @@ from osa.domain.shared.outbox import Outbox
 logger = logging.getLogger(__name__)
 
 
-class RecordCreationListener(EventListener[DepositionApproved]):
+class ConvertDepositionToRecord(EventListener[DepositionApproved]):
     """Creates and persists records when depositions are approved."""
 
     record_repo: RecordRepository

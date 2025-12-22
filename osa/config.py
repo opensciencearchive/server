@@ -1,14 +1,74 @@
 import logging
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Union
 
 import yaml
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
-from osa.domain.index.model.value import IndexConfig
-from osa.domain.ingest.model.value import IngestConfig
+from osa.infrastructure.index.vector.config import VectorBackendConfig
+from osa.infrastructure.ingest.geo.config import GEOIngestorConfig
+
+
+# =============================================================================
+# Index Configuration
+# =============================================================================
+
+# Union of all backend configs (extend as new backends are added)
+AnyBackendConfig = Annotated[
+    Union[VectorBackendConfig],
+    Field(discriminator=None),  # Could add discriminator when more backends exist
+]
+
+
+class IndexConfig(BaseModel):
+    """Configuration for a named index."""
+
+    backend: str  # "vector", "keyword", etc.
+    config: AnyBackendConfig
+
+
+# =============================================================================
+# Ingest Configuration
+# =============================================================================
+
+# Union of all ingestor configs (extend as new ingestors are added)
+AnyIngestorConfig = Annotated[
+    Union[GEOIngestorConfig],
+    Field(discriminator=None),
+]
+
+
+class IngestSchedule(BaseModel):
+    """Schedule configuration for an ingestor."""
+
+    cron: str  # Cron expression (e.g., "0 * * * *" for hourly)
+    limit: int | None = None  # Optional limit per scheduled run
+
+
+class InitialRun(BaseModel):
+    """Initial run configuration for an ingestor."""
+
+    enabled: bool = False
+    limit: int | None = 10  # Limit records for initial run
+    since: datetime | None = None  # Optional: bootstrap from specific date
+
+
+class IngestConfig(BaseModel):
+    """Configuration for a named ingestor."""
+
+    ingestor: str  # "geo", "ena", etc.
+    config: AnyIngestorConfig
+    schedule: IngestSchedule | None = None  # Optional: if set, runs on schedule
+    initial_run: InitialRun | None = None  # Optional: if set, runs on startup
+
+
+# =============================================================================
+# Application Configuration
+# =============================================================================
 
 
 class YamlConfigSettingsSource(PydanticBaseSettingsSource):

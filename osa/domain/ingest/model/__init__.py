@@ -1,5 +1,5 @@
 """Ingest domain models."""
 
-from osa.domain.ingest.model.value import IngestConfig
+from osa.domain.ingest.model.registry import IngestorRegistry
 
-__all__ = ["IngestConfig"]
+__all__ = ["IngestorRegistry"]

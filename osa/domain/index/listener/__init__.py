@@ -1,5 +1,5 @@
 """Index domain listeners."""
 
-from osa.domain.index.listener.index_projector import IndexProjector
+from osa.domain.index.listener.index_projector import ProjectNewRecordToIndexes
 
 __all__ = ["IndexProjector"]

@@ -14,7 +14,7 @@ from osa.domain.shared.outbox import Outbox
 logger = logging.getLogger(__name__)
 
 
-class InitialIngestListener(EventListener[ServerStarted]):
+class TriggerInitialIngestion(EventListener[ServerStarted]):
     """Emits IngestRequested on server startup for ingestors with initial_run enabled."""
 
     config: Config

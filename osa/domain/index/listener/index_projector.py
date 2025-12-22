@@ -9,7 +9,7 @@ from osa.domain.shared.event import EventListener
 logger = logging.getLogger(__name__)
 
 
-class IndexProjector(EventListener[RecordPublished]):
+class ProjectNewRecordToIndexes(EventListener[RecordPublished]):
     """Projects published records into index backends."""
 
     indexes: IndexRegistry

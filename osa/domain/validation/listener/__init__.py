@@ -1,5 +1,5 @@
 """Validation domain listeners."""
 
-from osa.domain.validation.listener.validation_listener import ValidationListener
+from osa.domain.validation.listener.validation_listener import ValidateNewDeposition
 
 __all__ = ["ValidationListener"]
