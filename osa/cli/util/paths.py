@@ -5,6 +5,10 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pydantic import ValidationError
+
+from osa.cli.models import SearchCache, SearchHit
+
 
 @dataclass
 class ServerState:
@@ -16,22 +20,13 @@ class ServerState:
     started_at: str  # ISO format
 
 
-@dataclass
-class SearchResultCache:
-    """Cached search results for numbered lookup."""
-
-    index: str
-    query: str
-    searched_at: str  # ISO format
-    results: list[dict]  # List of {srn, short_id, metadata}
-
-
 class OSAPaths:
     """Manages paths within the ~/.osa directory.
 
     Directory structure:
         ~/.osa/
             server.json     # Running server state (PID, host, port, etc.)
+            last_search.json # Cached search results
             logs/
                 server.log  # Server output logs
             data/
@@ -90,11 +85,7 @@ class OSAPaths:
         self.vectors_dir.mkdir(parents=True, exist_ok=True)
 
     def read_server_state(self) -> ServerState | None:
-        """Read server state from file.
-
-        Returns:
-            ServerState if file exists and is valid, None otherwise.
-        """
+        """Read server state from file."""
         if not self.server_state_file.exists():
             return None
         try:
@@ -120,33 +111,29 @@ class OSAPaths:
         if self.server_state_file.exists():
             self.server_state_file.unlink()
 
-    def read_search_cache(self) -> SearchResultCache | None:
-        """Read cached search results.
-
-        Returns:
-            SearchResultCache if file exists and is valid, None otherwise.
-        """
+    def read_search_cache(self) -> SearchCache | None:
+        """Read cached search results."""
         if not self.search_cache_file.exists():
             return None
         try:
             data = json.loads(self.search_cache_file.read_text())
-            return SearchResultCache(**data)
-        except (json.JSONDecodeError, TypeError, KeyError, OSError):
+            return SearchCache.model_validate(data)
+        except (json.JSONDecodeError, ValidationError, OSError):
             return None
 
     def write_search_cache(
         self,
         index: str,
         query: str,
-        results: list[dict],
-    ) -> SearchResultCache:
+        results: list[SearchHit],
+    ) -> SearchCache:
         """Write search results to cache for numbered lookup."""
         self.ensure_directories()
-        cache = SearchResultCache(
+        cache = SearchCache(
             index=index,
             query=query,
             searched_at=datetime.now(UTC).isoformat(),
             results=results,
         )
-        self.search_cache_file.write_text(json.dumps(asdict(cache), indent=2))
+        self.search_cache_file.write_text(cache.model_dump_json(indent=2))
         return cache

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import cyclopts
 
+from osa.cli.console import get_console, relative_time
 from osa.cli.util import DaemonManager, OSAPaths, ServerStatus
 
 app = cyclopts.App(name="server", help="Server management commands")
@@ -27,6 +28,7 @@ def start(
         port: Port to listen on.
         config: Path to YAML config file. Defaults to ./osa.yaml if it exists.
     """
+    console = get_console()
     daemon = DaemonManager()
 
     # Auto-detect osa.yaml in current directory if no config specified
@@ -35,49 +37,53 @@ def start(
 
     # Validate config file exists if provided
     if config and not config.exists():
-        print(f"Error: config file not found: {config}", file=sys.stderr)
+        console.error(f"Config file not found: {config}")
         sys.exit(1)
 
     try:
         config_path = str(config.resolve()) if config else None
         info = daemon.start(host=host, port=port, config_file=config_path)
-        print(f"Server started on http://{host}:{port} (PID {info.pid})")
+        console.success(f"Server started on http://{host}:{port}")
+        console.print(f"  [dim]PID:[/dim] {info.pid}")
         if config:
-            print(f"Config: {config}")
-        print(f"Logs: {daemon.paths.server_log}")
+            console.print(f"  [dim]Config:[/dim] {config}")
+        console.print(f"  [dim]Logs:[/dim] {daemon.paths.server_log}")
     except RuntimeError as e:
-        print(f"Error: {e}", file=sys.stderr)
+        console.error(str(e))
         sys.exit(1)
 
 
 @app.command
 def stop() -> None:
     """Stop the OSA server."""
+    console = get_console()
     daemon = DaemonManager()
 
     try:
         daemon.stop()
-        print("Server stopped")
+        console.success("Server stopped")
     except RuntimeError as e:
-        print(f"Error: {e}", file=sys.stderr)
+        console.error(str(e))
         sys.exit(1)
 
 
 @app.command
 def status() -> None:
     """Check server status."""
+    console = get_console()
     daemon = DaemonManager()
     info = daemon.status()
 
     if info.status == ServerStatus.RUNNING:
-        print(f"Server is running on http://{info.host}:{info.port} (PID {info.pid})")
+        console.success(f"Server running on http://{info.host}:{info.port}")
+        console.print(f"  [dim]PID:[/dim] {info.pid}")
         if info.started_at:
-            print(f"Started at: {info.started_at}")
+            console.print(f"  [dim]Started:[/dim] {relative_time(info.started_at)}")
     elif info.status == ServerStatus.STOPPED:
-        print("Server is not running")
+        console.print("[dim]Server is not running[/dim]")
     elif info.status == ServerStatus.STALE:
-        print(f"Server has stale state (PID {info.pid} is dead)")
-        print("Run 'osa server stop' to clean up, or 'osa server start' to start fresh")
+        console.warning(f"Stale server state (PID {info.pid} is dead)")
+        console.info("Run 'osa server stop' to clean up, or 'osa server start' to start fresh")
 
 
 @app.command
@@ -91,12 +97,15 @@ def logs(
         follow: Follow log output (like tail -f).
         lines: Number of lines to show (default 50). Use 0 for all.
     """
+    console = get_console()
     paths = OSAPaths()
     log_file = paths.server_log
 
     if not log_file.exists():
-        print(f"No log file found at {log_file}", file=sys.stderr)
-        print("Has the server been started?", file=sys.stderr)
+        console.error(
+            f"No log file found at {log_file}",
+            hint="Has the server been started?",
+        )
         sys.exit(1)
 
     if follow:
@@ -111,26 +120,20 @@ def _show_logs(log_file: Path, lines: int) -> None:
         all_lines = f.readlines()
 
     if lines == 0:
-        # Show all lines
         for line in all_lines:
             print(line, end="")
     else:
-        # Show last N lines
         for line in all_lines[-lines:]:
             print(line, end="")
 
 
 def _follow_logs(log_file: Path, initial_lines: int) -> None:
     """Follow log output, similar to tail -f."""
-    # First show the last N lines
     _show_logs(log_file, initial_lines)
 
-    # Then follow new content
     try:
         with open(log_file) as f:
-            # Seek to end
-            f.seek(0, 2)
-
+            f.seek(0, 2)  # Seek to end
             while True:
                 line = f.readline()
                 if line:
@@ -138,5 +141,4 @@ def _follow_logs(log_file: Path, initial_lines: int) -> None:
                 else:
                     time.sleep(0.1)
     except KeyboardInterrupt:
-        # Clean exit on Ctrl+C
         print()
