@@ -16,6 +16,16 @@ class ServerState:
     started_at: str  # ISO format
 
 
+@dataclass
+class SearchResultCache:
+    """Cached search results for numbered lookup."""
+
+    index: str
+    query: str
+    searched_at: str  # ISO format
+    results: list[dict]  # List of {srn, short_id, metadata}
+
+
 class OSAPaths:
     """Manages paths within the ~/.osa directory.
 
@@ -67,6 +77,11 @@ class OSAPaths:
         """Vector database directory."""
         return self.data_dir / "vectors"
 
+    @property
+    def search_cache_file(self) -> Path:
+        """Search results cache file for numbered lookup."""
+        return self._base / "last_search.json"
+
     def ensure_directories(self) -> None:
         """Create all required directories if they don't exist."""
         self._base.mkdir(parents=True, exist_ok=True)
@@ -104,3 +119,34 @@ class OSAPaths:
         """Remove server state file."""
         if self.server_state_file.exists():
             self.server_state_file.unlink()
+
+    def read_search_cache(self) -> SearchResultCache | None:
+        """Read cached search results.
+
+        Returns:
+            SearchResultCache if file exists and is valid, None otherwise.
+        """
+        if not self.search_cache_file.exists():
+            return None
+        try:
+            data = json.loads(self.search_cache_file.read_text())
+            return SearchResultCache(**data)
+        except (json.JSONDecodeError, TypeError, KeyError, OSError):
+            return None
+
+    def write_search_cache(
+        self,
+        index: str,
+        query: str,
+        results: list[dict],
+    ) -> SearchResultCache:
+        """Write search results to cache for numbered lookup."""
+        self.ensure_directories()
+        cache = SearchResultCache(
+            index=index,
+            query=query,
+            searched_at=datetime.now(UTC).isoformat(),
+            results=results,
+        )
+        self.search_cache_file.write_text(json.dumps(asdict(cache), indent=2))
+        return cache

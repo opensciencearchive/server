@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 
-from osa.infrastructure.local.paths import OSAPaths
+from osa.cli.util.paths import OSAPaths
 
 
 class ServerStatus(Enum):
@@ -119,7 +119,10 @@ class DaemonManager:
         # Pass log file path for the app to configure logging directly
         env["OSA_LOG_FILE"] = str(self._paths.server_log)
 
-        # Use uvicorn directly via subprocess (app handles its own logging to file)
+        # Open log file for uvicorn output (append mode)
+        log_file = open(self._paths.server_log, "a")
+
+        # Use uvicorn directly via subprocess
         process = subprocess.Popen(
             [
                 sys.executable,
@@ -130,9 +133,10 @@ class DaemonManager:
                 host,
                 "--port",
                 str(port),
+                "--access-log",  # Log each request
             ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=log_file,
             start_new_session=True,  # Detach from terminal
             env=env,
         )

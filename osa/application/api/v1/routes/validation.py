@@ -1,8 +1,10 @@
+"""Validation API routes."""
+
 import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from dishka.integrations.fastapi import FromDishka
+from dishka.integrations.fastapi import DishkaRoute, FromDishka
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -17,7 +19,11 @@ from osa.domain.validation.port.runner import ValidationInputs
 from osa.domain.validation.service import ValidationService
 
 
-router = APIRouter(tags=["validation"])
+router = APIRouter(
+    prefix="/validation",
+    tags=["validation"],
+    route_class=DishkaRoute,
+)
 
 
 # =============================================================================
@@ -146,7 +152,7 @@ async def submit_validation(
     return ValidateResponse(
         run_id=run_id,
         status=run.status,
-        poll_url=f"/validate/{run_id}",
+        poll_url=f"/api/v1/validation/validate/{run_id}",
     )
 
 

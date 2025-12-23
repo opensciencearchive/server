@@ -2,15 +2,16 @@ import logging
 from contextlib import asynccontextmanager
 
 import logfire
-from osa.util.di.fastapi import setup_dishka
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from osa.application.api.rest.routes import health
+from osa.application.api.v1.errors import map_osa_error
+from osa.application.api.v1.routes import health, search, validation
 from osa.application.di import create_container
 from osa.config import Config, configure_logging
-from osa.domain.search.api.rest import router as search_router
+from osa.domain.shared.error import OSAError
 from osa.infrastructure.event.worker import BackgroundWorker
+from osa.util.di.fastapi import setup_dishka
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +51,19 @@ def create_app() -> FastAPI:
     container = create_container()
     setup_dishka(container, app_instance)
 
-    # Register routes
-    app_instance.include_router(health.router)
-    app_instance.include_router(search_router)
+    # Register v1 routes with /api/v1 prefix
+    app_instance.include_router(health.router, prefix="/api/v1")
+    app_instance.include_router(search.router, prefix="/api/v1")
+    app_instance.include_router(validation.router, prefix="/api/v1")
+
+    # Global OSA error handler - maps domain and infrastructure errors to HTTP responses
+    @app_instance.exception_handler(OSAError)
+    async def osa_error_handler(request: Request, exc: OSAError):
+        http_exc = map_osa_error(exc)
+        return JSONResponse(
+            status_code=http_exc.status_code,
+            content=http_exc.detail,
+        )
 
     # Global exception handler - logs all unhandled exceptions
     @app_instance.exception_handler(Exception)

@@ -6,8 +6,7 @@ from pathlib import Path
 
 import cyclopts
 
-from osa.infrastructure.local import DaemonManager, ServerStatus
-from osa.infrastructure.local.paths import OSAPaths
+from osa.cli.util import DaemonManager, OSAPaths, ServerStatus
 
 app = cyclopts.App(name="admin", help="Administrative commands")
 

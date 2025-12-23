@@ -1,11 +1,12 @@
 """Server start/stop commands."""
 
 import sys
+import time
 from pathlib import Path
 
 import cyclopts
 
-from osa.infrastructure.local import DaemonManager, ServerStatus
+from osa.cli.util import DaemonManager, OSAPaths, ServerStatus
 
 app = cyclopts.App(name="server", help="Server management commands")
 
@@ -77,3 +78,65 @@ def status() -> None:
     elif info.status == ServerStatus.STALE:
         print(f"Server has stale state (PID {info.pid} is dead)")
         print("Run 'osa server stop' to clean up, or 'osa server start' to start fresh")
+
+
+@app.command
+def logs(
+    follow: bool = False,
+    lines: int = 50,
+) -> None:
+    """View server logs.
+
+    Args:
+        follow: Follow log output (like tail -f).
+        lines: Number of lines to show (default 50). Use 0 for all.
+    """
+    paths = OSAPaths()
+    log_file = paths.server_log
+
+    if not log_file.exists():
+        print(f"No log file found at {log_file}", file=sys.stderr)
+        print("Has the server been started?", file=sys.stderr)
+        sys.exit(1)
+
+    if follow:
+        _follow_logs(log_file, lines)
+    else:
+        _show_logs(log_file, lines)
+
+
+def _show_logs(log_file: Path, lines: int) -> None:
+    """Show the last N lines of the log file."""
+    with open(log_file) as f:
+        all_lines = f.readlines()
+
+    if lines == 0:
+        # Show all lines
+        for line in all_lines:
+            print(line, end="")
+    else:
+        # Show last N lines
+        for line in all_lines[-lines:]:
+            print(line, end="")
+
+
+def _follow_logs(log_file: Path, initial_lines: int) -> None:
+    """Follow log output, similar to tail -f."""
+    # First show the last N lines
+    _show_logs(log_file, initial_lines)
+
+    # Then follow new content
+    try:
+        with open(log_file) as f:
+            # Seek to end
+            f.seek(0, 2)
+
+            while True:
+                line = f.readline()
+                if line:
+                    print(line, end="", flush=True)
+                else:
+                    time.sleep(0.1)
+    except KeyboardInterrupt:
+        # Clean exit on Ctrl+C
+        print()

@@ -10,7 +10,7 @@ from osa.domain.index.model.registry import IndexRegistry
 from osa.sdk.index import QueryResult
 
 router = APIRouter(
-    prefix="/api/v1/search",
+    prefix="/search",
     tags=["search"],
     route_class=DishkaRoute,
 )
