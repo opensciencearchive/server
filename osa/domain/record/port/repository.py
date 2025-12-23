@@ -17,3 +17,6 @@ class RecordRepository(Port, Protocol):
 
     @abstractmethod
     async def find_by_deposition(self, deposition_srn: DepositionSRN) -> Record | None: ...
+
+    @abstractmethod
+    async def count(self) -> int: ...

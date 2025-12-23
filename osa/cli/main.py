@@ -6,15 +6,17 @@ No internal DI needed since all business logic lives in the server.
 
 import cyclopts
 
-from osa.cli.commands import admin, config, search, server, show
+from osa.cli.commands import admin, config, init, search, server, show, stats
 
 app = cyclopts.App(
     name="osa",
     help="Open Science Archive - CLI",
 )
 
+app.command(init.app, name="init")
 app.command(server.app, name="server")
 app.command(search.app, name="search")
 app.command(show.app, name="show")
+app.command(stats.app, name="stats")
 app.command(config.app, name="config")
 app.command(admin.app, name="admin")

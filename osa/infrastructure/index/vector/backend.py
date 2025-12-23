@@ -102,6 +102,10 @@ class VectorStorageBackend:
         except Exception:
             return False
 
+    async def count(self) -> int:
+        """Return the number of documents in the index."""
+        return await asyncio.to_thread(self._collection.count)
+
     def _to_text(self, record: dict[str, Any]) -> str:
         """Convert record to embeddable text."""
         if self._config.embedding.template:

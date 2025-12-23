@@ -1,6 +1,6 @@
 """PostgreSQL implementation of RecordRepository."""
 
-from sqlalchemy import insert, select
+from sqlalchemy import func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.record.model.aggregate import Record
@@ -38,3 +38,9 @@ class PostgresRecordRepository(RecordRepository):
         result = await self.session.execute(stmt)
         row = result.mappings().first()
         return row_to_record(dict(row)) if row else None
+
+    async def count(self) -> int:
+        """Count total records in the database."""
+        stmt = select(func.count()).select_from(records_table)
+        result = await self.session.execute(stmt)
+        return result.scalar() or 0

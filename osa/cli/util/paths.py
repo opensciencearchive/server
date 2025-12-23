@@ -1,4 +1,21 @@
-"""Manages the ~/.osa directory structure."""
+"""Manages OSA directory structure following XDG Base Directory spec.
+
+Directory layout:
+    ~/.config/osa/
+        config.yaml         # User configuration
+
+    ~/.local/share/osa/
+        osa.db              # SQLite database
+        vectors/            # Vector index (ChromaDB)
+
+    ~/.local/state/osa/
+        server.json         # Daemon state (PID, host, port)
+        logs/
+            server.log      # Server logs
+
+    ~/.cache/osa/
+        last_search.json    # CLI search cache
+"""
 
 import json
 from dataclasses import asdict, dataclass
@@ -21,68 +38,128 @@ class ServerState:
 
 
 class OSAPaths:
-    """Manages paths within the ~/.osa directory.
+    """Manages OSA paths following XDG Base Directory specification.
 
-    Directory structure:
-        ~/.osa/
-            server.json     # Running server state (PID, host, port, etc.)
-            last_search.json # Cached search results
-            logs/
-                server.log  # Server output logs
-            data/
-                vectors/    # ChromaDB persistence
+    Supports overriding individual directories for testing.
     """
 
-    def __init__(self, base_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        config_dir: Path | None = None,
+        data_dir: Path | None = None,
+        state_dir: Path | None = None,
+        cache_dir: Path | None = None,
+    ) -> None:
         """Initialize paths.
 
         Args:
-            base_dir: Override base directory (default: ~/.osa).
-                      Useful for testing.
+            config_dir: Override config directory (default: ~/.config/osa).
+            data_dir: Override data directory (default: ~/.local/share/osa).
+            state_dir: Override state directory (default: ~/.local/state/osa).
+            cache_dir: Override cache directory (default: ~/.cache/osa).
         """
-        self._base = base_dir or Path.home() / ".osa"
+        home = Path.home()
+        self._config_dir = config_dir or home / ".config" / "osa"
+        self._data_dir = data_dir or home / ".local" / "share" / "osa"
+        self._state_dir = state_dir or home / ".local" / "state" / "osa"
+        self._cache_dir = cache_dir or home / ".cache" / "osa"
+
+    # -------------------------------------------------------------------------
+    # Base directories
+    # -------------------------------------------------------------------------
 
     @property
-    def base(self) -> Path:
-        """Base directory (~/.osa)."""
-        return self._base
+    def config_dir(self) -> Path:
+        """Config directory (~/.config/osa)."""
+        return self._config_dir
+
+    @property
+    def data_dir(self) -> Path:
+        """Data directory (~/.local/share/osa)."""
+        return self._data_dir
+
+    @property
+    def state_dir(self) -> Path:
+        """State directory (~/.local/state/osa)."""
+        return self._state_dir
+
+    @property
+    def cache_dir(self) -> Path:
+        """Cache directory (~/.cache/osa)."""
+        return self._cache_dir
+
+    # -------------------------------------------------------------------------
+    # Config paths
+    # -------------------------------------------------------------------------
+
+    @property
+    def config_file(self) -> Path:
+        """Main config file."""
+        return self._config_dir / "config.yaml"
+
+    # -------------------------------------------------------------------------
+    # Data paths
+    # -------------------------------------------------------------------------
+
+    @property
+    def database_file(self) -> Path:
+        """SQLite database file."""
+        return self._data_dir / "osa.db"
+
+    @property
+    def vectors_dir(self) -> Path:
+        """Vector database directory."""
+        return self._data_dir / "vectors"
+
+    # -------------------------------------------------------------------------
+    # State paths
+    # -------------------------------------------------------------------------
 
     @property
     def server_state_file(self) -> Path:
         """Server state file."""
-        return self._base / "server.json"
+        return self._state_dir / "server.json"
 
     @property
     def logs_dir(self) -> Path:
         """Logs directory."""
-        return self._base / "logs"
+        return self._state_dir / "logs"
 
     @property
     def server_log(self) -> Path:
         """Server log file."""
         return self.logs_dir / "server.log"
 
-    @property
-    def data_dir(self) -> Path:
-        """Data directory."""
-        return self._base / "data"
-
-    @property
-    def vectors_dir(self) -> Path:
-        """Vector database directory."""
-        return self.data_dir / "vectors"
+    # -------------------------------------------------------------------------
+    # Cache paths
+    # -------------------------------------------------------------------------
 
     @property
     def search_cache_file(self) -> Path:
-        """Search results cache file for numbered lookup."""
-        return self._base / "last_search.json"
+        """Search results cache file."""
+        return self._cache_dir / "last_search.json"
+
+    # -------------------------------------------------------------------------
+    # Directory management
+    # -------------------------------------------------------------------------
 
     def ensure_directories(self) -> None:
         """Create all required directories if they don't exist."""
-        self._base.mkdir(parents=True, exist_ok=True)
+        self._config_dir.mkdir(parents=True, exist_ok=True)
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+        self._state_dir.mkdir(parents=True, exist_ok=True)
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
-        self.data_dir.mkdir(parents=True, exist_ok=True)
         self.vectors_dir.mkdir(parents=True, exist_ok=True)
+
+    def is_initialized(self) -> bool:
+        """Check if OSA has been initialized (config file exists)."""
+        return self.config_file.exists()
+
+    # -------------------------------------------------------------------------
+    # Server state
+    # -------------------------------------------------------------------------
 
     def read_server_state(self) -> ServerState | None:
         """Read server state from file."""
@@ -96,7 +173,7 @@ class OSAPaths:
 
     def write_server_state(self, pid: int, host: str, port: int) -> ServerState:
         """Write server state to file."""
-        self.ensure_directories()
+        self._state_dir.mkdir(parents=True, exist_ok=True)
         state = ServerState(
             pid=pid,
             host=host,
@@ -110,6 +187,10 @@ class OSAPaths:
         """Remove server state file."""
         if self.server_state_file.exists():
             self.server_state_file.unlink()
+
+    # -------------------------------------------------------------------------
+    # Search cache
+    # -------------------------------------------------------------------------
 
     def read_search_cache(self) -> SearchCache | None:
         """Read cached search results."""
@@ -128,7 +209,7 @@ class OSAPaths:
         results: list[SearchHit],
     ) -> SearchCache:
         """Write search results to cache for numbered lookup."""
-        self.ensure_directories()
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
         cache = SearchCache(
             index=index,
             query=query,

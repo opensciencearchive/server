@@ -53,3 +53,11 @@ class StorageBackend(Protocol):
             True if the backend is healthy, False otherwise.
         """
         ...
+
+    async def count(self) -> int:
+        """Return the number of documents in the index.
+
+        Returns:
+            Number of indexed documents.
+        """
+        ...

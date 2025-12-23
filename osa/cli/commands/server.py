@@ -12,7 +12,8 @@ from osa.cli.util import DaemonManager, OSAPaths, ServerStatus
 app = cyclopts.App(name="server", help="Server management commands")
 
 
-DEFAULT_CONFIG = Path("osa.yaml")
+# Local config override (for development)
+LOCAL_CONFIG = Path("osa.yaml")
 
 
 @app.command
@@ -26,27 +27,40 @@ def start(
     Args:
         host: Host to bind to.
         port: Port to listen on.
-        config: Path to YAML config file. Defaults to ./osa.yaml if it exists.
+        config: Path to config file. Defaults to ~/.config/osa/config.yaml,
+                or ./osa.yaml if present (for local development).
     """
     console = get_console()
-    daemon = DaemonManager()
+    paths = OSAPaths()
+    daemon = DaemonManager(paths)
 
-    # Auto-detect osa.yaml in current directory if no config specified
-    if config is None and DEFAULT_CONFIG.exists():
-        config = DEFAULT_CONFIG
+    # Config resolution order:
+    # 1. Explicit --config flag
+    # 2. ./osa.yaml (local development override)
+    # 3. ~/.config/osa/config.yaml (standard location)
+    if config is None:
+        if LOCAL_CONFIG.exists():
+            config = LOCAL_CONFIG
+        elif paths.config_file.exists():
+            config = paths.config_file
+        else:
+            console.error(
+                "No configuration found",
+                hint="Run 'osa init' to set up OSA, or create ./osa.yaml",
+            )
+            sys.exit(1)
 
-    # Validate config file exists if provided
-    if config and not config.exists():
+    # Validate config file exists
+    if not config.exists():
         console.error(f"Config file not found: {config}")
         sys.exit(1)
 
     try:
-        config_path = str(config.resolve()) if config else None
+        config_path = str(config.resolve())
         info = daemon.start(host=host, port=port, config_file=config_path)
         console.success(f"Server started on http://{host}:{port}")
         console.print(f"  [dim]PID:[/dim] {info.pid}")
-        if config:
-            console.print(f"  [dim]Config:[/dim] {config}")
+        console.print(f"  [dim]Config:[/dim] {config}")
         console.print(f"  [dim]Logs:[/dim] {daemon.paths.server_log}")
     except RuntimeError as e:
         console.error(str(e))

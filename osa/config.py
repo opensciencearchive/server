@@ -180,7 +180,7 @@ def configure_logging(config: LoggingConfig) -> None:
 
     formatter = logging.Formatter(config.format, datefmt=config.date_format)
 
-    # Add file handler if log file specified
+    # Add file handler if log file specified (daemon mode)
     if config.file:
         log_path = Path(config.file).expanduser()
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -188,12 +188,14 @@ def configure_logging(config: LoggingConfig) -> None:
         file_handler.setLevel(config.level)
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
-
-    # Always add console handler for stderr
-    console_handler = logging.StreamHandler(sys.stderr)
-    console_handler.setLevel(config.level)
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
+    else:
+        # Only add console handler when not using a log file.
+        # When running as a daemon, stderr is redirected to the log file,
+        # so we'd get double entries if we had both handlers.
+        console_handler = logging.StreamHandler(sys.stderr)
+        console_handler.setLevel(config.level)
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
 
     # Reduce noise from third-party libraries
     logging.getLogger("httpx").setLevel(logging.WARNING)

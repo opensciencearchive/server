@@ -37,18 +37,18 @@ class TriggerInitialIngestion(EventListener[ServerStarted]):
                 )
                 continue
 
+            # Check if initial run already completed for this ingestor
+            last_run = await self.outbox.find_latest(IngestionRunCompleted)
+            if last_run and last_run.ingestor_name == ingestor_name:
+                logger.debug(
+                    f"Initial ingest: skipping '{ingestor_name}' - "
+                    f"already completed at {last_run.completed_at}"
+                )
+                continue
+
             initial_run = ingest_config.initial_run
             limit = initial_run.limit
-
-            # Determine 'since': use config value, or look up last completed run
             since = initial_run.since
-            if since is None:
-                last_run = await self.outbox.find_latest(IngestionRunCompleted)
-                if last_run and last_run.ingestor_name == ingestor_name:
-                    since = last_run.completed_at
-                    logger.debug(
-                        f"Found previous run for '{ingestor_name}', using since={since}"
-                    )
 
             logger.info(f"Initial ingest: {ingestor_name} (since={since}, limit={limit})")
 
