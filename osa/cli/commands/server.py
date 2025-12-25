@@ -16,7 +16,7 @@ app = cyclopts.App(name="server", help="Server management commands")
 LOCAL_CONFIG = Path("osa.yaml")
 
 
-def _resolve_config(paths: OSAPaths, config: Path | None) -> Path:
+def _resolve_config(paths: OSAPaths, config: Path) -> Path:
     """Resolve config file path.
 
     Resolution order:
@@ -37,7 +37,7 @@ def _resolve_config(paths: OSAPaths, config: Path | None) -> Path:
         else:
             console.error(
                 "No configuration found",
-                hint="Run 'osa init' to set up OSA, or create ./osa.yaml",
+                hint="Run 'osa init' to set up OSA",
             )
             sys.exit(1)
 
@@ -52,7 +52,6 @@ def _resolve_config(paths: OSAPaths, config: Path | None) -> Path:
 def start(
     host: str = "0.0.0.0",
     port: int = 8000,
-    config: Path | None = None,
 ) -> None:
     """Start the OSA server in the background.
 
@@ -66,7 +65,7 @@ def start(
     paths = OSAPaths()
     daemon = DaemonManager(paths)
 
-    config = _resolve_config(paths, config)
+    config = _resolve_config(paths, paths.config_dir)
 
     try:
         config_path = str(config.resolve())
@@ -128,7 +127,7 @@ def restart(
                 pass
 
     # Start with resolved config
-    start(host=host, port=port, config=config)
+    start(host=host, port=port)
 
 
 @app.command
