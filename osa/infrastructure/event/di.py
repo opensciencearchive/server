@@ -10,6 +10,7 @@ from osa.domain.index.listener import ProjectNewRecordToIndexes
 from osa.domain.ingest.listener import IngestFromUpstream, TriggerInitialIngestion
 from osa.domain.ingest.schedule import IngestSchedule
 from osa.domain.record.listener import ConvertDepositionToRecord
+from osa.domain.shared.event_log import EventLog
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.event_repository import EventRepository
 from osa.domain.validation.listener import ValidateNewDeposition
@@ -43,10 +44,15 @@ class EventProvider(Provider):
     BackgroundWorker is APP-scoped singleton.
     """
 
-    # UOW-scoped Outbox (wraps EventRepository)
+    # UOW-scoped Outbox (wraps EventRepository) - write side
     @provide(scope=Scope.UOW)
     def get_outbox(self, repo: EventRepository) -> Outbox:
         return Outbox(repo)
+
+    # UOW-scoped EventLog (wraps EventRepository) - read side
+    @provide(scope=Scope.UOW)
+    def get_event_log(self, repo: EventRepository) -> EventLog:
+        return EventLog(repo)
 
     # UOW-scoped providers for listeners
     for _listener_type in LISTENER_TYPES:

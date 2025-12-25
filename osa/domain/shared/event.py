@@ -2,14 +2,21 @@
 
 from abc import ABC, ABCMeta, abstractmethod
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, ClassVar, Generic, NewType, TypeVar, dataclass_transform, get_args, get_origin
 from uuid import UUID
+
+from pydantic import Field
 
 from osa.domain.shared.model.entity import Entity
 
 EventId = NewType("EventId", UUID)
 
 E = TypeVar("E", bound="Event")
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 class Event(Entity):
@@ -19,6 +26,7 @@ class Event(Entity):
     """
 
     id: EventId
+    created_at: datetime = Field(default_factory=_utc_now)
 
     # Auto-populated registry of all Event subclasses
     _registry: ClassVar[dict[str, type["Event"]]] = {}

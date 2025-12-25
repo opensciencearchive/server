@@ -16,6 +16,38 @@ app = cyclopts.App(name="server", help="Server management commands")
 LOCAL_CONFIG = Path("osa.yaml")
 
 
+def _resolve_config(paths: OSAPaths, config: Path | None) -> Path:
+    """Resolve config file path.
+
+    Resolution order:
+    1. Explicit config argument
+    2. ./osa.yaml (local development override)
+    3. ~/.config/osa/config.yaml (standard location)
+
+    Raises:
+        SystemExit: If no config found or config doesn't exist.
+    """
+    console = get_console()
+
+    if config is None:
+        if LOCAL_CONFIG.exists():
+            config = LOCAL_CONFIG
+        elif paths.config_file.exists():
+            config = paths.config_file
+        else:
+            console.error(
+                "No configuration found",
+                hint="Run 'osa init' to set up OSA, or create ./osa.yaml",
+            )
+            sys.exit(1)
+
+    if not config.exists():
+        console.error(f"Config file not found: {config}")
+        sys.exit(1)
+
+    return config
+
+
 @app.command
 def start(
     host: str = "0.0.0.0",
@@ -34,26 +66,7 @@ def start(
     paths = OSAPaths()
     daemon = DaemonManager(paths)
 
-    # Config resolution order:
-    # 1. Explicit --config flag
-    # 2. ./osa.yaml (local development override)
-    # 3. ~/.config/osa/config.yaml (standard location)
-    if config is None:
-        if LOCAL_CONFIG.exists():
-            config = LOCAL_CONFIG
-        elif paths.config_file.exists():
-            config = paths.config_file
-        else:
-            console.error(
-                "No configuration found",
-                hint="Run 'osa init' to set up OSA, or create ./osa.yaml",
-            )
-            sys.exit(1)
-
-    # Validate config file exists
-    if not config.exists():
-        console.error(f"Config file not found: {config}")
-        sys.exit(1)
+    config = _resolve_config(paths, config)
 
     try:
         config_path = str(config.resolve())
@@ -79,6 +92,43 @@ def stop() -> None:
     except RuntimeError as e:
         console.error(str(e))
         sys.exit(1)
+
+
+@app.command
+def restart(
+    config: Path | None = None,
+) -> None:
+    """Restart the OSA server (stop + start).
+
+    Args:
+        config: Path to config file. If not specified, uses the same resolution
+                as 'start' (./osa.yaml or ~/.config/osa/config.yaml).
+    """
+    console = get_console()
+    paths = OSAPaths()
+    daemon = DaemonManager(paths)
+
+    # Get current server info before stopping
+    info = daemon.status()
+    if info.status == ServerStatus.RUNNING:
+        host = info.host or "0.0.0.0"
+        port = info.port or 8000
+        console.print(f"Stopping server (PID {info.pid})...")
+        try:
+            daemon.stop()
+        except RuntimeError:
+            pass  # Continue to start even if stop fails
+    else:
+        host = "0.0.0.0"
+        port = 8000
+        if info.status == ServerStatus.STALE:
+            try:
+                daemon.stop()
+            except RuntimeError:
+                pass
+
+    # Start with resolved config
+    start(host=host, port=port, config=config)
 
 
 @app.command

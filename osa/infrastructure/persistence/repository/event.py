@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import TypeVar
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.shared.event import Event, EventId
@@ -105,8 +105,65 @@ class SQLAlchemyEventRepository(EventRepository):
         if row is None:
             return None
 
-        payload = row[0]
+        (payload,) = row
         return self._deserialize(type_name, payload)  # type: ignore[return-value]
+
+    async def list_events(
+        self,
+        limit: int = 50,
+        after: EventId | None = None,
+        event_types: list[str] | None = None,
+        newest_first: bool = False,
+    ) -> list[Event]:
+        """List events with cursor-based pagination."""
+        stmt = select(
+            events_table.c.event_type,
+            events_table.c.payload,
+        )
+
+        # Order by created_at
+        if newest_first:
+            stmt = stmt.order_by(events_table.c.created_at.desc())
+        else:
+            stmt = stmt.order_by(events_table.c.created_at.asc())
+
+        # Cursor: get events after the given ID
+        if after is not None:
+            cursor_stmt = select(events_table.c.created_at).where(
+                events_table.c.id == str(after)
+            )
+            cursor_result = await self._session.execute(cursor_stmt)
+            cursor_row = cursor_result.first()
+            if cursor_row:
+                if newest_first:
+                    stmt = stmt.where(events_table.c.created_at < cursor_row[0])
+                else:
+                    stmt = stmt.where(events_table.c.created_at > cursor_row[0])
+
+        if event_types:
+            stmt = stmt.where(events_table.c.event_type.in_(event_types))
+
+        stmt = stmt.limit(limit)
+
+        result = await self._session.execute(stmt)
+        rows = result.fetchall()
+
+        events: list[Event] = []
+        for event_type, payload in rows:
+            event = self._deserialize(event_type, payload)
+            if event is not None:
+                events.append(event)
+        return events
+
+    async def count(self, event_types: list[str] | None = None) -> int:
+        """Count events, optionally filtered by types."""
+        stmt = select(func.count()).select_from(events_table)
+
+        if event_types:
+            stmt = stmt.where(events_table.c.event_type.in_(event_types))
+
+        result = await self._session.execute(stmt)
+        return result.scalar() or 0
 
     def _deserialize(self, event_type: str, payload: dict | str) -> Event | None:
         """Deserialize an event from stored data."""
@@ -114,7 +171,6 @@ class SQLAlchemyEventRepository(EventRepository):
         if event_cls is None:
             return None
 
-        # Handle both dict and string payloads (SQLite JSON vs text)
         if isinstance(payload, str):
             return event_cls.model_validate_json(payload)
         return event_cls.model_validate(payload)

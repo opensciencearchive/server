@@ -108,7 +108,7 @@ class Server(BaseSettings):
 
 
 class DatabaseConfig(BaseSettings):
-    url: str = "sqlite+aiosqlite:///~/.osa/osa.db"  # Default to SQLite for local operation
+    url: str = "sqlite+aiosqlite:///~/.local/share/osa/osa.db"  # XDG data directory
     echo: bool = False
     auto_migrate: bool = True  # Auto-migrate for SQLite, manual for PostgreSQL
 
