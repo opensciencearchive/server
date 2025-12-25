@@ -100,4 +100,4 @@ uv run ruff check
 
 ## License
 
-MIT
+Apache 2.0
