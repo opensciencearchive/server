@@ -16,7 +16,6 @@ TEMPLATES: list[Template] = ["geo", "minimal"]
 
 GEO_TEMPLATE = """\
 # OSA Configuration - GEO Template
-# Documentation: https://docs.osa.dev/config
 
 server:
   name: "My OSA Node"
@@ -57,7 +56,6 @@ indexes:
 
 MINIMAL_TEMPLATE = """\
 # OSA Configuration
-# Documentation: https://docs.osa.dev/config
 
 server:
   name: "My OSA Node"
