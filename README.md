@@ -5,19 +5,19 @@
 <h1 align="center">Open Science Archive</h1>
 
 <p align="center">
-  <strong>Natural language search for scientific datasets</strong>
+  <strong>A domain-agnostic archive for AI-ready scientific data</strong>
 </p>
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> •
-  <a href="#features">Features</a> •
+  <a href="#templates">Templates</a> •
   <a href="#usage">Usage</a> •
   <a href="#development">Development</a>
 </p>
 
 ---
 
-OSA is a local-first server for discovering scientific data. It ingests metadata from public repositories like [NCBI GEO](https://www.ncbi.nlm.nih.gov/geo/), indexes it with vector embeddings, and provides natural language search via CLI.
+OSA makes it easy to stand up [PDB](https://www.rcsb.org/)-level data infrastructure for any scientific domain — validated, searchable, and AI-ready.
 
 ## Quick Start
 
@@ -28,23 +28,37 @@ OSA is a local-first server for discovering scientific data. It ingests metadata
 git clone https://github.com/opendatabank/osa.git
 cd osa
 uv sync
+source .venv/bin/activate
 
-# Initialize OSA (creates config at ~/.config/osa/)
-uv run osa init --email your@email.com
+# Initialize with the GEO template
+osa init geo
 
 # Start the server
-uv run osa server start
+osa server start
 
-# Search GEO datasets
-uv run osa search vector "single cell RNA-seq alzheimer's disease"
+# Search datasets using natural language
+osa search vector "single cell RNA-seq alzheimer's disease"
 ```
 
-## Features
+## Templates
 
-- **Natural language search** — Find datasets by describing what you're looking for
-- **GEO integration** — Automatic ingestion from NCBI Gene Expression Omnibus
-- **Local-first** — Runs entirely on your machine, no cloud dependencies
-- **Vector search** — Semantic similarity powered by sentence-transformers
+OSA ships with pre-configured templates for different domains:
+
+| Template | Description |
+|----------|-------------|
+| **geo** | [NCBI GEO](https://www.ncbi.nlm.nih.gov/geo/) integration with vector search. Natural language search over gene expression datasets. |
+| **minimal** | Blank configuration for building your own archive. |
+
+```bash
+# See available templates
+osa init
+
+# Initialize with a specific template
+osa init geo
+osa init minimal
+```
+
+More templates coming soon. Contributions welcome.
 
 ## Usage
 
@@ -60,16 +74,15 @@ osa show 1
 # Check system stats
 osa stats
 
-# View server status
+# Server management
 osa server status
-
-# View logs
 osa server logs --follow
+osa server stop
 ```
 
 ### Configuration
 
-OSA stores configuration in `~/.config/osa/config.yaml`. Data is stored in `~/.local/share/osa/`.
+Configuration lives in `~/.config/osa/config.yaml`. Data is stored in `~/.local/share/osa/`.
 
 ## Development
 
@@ -80,10 +93,8 @@ uv sync --group dev
 # Run tests
 uv run pytest
 
-# Type checking
+# Type checking & linting
 uv run pyright
-
-# Linting
 uv run ruff check
 ```
 

@@ -1,36 +1,41 @@
 """Initialize OSA configuration and directories."""
 
 import sys
+from typing import Literal
 
 import cyclopts
 
 from osa.cli.console import get_console
 from osa.cli.util import OSAPaths
 
-app = cyclopts.App(name="init", help="Initialize OSA")
+app = cyclopts.App(name="init", help="Initialize OSA with a template")
 
-CONFIG_TEMPLATE = """\
-# OSA Configuration
+# Available templates
+Template = Literal["geo", "minimal"]
+TEMPLATES: list[Template] = ["geo", "minimal"]
+
+GEO_TEMPLATE = """\
+# OSA Configuration - GEO Template
 # Documentation: https://docs.osa.dev/config
 
 server:
   name: "My OSA Node"
   domain: "localhost"
 
-# Database (SQLite by default)
+# Database (SQLite by default, stored in ~/.local/share/osa/)
 # database:
-#   url: "sqlite+aiosqlite:///{data_dir}/osa.db"
 #   auto_migrate: true
 
 # Logging
 # logging:
 #   level: "INFO"
 
+# GEO Ingestor - pulls from NCBI Gene Expression Omnibus
 ingestors:
   geo:
     ingestor: geo
     config:
-      email: {email}
+      email: your@email.com  # Required by NCBI - please update this
       # api_key: null  # Optional: NCBI API key for higher rate limits
     initial_run:
       enabled: true
@@ -39,6 +44,7 @@ ingestors:
     #   cron: "0 * * * *"  # Hourly
     #   limit: 100
 
+# Vector search index
 indexes:
   vector:
     backend: vector
@@ -49,10 +55,41 @@ indexes:
         fields: [title, summary, organism, platform, entry_type]
 """
 
+MINIMAL_TEMPLATE = """\
+# OSA Configuration
+# Documentation: https://docs.osa.dev/config
+
+server:
+  name: "My OSA Node"
+  domain: "localhost"
+
+# Database (SQLite by default, stored in ~/.local/share/osa/)
+# database:
+#   auto_migrate: true
+
+# Logging
+# logging:
+#   level: "INFO"
+
+# Add your ingestors here:
+# ingestors:
+#   my_ingestor:
+#     ingestor: ...
+#     config: ...
+
+# Add your indexes here:
+# indexes:
+#   my_index:
+#     backend: vector
+#     config:
+#       persist_dir: {vectors_dir}
+"""
+
 
 @app.default
 def init(
-    email: str | None = None,
+    template: Template | None = None,
+    /,
     force: bool = False,
 ) -> None:
     """Initialize OSA configuration and directories.
@@ -60,11 +97,22 @@ def init(
     Creates the config file and directory structure needed to run OSA.
 
     Args:
-        email: Email for NCBI API access (required for GEO ingestion).
+        template: Template to use (geo, minimal).
         force: Overwrite existing configuration.
     """
     console = get_console()
     paths = OSAPaths()
+
+    # If no template specified, show available options
+    if template is None:
+        console.print("[bold]Available templates:[/bold]\n")
+        console.print("  [cyan]geo[/cyan]      NCBI GEO integration with vector search")
+        console.print("  [cyan]minimal[/cyan]  Blank configuration to customize")
+        console.print()
+        console.print("Usage: [bold]osa init <template>[/bold]")
+        console.print()
+        console.print("Example: [dim]osa init geo[/dim]")
+        sys.exit(0)
 
     # Check if already initialized
     if paths.is_initialized() and not force:
@@ -73,45 +121,25 @@ def init(
         console.info("Use --force to reinitialize")
         sys.exit(0)
 
-    # Show what we're going to create
-    console.print("[bold]OSA Setup[/bold]\n")
-    console.print("This will create:")
-    console.print(f"  [cyan]{paths.config_file}[/cyan]  [dim](configuration)[/dim]")
-    console.print(f"  [cyan]{paths.data_dir}/[/cyan]  [dim](database, indexes)[/dim]")
-    console.print(f"  [cyan]{paths.state_dir}/[/cyan]  [dim](logs, runtime state)[/dim]")
-    console.print(f"  [cyan]{paths.cache_dir}/[/cyan]  [dim](cache)[/dim]")
-    console.print()
-
-    # Get email if not provided
-    if email is None:
-        console.print("[dim]NCBI requires an email address for GEO API access.[/dim]")
-        try:
-            email = input("Email: ").strip()
-        except (KeyboardInterrupt, EOFError):
-            console.print()
-            console.error("Setup cancelled")
-            sys.exit(1)
-
-        if not email:
-            console.error("Email is required for GEO ingestion")
-            sys.exit(1)
-
-    console.print()
+    # Generate config content
+    if template == "geo":
+        config_content = GEO_TEMPLATE.format(vectors_dir=paths.vectors_dir)
+    else:  # minimal
+        config_content = MINIMAL_TEMPLATE.format(vectors_dir=paths.vectors_dir)
 
     # Create directories
     paths.ensure_directories()
 
     # Write config file
-    config_content = CONFIG_TEMPLATE.format(
-        email=email,
-        data_dir=paths.data_dir,
-        vectors_dir=paths.vectors_dir,
-    )
     paths.config_file.write_text(config_content)
 
-    console.success(f"Created {paths.config_file}")
-    console.success(f"Created {paths.data_dir}/")
-    console.success(f"Created {paths.state_dir}/")
-    console.success(f"Created {paths.cache_dir}/")
+    # Show results
+    console.success(f"Initialized OSA with '{template}' template")
     console.print()
-    console.print("Run [bold]osa server start[/bold] to start the server.")
+    console.print(f"  [cyan]Config:[/cyan]  {paths.config_file}")
+    console.print(f"  [cyan]Data:[/cyan]    {paths.data_dir}/")
+    console.print(f"  [cyan]State:[/cyan]   {paths.state_dir}/")
+    console.print(f"  [cyan]Cache:[/cyan]   {paths.cache_dir}/")
+    console.print()
+    console.print(f"Edit your config: [bold]{paths.config_file}[/bold]")
+    console.print("Then run: [bold]osa server start[/bold]")
