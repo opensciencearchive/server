@@ -23,11 +23,13 @@ class TriggerInitialIngestion(EventListener[ServerStarted]):
 
     async def handle(self, event: ServerStarted) -> None:
         """Check each ingestor config and emit IngestRequested if initial_run is enabled."""
-        for ingestor_name, ingest_config in self.config.ingestors.items():
+        for ingest_config in self.config.ingestors:
             if ingest_config.initial_run is None:
                 continue
             if not ingest_config.initial_run.enabled:
                 continue
+
+            ingestor_name = ingest_config.name
 
             # Verify ingestor exists in registry
             if ingestor_name not in self.ingestors:

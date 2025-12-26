@@ -8,6 +8,8 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 
+from pydantic import ValidationError
+
 from osa.cli.util.paths import OSAPaths
 
 
@@ -17,6 +19,15 @@ class ServerStatus(Enum):
     RUNNING = "running"
     STOPPED = "stopped"
     STALE = "stale"  # State file exists but process is dead
+
+
+class ConfigError(Exception):
+    """Raised when configuration validation fails."""
+
+    def __init__(self, message: str, details: list[str] | None = None) -> None:
+        self.message = message
+        self.details = details or []
+        super().__init__(message)
 
 
 @dataclass
@@ -105,7 +116,19 @@ class DaemonManager:
         # Load config and run migrations
         if config_file:
             os.environ["OSA_CONFIG_FILE"] = config_file
-        app_config = Config()
+
+        try:
+            app_config = Config()
+        except ValidationError as e:
+            details = []
+            for err in e.errors():
+                loc = ".".join(str(x) for x in err.get("loc", []))
+                msg = err.get("msg", "Unknown error")
+                details.append(f"{loc}: {msg}")
+            raise ConfigError(
+                "Invalid configuration",
+                details=details,
+            ) from None
 
         if app_config.database.auto_migrate:
             print("Running database migrations...")

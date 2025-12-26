@@ -71,7 +71,7 @@ class EventProvider(Provider):
         """Build schedule configs from application config."""
         configs: list[ScheduleConfig] = []
 
-        for name, ingestor in config.ingestors.items():
+        for ingestor in config.ingestors:
             if ingestor.schedule is None:
                 continue
 
@@ -79,9 +79,9 @@ class EventProvider(Provider):
                 ScheduleConfig(
                     schedule_type=IngestSchedule,
                     cron=ingestor.schedule.cron,
-                    id=f"ingest-{name}",
+                    id=f"ingest-{ingestor.name}",
                     params={
-                        "ingestor_name": name,
+                        "ingestor_name": ingestor.name,
                         "limit": ingestor.schedule.limit,
                     },
                 )

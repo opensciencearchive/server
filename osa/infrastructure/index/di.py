@@ -21,11 +21,15 @@ class IndexProvider(Provider):
         """
         backends: dict[str, StorageBackend] = {}
 
-        for name, idx_config in config.indexes.items():
+        for idx_config in config.indexes:
             if idx_config.backend == "vector":
-                backends[name] = VectorStorageBackend(name, idx_config.config)
+                backends[idx_config.name] = VectorStorageBackend(
+                    idx_config.name, idx_config.config
+                )
             # Add more backend types here as they're implemented
             # elif idx_config.backend == "keyword":
-            #     backends[name] = KeywordStorageBackend(name, idx_config.config)
+            #     backends[idx_config.name] = KeywordStorageBackend(
+            #         idx_config.name, idx_config.config
+            #     )
 
         return IndexRegistry(backends)

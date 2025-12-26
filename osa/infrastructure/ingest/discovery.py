@@ -112,31 +112,31 @@ class IngestorConfigError(Exception):
         return "\n".join(lines)
 
 
-def validate_ingestors_at_startup(ingestors_config: dict[str, IngestConfig]) -> None:
+def validate_ingestors_at_startup(ingestors_config: list[IngestConfig]) -> None:
     """Validate all ingestor configurations at application startup.
 
     Call this early in startup to fail fast with clear error messages
     if any ingestor configuration is invalid.
 
     Args:
-        ingestors_config: Dict of ingestor name -> IngestConfig from user config.
+        ingestors_config: List of IngestConfig from user config.
 
     Raises:
         IngestorConfigError: If any configuration is invalid.
-        ValueError: If an unknown ingestor type is specified.
+        ValueError: If an unknown ingestor type is specified or duplicates exist.
     """
     available = discover_ingestors()
     validate_all_ingestor_configs(ingestors_config, available)
 
 
 def validate_all_ingestor_configs(
-    ingestors_config: dict[str, IngestConfig],
+    ingestors_config: list[IngestConfig],
     available_ingestors: dict[str, type[Ingestor]],
 ) -> dict[str, tuple[type[Ingestor], BaseModel]]:
     """Validate all ingestor configurations at startup.
 
     Args:
-        ingestors_config: Dict of ingestor name -> IngestConfig from user config.
+        ingestors_config: List of IngestConfig from user config.
         available_ingestors: Dict of ingestor type -> class from discovery.
 
     Returns:
@@ -144,18 +144,24 @@ def validate_all_ingestor_configs(
 
     Raises:
         IngestorConfigError: If any configuration is invalid.
-        ValueError: If an unknown ingestor type is specified.
+        ValueError: If an unknown ingestor type is specified or duplicates exist.
     """
     validated: dict[str, tuple[type[Ingestor], BaseModel]] = {}
 
-    for name, ing_config in ingestors_config.items():
+    for ing_config in ingestors_config:
         name = ing_config.ingestor
+
+        # Check for duplicates
+        if name in validated:
+            raise ValueError(
+                f"Duplicate ingestor '{name}'. "
+                "Each ingestor type can only be configured once."
+            )
 
         if name not in available_ingestors:
             available = ", ".join(sorted(available_ingestors.keys())) or "(none)"
             raise ValueError(
-                f"Unknown ingestor type '{name}' for '{name}'. "
-                f"Available: {available}"
+                f"Unknown ingestor type '{name}'. Available: {available}"
             )
 
         ingestor_cls = available_ingestors[name]

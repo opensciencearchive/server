@@ -7,7 +7,7 @@ from pathlib import Path
 import cyclopts
 
 from osa.cli.console import get_console, relative_time
-from osa.cli.util import DaemonManager, OSAPaths, ServerStatus
+from osa.cli.util import ConfigError, DaemonManager, OSAPaths, ServerStatus
 
 app = cyclopts.App(name="server", help="Server management commands")
 
@@ -74,6 +74,13 @@ def start(
         console.print(f"  [dim]PID:[/dim] {info.pid}")
         console.print(f"  [dim]Config:[/dim] {config}")
         console.print(f"  [dim]Logs:[/dim] {daemon.paths.server_log}")
+    except ConfigError as e:
+        console.error(e.message)
+        for detail in e.details:
+            console.print(f"  [dim]•[/dim] {detail}")
+        console.print()
+        console.info(f"Config file: {config}")
+        sys.exit(1)
     except RuntimeError as e:
         console.error(str(e))
         sys.exit(1)

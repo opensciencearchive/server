@@ -31,12 +31,11 @@ server:
 
 # GEO Ingestor - pulls from NCBI Gene Expression Omnibus via Entrez API
 ingestors:
-  geo:
-    ingestor: geo-entrez
+  - ingestor: geo-entrez
     config:
       record_type: gds  # gds (~5k curated) or gse (~230k all)
       email: your@email.com  # Required by NCBI - please update this
-      # api_key: null  # Optional: NCBI API key for higher rate limits
+      # api_key: null  # Optional: NCBI API key for higher rate limits (https://account.ncbi.nlm.nih.gov/settings/)
     initial_run:
       enabled: true
       limit: 50
@@ -46,7 +45,7 @@ ingestors:
 
 # Vector search index
 indexes:
-  vector:
+  - name: vector
     backend: vector
     config:
       persist_dir: {vectors_dir}
@@ -72,13 +71,13 @@ server:
 
 # Add your ingestors here:
 # ingestors:
-#   my_ingestor:
-#     ingestor: ...
-#     config: ...
+#   - ingestor: geo-entrez
+#     config:
+#       email: your@email.com
 
 # Add your indexes here:
 # indexes:
-#   my_index:
+#   - name: my-index
 #     backend: vector
 #     config:
 #       persist_dir: {vectors_dir}

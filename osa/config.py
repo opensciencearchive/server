@@ -24,8 +24,9 @@ AnyBackendConfig = Annotated[
 
 
 class IndexConfig(BaseModel):
-    """Configuration for a named index."""
+    """Configuration for an index."""
 
+    name: str  # Unique name for this index (used in search API)
     backend: str  # "vector", "keyword", etc.
     config: AnyBackendConfig
 
@@ -51,7 +52,7 @@ class InitialRun(BaseModel):
 
 
 class IngestConfig(BaseModel):
-    """Configuration for a named ingestor.
+    """Configuration for an ingestor.
 
     The `config` field is validated at runtime based on the ingestor type,
     allowing external ingestors to define their own config schemas.
@@ -61,6 +62,11 @@ class IngestConfig(BaseModel):
     config: dict[str, Any] = {}  # Validated at runtime by ingestor's config_class
     schedule: IngestSchedule | None = None  # Optional: if set, runs on schedule
     initial_run: InitialRun | None = None  # Optional: if set, runs on startup
+
+    @property
+    def name(self) -> str:
+        """The ingestor name (same as ingestor type for now)."""
+        return self.ingestor
 
 
 # =============================================================================
@@ -126,8 +132,8 @@ class Config(BaseSettings):
     frontend: Frontend = Frontend()
     database: DatabaseConfig = DatabaseConfig()
     logging: LoggingConfig = LoggingConfig()
-    indexes: dict[str, IndexConfig] = {}  # name -> IndexConfig
-    ingestors: dict[str, IngestConfig] = {}  # name -> IngestConfig
+    indexes: list[IndexConfig] = []  # list of index configs
+    ingestors: list[IngestConfig] = []  # list of ingestor configs
 
     class Config:
         env_file = ".env"
