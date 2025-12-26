@@ -33,6 +33,8 @@ source .venv/bin/activate
 # Initialize with the GEO template
 osa init geo
 
+# NOTE: update the config.yaml with your NCBI API key and increase the record ingestion limit
+
 # Start the server
 osa server start
 
@@ -83,6 +85,30 @@ osa server stop
 ### Configuration
 
 Configuration lives in `~/.config/osa/config.yaml`. Data is stored in `~/.local/share/osa/`.
+
+#### GEO Template Setup
+
+After running `osa init geo`, edit your config file to:
+
+1. **Add your NCBI API key** (recommended for faster ingestion):
+   - Get a free API key at https://account.ncbi.nlm.nih.gov/settings/
+   - Without an API key, NCBI limits you to 3 requests/second
+   - With an API key, you get 10 requests/second
+
+2. **Increase the initial ingestion limit** for a more complete dataset:
+
+```yaml
+ingestors:
+  - ingestor: geo-entrez
+    config:
+      email: your@email.com
+      api_key: your_ncbi_api_key_here  # Optional but recommended
+    initial_run:
+      enabled: true
+      limit: 10000  # Increase from default 50 for fuller dataset
+```
+
+The GEO template uses the full GSE dataset (~250,000 series). Initial ingestion of 10,000 records takes roughly 20-30 minutes with an API key.
 
 ## Development
 

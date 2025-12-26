@@ -33,7 +33,7 @@ server:
 ingestors:
   - ingestor: geo-entrez
     config:
-      record_type: gds  # gds (~5k curated) or gse (~230k all)
+      record_type: gse  # gse (~250k all) or gds (~5k curated)
       email: your@email.com  # Required by NCBI - please update this
       # api_key: null  # Optional: NCBI API key for higher rate limits (https://account.ncbi.nlm.nih.gov/settings/)
     initial_run:
