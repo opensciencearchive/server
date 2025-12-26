@@ -1,28 +1,37 @@
-# python 3.12+ / pydantic v2
 from __future__ import annotations
 
 import re
 from enum import Enum
 from string import Template
-from typing import Annotated, Optional, Type, Union
+from typing import ClassVar, Generic, Self, Type, TypeVar, Union
 
-from pydantic import BaseModel, Field, RootModel, field_validator, model_validator
+from pydantic import (
+    Field,
+    RootModel,
+    field_validator,
+)
+
+from osa.domain.shared.model.value import ValueObject
 
 # ---------- Atomic (RootModel) parts ----------
 
-class NodeId(RootModel[str]):
+T = TypeVar("T", bound=Union[str, int])
+
+
+class Domain(RootModel[str]):
     """
-    Node identity segment.
-    Allowed forms (draft): nuuid_<ulid/uuid> | dns_<domain> | nkey_<pubkey-hash>
+    Node identity segment: a DNS domain name.
+    Examples: osap.org, archive.university.edu, localhost
     """
-    _re = re.compile(r"^(nuuid|dns|nkey)_[a-z0-9.\-]+$")
+
+    _re: ClassVar[re.Pattern] = re.compile(r"^[a-z0-9]([a-z0-9\-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]*[a-z0-9])?)*$")
 
     @field_validator("root")
     @classmethod
     def _validate(cls, v: str) -> str:
         v = v.strip().lower()
         if not cls._re.match(v):
-            raise ValueError("invalid NodeId (expected nuuid_*, dns_*, or nkey_*)")
+            raise ValueError("invalid Domain (expected DNS domain name)")
         return v
 
 
@@ -30,7 +39,8 @@ class LocalId(RootModel[str]):
     """
     Opaque, node-scoped identifier (prefer UUIDv7/ULID; we only enforce charset/length here).
     """
-    _re = re.compile(r"^[a-z0-9\-]{20,64}$")
+
+    _re: ClassVar[re.Pattern] = re.compile(r"^[a-z0-9\-]{3,64}$")
 
     @field_validator("root")
     @classmethod
@@ -41,10 +51,21 @@ class LocalId(RootModel[str]):
         return v
 
 
-class Semver(RootModel[str]):
-    _re = re.compile(
+class Version(RootModel[T], Generic[T]):
+    @classmethod
+    def from_string(cls, s: str) -> "Version":
+        raise NotImplementedError
+
+
+class Semver(Version[str]):
+    _re: ClassVar[re.Pattern] = re.compile(
         r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9a-z\-\.]+)?(?:\+[0-9a-z\-\.]+)?$"
     )
+
+    @classmethod
+    def from_string(cls, s: str) -> "Semver":
+        return Semver.model_validate(s)
+
     @field_validator("root")
     @classmethod
     def _validate(cls, v: str) -> str:
@@ -53,8 +74,15 @@ class Semver(RootModel[str]):
             raise ValueError("invalid SemVer")
         return v
 
+    def __str__(self) -> str:
+        return self.root
 
-class RecordVersion(RootModel[int]):
+
+class RecordVersion(Version[int]):
+    @classmethod
+    def from_string(cls, s: str) -> "RecordVersion":
+        return RecordVersion.model_validate(int(s))
+
     @field_validator("root")
     @classmethod
     def _validate(cls, v: int) -> int:
@@ -62,20 +90,21 @@ class RecordVersion(RootModel[int]):
             raise ValueError("record version must be >= 1")
         return v
 
-
-Version = Annotated[Union[Semver, RecordVersion], "SRN version segment"]
+    def __str__(self) -> str:
+        return str(self.root)
 
 
 # ---------- Shared enums / constants ----------
+
 
 class ResourceType(str, Enum):
     rec = "rec"
     dep = "dep"
     schema = "schema"
-    assur = "assur"
-    val = "val"
+    vocab = "vocab"
     snap = "snap"
     evt = "evt"
+    val = "val"
 
 
 URN_SCHEME = "urn"
@@ -83,20 +112,24 @@ URN_NID = "osa"
 
 # ---------- Base SRN (parts stored as fields) ----------
 
-class SRN(BaseModel):
+S = TypeVar("S", bound="SRN")
+
+
+class SRN(ValueObject):
     """
-    Base SRN model: urn:osa:{node}:{type}:{local}[@version]
+    Base SRN model: urn:osa:{domain}:{type}:{id}[@version]
     Stores parts, provides parse/render, and light invariants.
     Subclasses can tighten version rules per resource type.
     """
+
     scheme: str = Field(default=URN_SCHEME, frozen=True)
     nid: str = Field(default=URN_NID, frozen=True)
-    node: NodeId
+    domain: Domain
     type: ResourceType
-    local: LocalId
-    version: Optional[Version] = None
+    id: LocalId
+    version: Union[Version, None] = Field(default=None)
 
-    _tpl = Template("urn:osa:${node}:${type}:${local}${ver}")
+    _tpl: ClassVar[Template] = Template("urn:osa:${domain}:${type}:${id}${version}")
 
     @field_validator("scheme")
     @classmethod
@@ -118,112 +151,106 @@ class SRN(BaseModel):
     def render(self) -> str:
         ver = ""
         if self.version is not None:
-            # RootModel stores the primitive in .root
-            v = self.version.root if isinstance(self.version, RootModel) else self.version
-            ver = f"@{v}"
-        return self._tpl.substitute(node=self.node.root, type=self.type.value, local=self.local.root, ver=ver)
+            ver = f"@{self.version}"
+        return self._tpl.substitute(
+            domain=self.domain.root,
+            type=self.type.value,
+            id=self.id.root,
+            version=ver,
+        )
 
     # ---------- factory & parsing ----------
 
-    @classmethod
-    def parse(cls, srn: str) -> SRN:
+    @staticmethod
+    def _extract_parts(srn: str) -> tuple[str, str, str, Version | None]:
         """
-        Parse any SRN into the appropriate subclass (when possible), else base SRN.
+        Extract parts from SRN string.
+        Returns (domain, type, id, version).
+        Raises ValueError if malformed.
         """
         srn = srn.strip().lower()
-        # quick sanity
         if not srn.startswith("urn:osa:"):
             raise ValueError("not an OSA SRN")
-        # split into up to 5 segments: urn, osa, node, type, local[@version]
         parts = srn.split(":")
-        if len(parts) < 5:
-            raise ValueError("malformed SRN (expected urn:osa:{node}:{type}:{local}[...])")
-        _, _, node, typ, rest = parts[0], parts[1], parts[2], parts[3], ":".join(parts[4:])
-        # rest can contain ':' only if local contains ':' (we prohibit), so split on '@'
+        if len(parts) != 5:
+            raise ValueError(
+                "malformed SRN (expected urn:osa:{domain}:{type}:{id}[...])"
+            )
+        _, _, domain, typ, rest = (
+            parts[0],
+            parts[1],
+            parts[2],
+            parts[3],
+            parts[4],
+        )
         if "@" in rest:
-            local_str, ver_str = rest.split("@", 1)
-            version: Optional[Version] = _parse_version(ver_str)
+            id_str, ver_str = rest.split("@", 1)
+            try:
+                version = Semver.from_string(ver_str)
+            except ValueError:
+                try:
+                    version = RecordVersion.from_string(ver_str)
+                except ValueError:
+                    raise ValueError("invalid version format in SRN")
         else:
-            local_str, version = rest, None
+            id_str, version = rest, None
 
-       # dispatch to stricter subclasses
-        t = ResourceType(typ)
-        sub_cls: Type[SRN] = {
-            ResourceType.rec: RecordSRN,
-            ResourceType.schema: SchemaSRN,
-            ResourceType.assur: AssuranceSRN,
-            ResourceType.dep: DepositionSRN,
-            ResourceType.val: ValidationSRN,
-            ResourceType.snap: SnapshotSRN,
-            ResourceType.evt: EventSRN,
-        }.get(t, SRN)
+        return domain, typ, id_str, version
 
-        return sub_cls(node=NodeId(node), type=ResourceType(typ), local=LocalId(local_str), version=version)
+    @classmethod
+    def parse_as(cls, srn: str, type_: Type[S]) -> S:
+        domain, typ, id_str, version = cls._extract_parts(srn)
+        return type_(
+            domain=Domain(domain),
+            type=ResourceType(typ),
+            id=LocalId(id_str),
+            version=version,
+        )
+
+    @classmethod
+    def parse(cls, srn: str) -> Self:
+        domain, typ, id_str, version = cls._extract_parts(srn)
+        return cls(
+            domain=Domain(domain),
+            type=ResourceType(typ),
+            id=LocalId(id_str),
+            version=version,
+        )
+
 
 # ---------- Per-type SRNs (tighten version constraints) ----------
 
+
 class RecordSRN(SRN):
     type: ResourceType = Field(default=ResourceType.rec, frozen=True)
-    version: Optional[RecordVersion]  # records: integer version or None (if you choose to allow implicit v1)
-
-    @model_validator(mode="after")
-    def _ensure_version(self) -> "RecordSRN":
-        # optional: require explicit version
-        if self.version is None:
-            raise ValueError("Record SRN must include @<int> version (e.g., @1)")
-        return self
+    version: RecordVersion  # type: ignore
 
 
 class SchemaSRN(SRN):
     type: ResourceType = Field(default=ResourceType.schema, frozen=True)
-    version: Semver  # required and must be semver
+    version: Semver  # type: ignore
 
 
-class AssuranceSRN(SRN):
-    type: ResourceType = Field(default=ResourceType.assur, frozen=True)
-    version: Semver  # required and must be semver
+class VocabSRN(SRN):
+    type: ResourceType = Field(default=ResourceType.vocab, frozen=True)
+    version: Semver  # type: ignore
 
 
 class DepositionSRN(SRN):
     type: ResourceType = Field(default=ResourceType.dep, frozen=True)
-    version: Optional[Version] = None  # typically unversioned
+    version: None = None  # type: ignore
 
 
-class ValidationSRN(SRN):
+class ValidationRunSRN(SRN):
     type: ResourceType = Field(default=ResourceType.val, frozen=True)
-    version: Optional[Version] = None  # job ids are separate; SRN usually unversioned
+    version: None = None  # type: ignore
 
 
 class SnapshotSRN(SRN):
     type: ResourceType = Field(default=ResourceType.snap, frozen=True)
-    version: Optional[Version] = None  # snapshot has its own id in 'local'
+    version: None = None  # type: ignore
 
 
 class EventSRN(SRN):
     type: ResourceType = Field(default=ResourceType.evt, frozen=True)
-    version: Optional[Version] = None
-
-
-# ---------- Helpers ----------
-
-def _parse_version(ver_str: str) -> Version:
-    # try int (RecordVersion), else Semver
-    if re.fullmatch(r"[1-9]\d*", ver_str):
-        return RecordVersion(int(ver_str))
-    return Semver(ver_str)
-
-# ---------- Examples ----------
-
-if __name__ == "__main__":
-    s1 = "urn:osa:nuuid_01j6z6y6m3z7q9x6e5yb1s6v:rec:01jb7r3z1emch1t290zq3gzj9v@3"
-    s2 = "urn:osa:dns_cam.ac.uk:schema:binding-measurement@1.0.0"
-    s3 = "urn:osa:nuuid_01j6...:dep:01j4zq3w7e4w6k8d9h3v2v3b7x"
-
-    rec = SRN.parse(s1)         # -> RecordSRN
-    sch = SRN.parse(s2)         # -> SchemaSRN
-    dep = SRN.parse(s3)         # -> DepositionSRN
-
-    print(type(rec), str(rec))
-    print(type(sch), sch.render())
-    print(type(dep), f"{dep}")
-
+    version: None = None  # type: ignore

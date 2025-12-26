@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import ClassVar, Literal, Type
 
-from dishka import Provider
+from dishka import Provider as DishkaProvider
 
 
 Component = Literal[
@@ -15,10 +15,10 @@ Component = Literal[
     "validation",
 ]
 
-PROVIDERS: list[Type[ProviderBase]] = []
+PROVIDERS: list[Type[Provider]] = []
 
 
-class ProviderBase(Provider):
+class Provider(DishkaProvider):
     """Base for all DI providers with unified metadata.
 
     Attributes:
@@ -30,9 +30,7 @@ class ProviderBase(Provider):
     __is_mock__: ClassVar[bool] = False
 
 
-def get_provider(
-    base: Type[ProviderBase], use_mock: bool = False
-) -> Type[ProviderBase]:
+def get_provider(base: Type[Provider], use_mock: bool = False) -> Type[Provider]:
     """Get appropriate provider class.
 
     Automatically determines if provider is mockable by checking for subclasses.

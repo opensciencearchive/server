@@ -1,22 +1,29 @@
 from datetime import datetime
 
 from pydantic import Field
+
 from osa.domain.shared.model.entity import Entity
-from osa.domain.shared.model.srn import SRN
-from osa.domain.validation.model.value import ValidationStatus, ValidatorMessage
+from osa.domain.shared.model.srn import ValidationRunSRN
+from osa.domain.shared.model.value import ValueObject
+from osa.domain.validation.model.value import CheckStatus, RunStatus
 
 
-class GuaranteeValidator(Entity):
-    id: SRN
-    image: str  # switch to Uri or OCIImage, created in shared/models
+class CheckResult(ValueObject):
+    """Result of a single validation check."""
+
+    check_id: str
+    validator_digest: str
+    status: CheckStatus
+    message: str | None = None
+    details: dict | None = None
 
 
-class ValidationCheck(Entity):
-    status: ValidationStatus
-    message: ValidatorMessage
+class ValidationRun(Entity):
+    """Execution of validation checks."""
 
-
-class ValidationSummary(Entity):
-    status: ValidationStatus
-    checks: list[ValidationCheck]
-    generated_at: datetime = Field(default_factory=datetime.now)
+    srn: ValidationRunSRN
+    status: RunStatus = RunStatus.PENDING
+    results: list[CheckResult] = Field(default_factory=list)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    expires_at: datetime | None = None

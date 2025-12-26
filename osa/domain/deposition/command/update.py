@@ -13,7 +13,7 @@ class DepositionUpdated(Result): ...
 class UpdateDepositionHandler(CommandHandler[UpdateDeposition, DepositionUpdated]):
     deposition_service: DepositionService
 
-    def run(self, cmd: UpdateDeposition) -> DepositionUpdated:
+    async def run(self, cmd: UpdateDeposition) -> DepositionUpdated:
         # TODO: Logfire span
         logfire.info("Deposition updated", cmd=cmd)
 
