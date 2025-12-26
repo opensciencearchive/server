@@ -2,7 +2,9 @@
 
 from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import Protocol
+from typing import ClassVar, Protocol
+
+from pydantic import BaseModel
 
 from osa.sdk.ingest.record import UpstreamRecord
 
@@ -12,11 +14,18 @@ class Ingestor(Protocol):
 
     Implement this protocol to create custom ingestors
     for different data sources (e.g., GEO, ENA, Zenodo).
+
+    Class attributes:
+        name: Unique identifier for this ingestor (e.g., 'geo-entrez').
+            Must match the entry point name.
+        config_class: Pydantic model for validating configuration.
     """
 
-    @property
-    def source_type(self) -> str:
-        """Unique identifier for this source (e.g., 'geo', 'ena')."""
+    name: ClassVar[str]
+    config_class: ClassVar[type[BaseModel]]
+
+    def __init__(self, config: BaseModel) -> None:
+        """Initialize the ingestor with validated configuration."""
         ...
 
     def pull(

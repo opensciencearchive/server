@@ -16,7 +16,7 @@ app = cyclopts.App(name="server", help="Server management commands")
 LOCAL_CONFIG = Path("osa.yaml")
 
 
-def _resolve_config(paths: OSAPaths, config: Path) -> Path:
+def _resolve_config(paths: OSAPaths, config: Path | None = None) -> Path:
     """Resolve config file path.
 
     Resolution order:
@@ -65,7 +65,7 @@ def start(
     paths = OSAPaths()
     daemon = DaemonManager(paths)
 
-    config = _resolve_config(paths, paths.config_dir)
+    config = _resolve_config(paths)
 
     try:
         config_path = str(config.resolve())

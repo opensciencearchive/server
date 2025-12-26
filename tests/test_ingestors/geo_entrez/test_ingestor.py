@@ -1,18 +1,17 @@
-"""Integration tests for GEO ingestor against live NCBI E-utilities API."""
+"""Integration tests for GEO Entrez ingestor against live NCBI E-utilities API."""
 
 from collections.abc import AsyncGenerator
 from datetime import datetime
 
 import pytest
 
-from osa.infrastructure.ingest.geo.config import GEOIngestorConfig
-from osa.infrastructure.ingest.geo.ingestor import GEOIngestor
+from ingestors.geo_entrez import GEOEntrezConfig, GEOEntrezIngestor
 from osa.sdk.ingest.record import UpstreamRecord
 
 
 @pytest.fixture
-def geo_config() -> GEOIngestorConfig:
-    return GEOIngestorConfig(
+def geo_config() -> GEOEntrezConfig:
+    return GEOEntrezConfig(
         email="test@example.com",
         tool_name="osa-integration-test",
     )
@@ -20,23 +19,23 @@ def geo_config() -> GEOIngestorConfig:
 
 @pytest.fixture
 async def geo_ingestor(
-    geo_config: GEOIngestorConfig,
-) -> AsyncGenerator[GEOIngestor, None]:
-    ingestor = GEOIngestor(geo_config)
+    geo_config: GEOEntrezConfig,
+) -> AsyncGenerator[GEOEntrezIngestor, None]:
+    ingestor = GEOEntrezIngestor(geo_config)
     yield ingestor
     await ingestor.close()
 
 
-class TestGEOIngestorIntegration:
+class TestGEOEntrezIngestorIntegration:
     """Integration tests that hit the live GEO API."""
 
-    async def test_health_returns_true(self, geo_ingestor: GEOIngestor) -> None:
+    async def test_health_returns_true(self, geo_ingestor: GEOEntrezIngestor) -> None:
         """Health check should return True when GEO API is reachable."""
         result = await geo_ingestor.health()
         assert result is True
 
     async def test_get_one_returns_upstream_record(
-        self, geo_ingestor: GEOIngestor
+        self, geo_ingestor: GEOEntrezIngestor
     ) -> None:
         """Fetching a known GSE should return a valid UpstreamRecord."""
         # GSE1 is one of the earliest GEO series, stable for testing
@@ -45,7 +44,7 @@ class TestGEOIngestorIntegration:
         assert record is not None
         assert isinstance(record, UpstreamRecord)
         assert record.source_id == "GSE1"
-        assert record.source_type == "geo"
+        assert record.source_type == "geo-entrez"
         assert isinstance(record.metadata, dict)
         assert isinstance(record.fetched_at, datetime)
         assert record.source_url is not None
@@ -56,14 +55,14 @@ class TestGEOIngestorIntegration:
         assert record.metadata["title"] is not None
 
     async def test_get_one_nonexistent_returns_none(
-        self, geo_ingestor: GEOIngestor
+        self, geo_ingestor: GEOEntrezIngestor
     ) -> None:
         """Fetching a nonexistent GSE should return None."""
         record = await geo_ingestor.get_one("GSE999999999999")
         assert record is None
 
     async def test_pull_yields_upstream_records(
-        self, geo_ingestor: GEOIngestor
+        self, geo_ingestor: GEOEntrezIngestor
     ) -> None:
         """Pulling records should yield valid UpstreamRecords."""
         records: list[UpstreamRecord] = []
@@ -76,6 +75,6 @@ class TestGEOIngestorIntegration:
         for record in records:
             assert isinstance(record, UpstreamRecord)
             assert record.source_id.startswith("GSE")
-            assert record.source_type == "geo"
+            assert record.source_type == "geo-entrez"
             assert isinstance(record.metadata, dict)
             assert isinstance(record.fetched_at, datetime)

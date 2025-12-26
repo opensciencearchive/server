@@ -11,6 +11,7 @@ from osa.application.di import create_container
 from osa.config import Config, configure_logging
 from osa.domain.shared.error import OSAError
 from osa.infrastructure.event.worker import BackgroundWorker
+from osa.infrastructure.ingest.discovery import validate_ingestors_at_startup
 from osa.util.di.fastapi import setup_dishka
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,9 @@ def create_app() -> FastAPI:
     # Configure logging early
     configure_logging(config.logging)
     logger.info("Starting OSA server: %s v%s", config.server.name, config.server.version)
+
+    # Validate ingestor configs at startup (fail fast with clear errors)
+    validate_ingestors_at_startup(config.ingestors)
 
     app_instance = FastAPI(
         title=config.server.name,

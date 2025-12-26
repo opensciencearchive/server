@@ -1,4 +1,4 @@
-"""GEO ingestor implementation using NCBI E-utilities."""
+"""GEO Entrez ingestor - uses NCBI E-utilities API."""
 
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -6,35 +6,41 @@ from xml.etree import ElementTree
 
 import httpx
 
-from osa.infrastructure.ingest.geo.config import GEOIngestorConfig
+from ingestors.geo_entrez.config import GEOEntrezConfig
 from osa.sdk.ingest.record import UpstreamRecord
 
 
-class GEOIngestor:
-    """Pulls GSE metadata from NCBI GEO via E-utilities."""
+class GEOEntrezIngestor:
+    """Pulls GEO metadata from NCBI via E-utilities (Entrez).
 
-    source_type = "geo"
+    Supports both GSE (Series, ~230k records) and GDS (DataSets, ~5k curated).
+    Best for incremental updates; for bulk initialization consider geo-ftp.
+    """
 
-    def __init__(self, config: GEOIngestorConfig) -> None:
+    name = "geo-entrez"
+    config_class = GEOEntrezConfig
+
+    def __init__(self, config: GEOEntrezConfig) -> None:
         self._config = config
         self._client = httpx.AsyncClient(timeout=30.0)
+        self._record_prefix = config.record_type.upper()  # "GSE" or "GDS"
 
     async def pull(
         self,
         since: datetime | None = None,
         limit: int | None = None,
     ) -> AsyncIterator[UpstreamRecord]:
-        """Pull GSE records from GEO.
+        """Pull records from GEO.
 
         Args:
             since: Only fetch records updated after this time.
             limit: Maximum number of records to fetch.
 
         Yields:
-            RawRecord for each GSE series.
+            UpstreamRecord for each GEO record.
         """
         # Build search query
-        query = "GSE[ETYP]"  # All GSE records
+        query = f"{self._record_prefix}[ETYP]"
         if since:
             date_str = since.strftime("%Y/%m/%d")
             query += f" AND {date_str}:3000[PDAT]"
@@ -148,7 +154,7 @@ class GEOIngestor:
 
         for doc in tree.findall(".//DocumentSummary"):
             accession = self._get_item(doc, "Accession")
-            if not accession or not accession.startswith("GSE"):
+            if not accession or not accession.startswith(self._record_prefix):
                 continue
 
             metadata = {
@@ -168,7 +174,7 @@ class GEOIngestor:
             records.append(
                 UpstreamRecord(
                     source_id=accession,
-                    source_type=self.source_type,
+                    source_type=self.name,
                     metadata=metadata,
                     fetched_at=now,
                     source_url=f"https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={accession}",

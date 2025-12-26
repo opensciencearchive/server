@@ -31,6 +31,9 @@ dependencies = [
 [project.scripts]
 osa = "osa:main"
 
+[project.entry-points."osa.ingestors"]
+geo-entrez = "ingestors.geo_entrez:GEOEntrezIngestor"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

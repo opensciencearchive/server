@@ -1,1 +1,0 @@
-"""GEO ingestor integration tests."""

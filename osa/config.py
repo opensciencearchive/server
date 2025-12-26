@@ -10,7 +10,6 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 from osa.infrastructure.index.vector.config import VectorBackendConfig
-from osa.infrastructure.ingest.geo.config import GEOIngestorConfig
 
 
 # =============================================================================
@@ -35,12 +34,6 @@ class IndexConfig(BaseModel):
 # Ingest Configuration
 # =============================================================================
 
-# Union of all ingestor configs (extend as new ingestors are added)
-AnyIngestorConfig = Annotated[
-    Union[GEOIngestorConfig],
-    Field(discriminator=None),
-]
-
 
 class IngestSchedule(BaseModel):
     """Schedule configuration for an ingestor."""
@@ -58,10 +51,14 @@ class InitialRun(BaseModel):
 
 
 class IngestConfig(BaseModel):
-    """Configuration for a named ingestor."""
+    """Configuration for a named ingestor.
 
-    ingestor: str  # "geo", "ena", etc.
-    config: AnyIngestorConfig
+    The `config` field is validated at runtime based on the ingestor type,
+    allowing external ingestors to define their own config schemas.
+    """
+
+    ingestor: str  # "geo-entrez", etc. - matches entry point name
+    config: dict[str, Any] = {}  # Validated at runtime by ingestor's config_class
     schedule: IngestSchedule | None = None  # Optional: if set, runs on schedule
     initial_run: InitialRun | None = None  # Optional: if set, runs on startup
 

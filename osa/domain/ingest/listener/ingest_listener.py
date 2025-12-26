@@ -67,7 +67,7 @@ class IngestFromUpstream(EventListener[IngestRequested]):
             IngestionRunCompleted(
                 id=EventId(uuid4()),
                 ingestor_name=event.ingestor_name,
-                source_type=ingestor.source_type,
+                source_type=ingestor.name,
                 started_at=started_at,
                 completed_at=completed_at,
                 record_count=count,
