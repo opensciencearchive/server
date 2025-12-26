@@ -216,8 +216,13 @@ class Console:
             # Title line with number (no truncation, let it wrap)
             self._console.print(f"[bold blue][{i}][/bold blue] {meta.title}")
 
-            # Metadata line: short_id · organism · samples · date
-            meta_parts = [f"[dim]{hit.short_id}[/dim]", f"[dim]{organism}[/dim]"]
+            # Metadata line: score · short_id · organism · samples · date
+            score_pct = f"{hit.score * 100:.0f}%"
+            meta_parts = [
+                f"[green]{score_pct}[/green]",
+                f"[dim]{hit.short_id}[/dim]",
+                f"[dim]{organism}[/dim]",
+            ]
             if samples:
                 meta_parts.append(f"[dim]{samples} samples[/dim]")
             if pub_date:
