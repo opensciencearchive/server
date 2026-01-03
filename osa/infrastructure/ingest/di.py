@@ -4,6 +4,9 @@ from dishka import Provider, provide
 
 from osa.config import Config
 from osa.domain.ingest.model.registry import IngestorRegistry
+from osa.domain.ingest.service import IngestService
+from osa.domain.shared.model.srn import Domain
+from osa.domain.shared.outbox import Outbox
 from osa.infrastructure.ingest.discovery import (
     discover_ingestors,
     validate_all_ingestor_configs,
@@ -37,3 +40,20 @@ class IngestProvider(Provider):
             ingestors[name] = ingestor_cls(validated_config)
 
         return IngestorRegistry(ingestors)
+
+    @provide(scope=Scope.UOW)
+    def get_ingest_service(
+        self,
+        ingestors: IngestorRegistry,
+        outbox: Outbox,
+        config: Config,
+    ) -> IngestService:
+        """Provide IngestService for UOW scope.
+
+        IngestService is UOW-scoped because it needs fresh Outbox per unit of work.
+        """
+        return IngestService(
+            ingestors=ingestors,
+            outbox=outbox,
+            node_domain=Domain(config.server.domain),
+        )

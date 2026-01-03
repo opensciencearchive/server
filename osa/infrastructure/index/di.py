@@ -1,12 +1,13 @@
 """Dependency injection provider for index backends."""
-from osa.util.di.scope import Scope
 
 from dishka import Provider, provide
 
 from osa.config import Config
 from osa.domain.index.model.registry import IndexRegistry
+from osa.domain.index.service import IndexService
 from osa.infrastructure.index.vector.backend import VectorStorageBackend
 from osa.sdk.index.backend import StorageBackend
+from osa.util.di.scope import Scope
 
 
 class IndexProvider(Provider):
@@ -33,3 +34,12 @@ class IndexProvider(Provider):
             #     )
 
         return IndexRegistry(backends)
+
+    @provide(scope=Scope.UOW)
+    def get_index_service(self, indexes: IndexRegistry) -> IndexService:
+        """Provide IndexService for UOW scope.
+
+        IndexService is UOW-scoped for consistency with other services,
+        though it doesn't require Outbox (no events emitted).
+        """
+        return IndexService(indexes=indexes)

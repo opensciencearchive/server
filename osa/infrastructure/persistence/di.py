@@ -6,6 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from osa.config import Config
 from osa.domain.deposition.port.repository import DepositionRepository
 from osa.domain.record.port.repository import RecordRepository
+from osa.domain.record.service import RecordService
+from osa.domain.shared.model.srn import Domain
+from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.event_repository import EventRepository
 from osa.domain.validation.port.repository import ValidationRunRepository
 from osa.infrastructure.persistence.database import (
@@ -61,3 +64,20 @@ class PersistenceProvider(Provider):
     event_repo = provide(
         SQLAlchemyEventRepository, scope=Scope.UOW, provides=EventRepository
     )
+
+    @provide(scope=Scope.UOW)
+    def get_record_service(
+        self,
+        record_repo: RecordRepository,
+        outbox: Outbox,
+        config: Config,
+    ) -> RecordService:
+        """Provide RecordService for UOW scope.
+
+        RecordService is UOW-scoped because it needs fresh Outbox per unit of work.
+        """
+        return RecordService(
+            record_repo=record_repo,
+            outbox=outbox,
+            node_domain=Domain(config.server.domain),
+        )
