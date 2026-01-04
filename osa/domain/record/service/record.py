@@ -9,7 +9,13 @@ from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.record.model.aggregate import Record
 from osa.domain.record.port.repository import RecordRepository
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.srn import DepositionSRN, Domain, LocalId, RecordSRN, RecordVersion
+from osa.domain.shared.model.srn import (
+    DepositionSRN,
+    Domain,
+    LocalId,
+    RecordSRN,
+    RecordVersion,
+)
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
 

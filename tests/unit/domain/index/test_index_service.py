@@ -1,7 +1,7 @@
 """Unit tests for IndexService."""
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -9,7 +9,6 @@ import pytest
 from osa.domain.index.model.registry import IndexRegistry
 from osa.domain.index.service.index import IndexService
 from osa.domain.shared.model.srn import Domain, LocalId, RecordSRN, RecordVersion
-from osa.sdk.index.backend import StorageBackend
 
 
 class FakeBackend:
@@ -89,10 +88,12 @@ class TestIndexService:
         # Arrange
         failing_backend = FailingBackend()
         working_backend = FakeBackend()
-        registry = IndexRegistry({
-            "failing": failing_backend,
-            "working": working_backend,
-        })
+        registry = IndexRegistry(
+            {
+                "failing": failing_backend,
+                "working": working_backend,
+            }
+        )
 
         service = IndexService(indexes=registry)
 

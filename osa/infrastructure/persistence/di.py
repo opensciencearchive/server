@@ -38,9 +38,7 @@ class PersistenceProvider(Provider):
         return create_db_engine(config)
 
     @provide(scope=Scope.APP)
-    def get_session_factory(
-        self, engine: AsyncEngine
-    ) -> async_sessionmaker[AsyncSession]:
+    def get_session_factory(self, engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
         return create_session_factory(engine)
 
     # UOW-scoped session (one per unit of work)
@@ -52,18 +50,14 @@ class PersistenceProvider(Provider):
             yield session
 
     # UOW-scoped repositories
-    dep_repo = provide(
-        PostgresDepositionRepository, scope=Scope.UOW, provides=DepositionRepository
-    )
-    record_repo = provide(
-        PostgresRecordRepository, scope=Scope.UOW, provides=RecordRepository
-    )
+    dep_repo = provide(PostgresDepositionRepository, scope=Scope.UOW, provides=DepositionRepository)
+    record_repo = provide(PostgresRecordRepository, scope=Scope.UOW, provides=RecordRepository)
     validation_run_repo = provide(
-        PostgresValidationRunRepository, scope=Scope.UOW, provides=ValidationRunRepository
+        PostgresValidationRunRepository,
+        scope=Scope.UOW,
+        provides=ValidationRunRepository,
     )
-    event_repo = provide(
-        SQLAlchemyEventRepository, scope=Scope.UOW, provides=EventRepository
-    )
+    event_repo = provide(SQLAlchemyEventRepository, scope=Scope.UOW, provides=EventRepository)
 
     @provide(scope=Scope.UOW)
     def get_record_service(

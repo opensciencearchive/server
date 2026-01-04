@@ -62,9 +62,7 @@ class IngestService(Service):
             raise ValueError(f"Unknown ingestor: {ingestor_name}")
 
         started_at = datetime.now(UTC)
-        logger.info(
-            f"Starting ingest from {ingestor_name}, since={since}, limit={limit}"
-        )
+        logger.info(f"Starting ingest from {ingestor_name}, since={since}, limit={limit}")
 
         count = 0
         async for record in ingestor.pull(since=since, limit=limit):

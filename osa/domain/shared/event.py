@@ -3,7 +3,16 @@
 from abc import ABC, ABCMeta, abstractmethod
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, ClassVar, Generic, NewType, TypeVar, dataclass_transform, get_args, get_origin
+from typing import (
+    Any,
+    ClassVar,
+    Generic,
+    NewType,
+    TypeVar,
+    dataclass_transform,
+    get_args,
+    get_origin,
+)
 from uuid import UUID
 
 from pydantic import Field

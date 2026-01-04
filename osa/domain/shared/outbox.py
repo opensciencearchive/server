@@ -1,6 +1,5 @@
 """Outbox - domain service for reliable event delivery."""
 
-from datetime import UTC, datetime
 from typing import TypeVar
 
 from osa.domain.shared.event import Event, EventId

@@ -172,9 +172,7 @@ class DaemonManager:
         if process.poll() is not None:
             # Process exited immediately - error
             self._paths.remove_server_state()
-            raise RuntimeError(
-                f"Server failed to start. Check logs at {self._paths.server_log}"
-            )
+            raise RuntimeError(f"Server failed to start. Check logs at {self._paths.server_log}")
 
         return ServerInfo(
             status=ServerStatus.RUNNING,

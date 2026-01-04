@@ -25,9 +25,10 @@ def show(ref: str, /) -> None:
     if cache is None:
         console.error(
             "No search results cached",
-            hint="Run a search first: osa search vector \"your query\"",
+            hint='Run a search first: osa search vector "your query"',
         )
         sys.exit(1)
+        return  # Unreachable, but helps type checker
 
     # Try to interpret ref as a number first
     result: SearchHit | None = None
@@ -51,9 +52,7 @@ def show(ref: str, /) -> None:
             console.error(f"Ambiguous short ID '{ref}'")
             console.print("[dim]Matches:[/dim]")
             for m in matches:
-                console.print(
-                    f"  [cyan]{m.short_id}[/cyan]  {m.metadata.title[:50]}"
-                )
+                console.print(f"  [cyan]{m.short_id}[/cyan]  {m.metadata.title[:50]}")
             sys.exit(1)
         else:
             console.error(

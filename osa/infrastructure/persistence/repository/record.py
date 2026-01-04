@@ -32,9 +32,7 @@ class PostgresRecordRepository(RecordRepository):
 
     async def find_by_deposition(self, deposition_srn: DepositionSRN) -> Record | None:
         """Find the record created from a deposition."""
-        stmt = select(records_table).where(
-            records_table.c.deposition_srn == str(deposition_srn)
-        )
+        stmt = select(records_table).where(records_table.c.deposition_srn == str(deposition_srn))
         result = await self.session.execute(stmt)
         row = result.mappings().first()
         return row_to_record(dict(row)) if row else None

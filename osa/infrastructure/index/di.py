@@ -24,9 +24,7 @@ class IndexProvider(Provider):
 
         for idx_config in config.indexes:
             if idx_config.backend == "vector":
-                backends[idx_config.name] = VectorStorageBackend(
-                    idx_config.name, idx_config.config
-                )
+                backends[idx_config.name] = VectorStorageBackend(idx_config.name, idx_config.config)
             # Add more backend types here as they're implemented
             # elif idx_config.backend == "keyword":
             #     backends[idx_config.name] = KeywordStorageBackend(

@@ -34,9 +34,7 @@ class TestGEOEntrezIngestorIntegration:
         result = await geo_ingestor.health()
         assert result is True
 
-    async def test_get_one_returns_upstream_record(
-        self, geo_ingestor: GEOEntrezIngestor
-    ) -> None:
+    async def test_get_one_returns_upstream_record(self, geo_ingestor: GEOEntrezIngestor) -> None:
         """Fetching a known GSE should return a valid UpstreamRecord."""
         # GSE1 is one of the earliest GEO series, stable for testing
         record = await geo_ingestor.get_one("GSE1")
@@ -54,16 +52,12 @@ class TestGEOEntrezIngestorIntegration:
         assert "title" in record.metadata
         assert record.metadata["title"] is not None
 
-    async def test_get_one_nonexistent_returns_none(
-        self, geo_ingestor: GEOEntrezIngestor
-    ) -> None:
+    async def test_get_one_nonexistent_returns_none(self, geo_ingestor: GEOEntrezIngestor) -> None:
         """Fetching a nonexistent GSE should return None."""
         record = await geo_ingestor.get_one("GSE999999999999")
         assert record is None
 
-    async def test_pull_yields_upstream_records(
-        self, geo_ingestor: GEOEntrezIngestor
-    ) -> None:
+    async def test_pull_yields_upstream_records(self, geo_ingestor: GEOEntrezIngestor) -> None:
         """Pulling records should yield valid UpstreamRecords."""
         records: list[UpstreamRecord] = []
 

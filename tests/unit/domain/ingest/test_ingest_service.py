@@ -21,9 +21,7 @@ class FakeIngestor:
     def __init__(self, records: list[UpstreamRecord]):
         self._records = records
 
-    async def pull(
-        self, since: datetime | None = None, limit: int | None = None
-    ):
+    async def pull(self, since: datetime | None = None, limit: int | None = None):
         for record in self._records[: limit if limit else len(self._records)]:
             yield record
 
@@ -170,14 +168,16 @@ class TestIngestService:
         )
 
         # Act
-        result = await service.run_ingest(
+        await service.run_ingest(
             ingestor_name="fake",
             since=None,
             limit=None,
         )
 
         # Assert - last call should be the completion event
-        from osa.domain.ingest.event.ingestion_run_completed import IngestionRunCompleted
+        from osa.domain.ingest.event.ingestion_run_completed import (
+            IngestionRunCompleted,
+        )
 
         last_call = mock_outbox.append.call_args_list[-1]
         event = last_call[0][0]

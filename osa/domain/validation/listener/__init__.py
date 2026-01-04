@@ -2,4 +2,4 @@
 
 from osa.domain.validation.listener.validation_listener import ValidateNewDeposition
 
-__all__ = ["ValidationListener"]
+__all__ = ["ValidateNewDeposition"]

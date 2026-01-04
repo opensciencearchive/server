@@ -41,6 +41,7 @@ def _resolve_config(paths: OSAPaths, config: Path | None = None) -> Path:
             )
             sys.exit(1)
 
+    assert config is not None  # Guaranteed by logic above
     if not config.exists():
         console.error(f"Config file not found: {config}")
         sys.exit(1)

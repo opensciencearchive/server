@@ -77,9 +77,7 @@ class IngestConfig(BaseModel):
 class YamlConfigSettingsSource(PydanticBaseSettingsSource):
     """Load settings from YAML file specified by OSA_CONFIG_FILE env var."""
 
-    def get_field_value(
-        self, field: Any, field_name: str
-    ) -> tuple[Any, str, bool]:
+    def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:
         """Get the value for a field from the YAML config."""
         yaml_data = self._load_yaml_config()
         field_value = yaml_data.get(field_name)

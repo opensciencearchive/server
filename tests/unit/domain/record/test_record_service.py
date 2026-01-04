@@ -1,16 +1,13 @@
 """Unit tests for RecordService."""
 
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
-from osa.domain.curation.event.deposition_approved import DepositionApproved
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.record.port.repository import RecordRepository
 from osa.domain.record.service.record import RecordService
-from osa.domain.shared.event import EventId
 from osa.domain.shared.model.srn import DepositionSRN, Domain, LocalId
 from osa.domain.shared.outbox import Outbox
 

@@ -82,5 +82,9 @@ events_table = Table(
     Column("delivery_error", Text, nullable=True),
 )
 
-Index("idx_events_type_created", events_table.c.event_type, events_table.c.created_at.desc())
+Index(
+    "idx_events_type_created",
+    events_table.c.event_type,
+    events_table.c.created_at.desc(),
+)
 Index("idx_events_delivery_status", events_table.c.delivery_status)
