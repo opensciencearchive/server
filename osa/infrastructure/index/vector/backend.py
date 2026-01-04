@@ -22,6 +22,10 @@ class VectorStorageBackend:
         self._config = config
         self._model = SentenceTransformer(config.embedding.model.value)
 
+        # persist_dir must be set by DI (derived from OSAPaths if not explicit)
+        if config.persist_dir is None:
+            raise ValueError("VectorBackendConfig.persist_dir must be set")
+
         # Expand ~ to home directory and ensure persist directory exists
         persist_dir = config.persist_dir.expanduser()
         persist_dir.mkdir(parents=True, exist_ok=True)

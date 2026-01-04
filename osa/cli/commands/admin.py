@@ -7,7 +7,7 @@ from pathlib import Path
 import cyclopts
 
 from osa.cli.console import get_console
-from osa.cli.util import DaemonManager, OSAPaths, ServerStatus
+from osa.cli.util import DaemonManager, OSAPaths, ServerStatus, read_server_state
 
 app = cyclopts.App(name="admin", help="Administrative commands")
 
@@ -147,7 +147,7 @@ def info() -> None:
 
     # Server status
     console.print()
-    state = paths.read_server_state()
+    state = read_server_state(paths.server_state_file)
     if state:
         from osa.cli.console import relative_time
 

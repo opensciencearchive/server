@@ -31,7 +31,11 @@ class EmbeddingConfig(BaseModel):
 
 
 class VectorBackendConfig(BackendConfig):
-    """ChromaDB + sentence-transformers specific configuration."""
+    """ChromaDB + sentence-transformers specific configuration.
 
-    persist_dir: Path
+    If persist_dir is not specified (None), it will be derived from OSAPaths.vectors_dir
+    in the DI provider, respecting OSA_DATA_DIR for container deployments.
+    """
+
+    persist_dir: Path | None = None  # None = derive from OSAPaths
     embedding: EmbeddingConfig = EmbeddingConfig()
