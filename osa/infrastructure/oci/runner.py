@@ -96,9 +96,7 @@ class DockerValidatorRunner(ValidatorRunner):
 
             try:
                 return await asyncio.wait_for(
-                    self._run_container(
-                        self._docker, image_ref, osap_in, osap_out, resources
-                    ),
+                    self._run_container(self._docker, image_ref, osap_in, osap_out, resources),
                     timeout=timeout,
                 )
             except asyncio.TimeoutError:

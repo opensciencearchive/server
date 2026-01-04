@@ -1,5 +1,7 @@
 """Record domain listeners."""
 
-from osa.domain.record.listener.record_creation_listener import ConvertDepositionToRecord
+from osa.domain.record.listener.record_creation_listener import (
+    ConvertDepositionToRecord,
+)
 
-__all__ = ["RecordCreationListener"]
+__all__ = ["ConvertDepositionToRecord"]

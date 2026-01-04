@@ -19,9 +19,9 @@ class PostgresDepositionRepository(DepositionRepository):
 
     async def save(self, deposition: Deposition) -> None:
         dep_dict = deposition_to_dict(deposition)
-        
+
         existing = await self.get(deposition.srn)
-        
+
         if existing:
             stmt = (
                 update(depositions_table)
@@ -30,7 +30,7 @@ class PostgresDepositionRepository(DepositionRepository):
             )
         else:
             stmt = insert(depositions_table).values(**dep_dict)
-            
+
         await self.session.execute(stmt)
         await self.session.flush()
 

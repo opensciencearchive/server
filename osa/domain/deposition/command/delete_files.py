@@ -13,9 +13,7 @@ class DepositionFilesDeleted(Result):
     pass
 
 
-class DeleteDepositionFilesHandler(
-    CommandHandler[DeleteDepositionFiles, DepositionFilesDeleted]
-):
+class DeleteDepositionFilesHandler(CommandHandler[DeleteDepositionFiles, DepositionFilesDeleted]):
     repository: DepositionRepository
     storage: StoragePort
 

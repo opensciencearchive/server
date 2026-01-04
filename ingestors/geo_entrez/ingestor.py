@@ -120,9 +120,7 @@ class GEOEntrezIngestor:
         resp.raise_for_status()
 
         tree = ElementTree.fromstring(resp.text)
-        return [
-            id_elem.text for id_elem in tree.findall(".//Id") if id_elem.text
-        ]
+        return [id_elem.text for id_elem in tree.findall(".//Id") if id_elem.text]
 
     async def _fetch_batch(self, uids: list[str]) -> list[UpstreamRecord]:
         """Fetch metadata for a batch of UIDs via ESummary."""

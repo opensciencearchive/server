@@ -27,14 +27,16 @@ logger = logging.getLogger(__name__)
 
 
 # All event listeners - single source of truth
-LISTENER_TYPES: Subscriptions = Subscriptions([
-    TriggerInitialIngestion,
-    IngestFromUpstream,
-    ValidateNewDeposition,
-    AutoApproveCurationTool,
-    ConvertDepositionToRecord,
-    ProjectNewRecordToIndexes,
-])
+LISTENER_TYPES: Subscriptions = Subscriptions(
+    [
+        TriggerInitialIngestion,
+        IngestFromUpstream,
+        ValidateNewDeposition,
+        AutoApproveCurationTool,
+        ConvertDepositionToRecord,
+        ProjectNewRecordToIndexes,
+    ]
+)
 
 
 class EventProvider(Provider):

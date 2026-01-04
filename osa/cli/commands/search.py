@@ -21,9 +21,7 @@ def extract_short_id(srn: str) -> str:
 
     SRN format: urn:osa:{domain}:{type}:{uuid}[@{version}]
     """
-    match = re.search(
-        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", srn
-    )
+    match = re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", srn)
     if match:
         return match.group(0)[:6]
     return srn[:6]

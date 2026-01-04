@@ -24,7 +24,9 @@ class Domain(RootModel[str]):
     Examples: osap.org, archive.university.edu, localhost
     """
 
-    _re: ClassVar[re.Pattern] = re.compile(r"^[a-z0-9]([a-z0-9\-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]*[a-z0-9])?)*$")
+    _re: ClassVar[re.Pattern] = re.compile(
+        r"^[a-z0-9]([a-z0-9\-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]*[a-z0-9])?)*$"
+    )
 
     @field_validator("root")
     @classmethod
@@ -173,9 +175,7 @@ class SRN(ValueObject):
             raise ValueError("not an OSA SRN")
         parts = srn.split(":")
         if len(parts) != 5:
-            raise ValueError(
-                "malformed SRN (expected urn:osa:{domain}:{type}:{id}[...])"
-            )
+            raise ValueError("malformed SRN (expected urn:osa:{domain}:{type}:{id}[...])")
         _, _, domain, typ, rest = (
             parts[0],
             parts[1],

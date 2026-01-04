@@ -28,9 +28,9 @@ class LocalStorageAdapter(StoragePort):
         # Helper for UploadFile command
         target_dir = self._get_dep_path(deposition_id)
         target_dir.mkdir(parents=True, exist_ok=True)
-        
+
         target_file = target_dir / filename
-        
+
         # Assuming stream is file-like open in binary mode
         # If stream is from httpx/spooledtempfile
         with open(target_file, "wb") as f:

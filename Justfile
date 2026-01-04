@@ -75,6 +75,9 @@ up: db-up
 down: db-down
 
 # Testing commands
+test kind="unit":
+    @TEST=1 uv run pytest "tests/{{kind}}" -v --tb=short
+
 test-s kind="unit":
     @TEST=1 uv run pytest -s -o log_cli=True -o log_cli_level=DEBUG "tests/{{kind}}"
 
@@ -96,7 +99,7 @@ fix thing="osa":
 
 lint thing="osa":
     uv run ruff check {{thing}}
-    uv run pyright {{thing}}
+    uv run ty check {{thing}}
 
 # Docker commands (standalone)
 docker-build:

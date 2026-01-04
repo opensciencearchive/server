@@ -31,9 +31,7 @@ def deposition_to_dict(dep: Deposition) -> dict[str, Any]:
     return {
         "srn": str(dep.srn),
         "status": dep.status,
-        "metadata": dep.metadata
-        if isinstance(dep.metadata, dict)
-        else dep.metadata.model_dump(),
+        "metadata": dep.metadata if isinstance(dep.metadata, dict) else dep.metadata.model_dump(),
         "files": [f.model_dump(mode="json") for f in dep.files],
         "provenance": dep.provenance,
         "record_id": str(dep.record_srn) if dep.record_srn else None,

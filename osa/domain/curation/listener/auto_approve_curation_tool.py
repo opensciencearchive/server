@@ -21,17 +21,13 @@ class AutoApproveCurationTool(EventListener[ValidationCompleted]):
         """Emit DepositionApproved if validation passed and no curation required."""
         # Only auto-approve if validation passed
         if event.status != RunStatus.COMPLETED:
-            logger.warning(
-                f"Validation failed for {event.deposition_srn}, skipping auto-approve"
-            )
+            logger.warning(f"Validation failed for {event.deposition_srn}, skipping auto-approve")
             return
 
         # TODO: Load curation config to check if manual curation is required
         curation_required = False  # False for v1
         if curation_required:
-            logger.info(
-                f"Curation required for {event.deposition_srn}, not auto-approving"
-            )
+            logger.info(f"Curation required for {event.deposition_srn}, not auto-approving")
             return
 
         logger.debug(f"Auto-approving deposition: {event.deposition_srn}")

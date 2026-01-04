@@ -2,4 +2,4 @@
 
 from osa.domain.index.listener.index_projector import ProjectNewRecordToIndexes
 
-__all__ = ["IndexProjector"]
+__all__ = ["ProjectNewRecordToIndexes"]

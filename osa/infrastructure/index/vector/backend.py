@@ -40,21 +40,17 @@ class VectorStorageBackend:
         """Store a record in the index."""
         text = self._to_text(record)
 
-        # Run CPU-bound embedding in thread pool
-        embedding = await asyncio.to_thread(self._model.encode, text)
+        # Run CPU-bound embedding in thread pool and convert to list
+        embedding = await asyncio.to_thread(lambda: self._model.encode(text).tolist())
 
         # Filter metadata to ChromaDB-compatible types
-        safe_meta = {
-            k: v
-            for k, v in record.items()
-            if isinstance(v, (str, int, float, bool))
-        }
+        safe_meta = {k: v for k, v in record.items() if isinstance(v, (str, int, float, bool))}
 
         # Run ChromaDB I/O in thread pool
         await asyncio.to_thread(
             self._collection.upsert,
             ids=[srn],
-            embeddings=[embedding.tolist()],
+            embeddings=[embedding],
             metadatas=[safe_meta],
             documents=[text],
         )
@@ -65,13 +61,13 @@ class VectorStorageBackend:
 
     async def query(self, q: str, limit: int = 20) -> QueryResult:
         """Execute a query and return structured results."""
-        # Run CPU-bound embedding in thread pool
-        embedding = await asyncio.to_thread(self._model.encode, q)
+        # Run CPU-bound embedding in thread pool and convert to list
+        embedding = await asyncio.to_thread(lambda: self._model.encode(q).tolist())
 
         # Run ChromaDB query in thread pool
         results = await asyncio.to_thread(
             self._collection.query,
-            query_embeddings=[embedding.tolist()],
+            query_embeddings=[embedding],
             n_results=limit,
             include=["metadatas", "distances"],
         )
@@ -110,6 +106,4 @@ class VectorStorageBackend:
         """Convert record to embeddable text."""
         if self._config.embedding.template:
             return self._config.embedding.template.format(**record)
-        return " ".join(
-            str(record.get(f, "")) for f in self._config.embedding.fields
-        )
+        return " ".join(str(record.get(f, "")) for f in self._config.embedding.fields)

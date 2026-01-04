@@ -31,9 +31,7 @@ def row_to_record(row: dict[str, Any]) -> Record:
 
 def record_to_dict(record: Record) -> dict[str, Any]:
     """Convert Record aggregate to database dict."""
-    indexes_dict = {
-        key: ref.model_dump(mode="json") for key, ref in record.indexes.items()
-    }
+    indexes_dict = {key: ref.model_dump(mode="json") for key, ref in record.indexes.items()}
 
     return {
         "srn": str(record.srn),

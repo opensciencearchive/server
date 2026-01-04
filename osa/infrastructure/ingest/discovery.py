@@ -64,9 +64,7 @@ def _validate_ingestor_class(cls: Any, name: str) -> None:
     if not hasattr(cls, "config_class"):
         raise TypeError(f"Ingestor {name} missing 'config_class' class attribute")
     if not issubclass(cls.config_class, BaseModel):
-        raise TypeError(
-            f"Ingestor {name} config_class must be a Pydantic BaseModel"
-        )
+        raise TypeError(f"Ingestor {name} config_class must be a Pydantic BaseModel")
 
 
 def validate_ingestor_config(
@@ -154,15 +152,12 @@ def validate_all_ingestor_configs(
         # Check for duplicates
         if name in validated:
             raise ValueError(
-                f"Duplicate ingestor '{name}'. "
-                "Each ingestor type can only be configured once."
+                f"Duplicate ingestor '{name}'. Each ingestor type can only be configured once."
             )
 
         if name not in available_ingestors:
             available = ", ".join(sorted(available_ingestors.keys())) or "(none)"
-            raise ValueError(
-                f"Unknown ingestor type '{name}'. Available: {available}"
-            )
+            raise ValueError(f"Unknown ingestor type '{name}'. Available: {available}")
 
         ingestor_cls = available_ingestors[name]
 

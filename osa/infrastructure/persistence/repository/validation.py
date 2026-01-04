@@ -18,9 +18,7 @@ class PostgresValidationRunRepository(ValidationRunRepository):
         self._session = session
 
     async def get(self, srn: ValidationRunSRN) -> ValidationRun | None:
-        stmt = select(validation_runs_table).where(
-            validation_runs_table.c.srn == str(srn)
-        )
+        stmt = select(validation_runs_table).where(validation_runs_table.c.srn == str(srn))
         result = await self._session.execute(stmt)
         row = result.mappings().first()
         return row_to_validation_run(dict(row)) if row else None

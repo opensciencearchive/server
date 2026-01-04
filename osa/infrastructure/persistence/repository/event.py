@@ -63,11 +63,7 @@ class SQLAlchemyEventRepository(EventRepository):
         if error is not None:
             values["delivery_error"] = error
 
-        stmt = (
-            update(events_table)
-            .where(events_table.c.id == str(event_id))
-            .values(**values)
-        )
+        stmt = update(events_table).where(events_table.c.id == str(event_id)).values(**values)
         await self._session.execute(stmt)
 
     async def find_pending(self, limit: int = 100) -> list[Event]:
@@ -129,9 +125,7 @@ class SQLAlchemyEventRepository(EventRepository):
 
         # Cursor: get events after the given ID
         if after is not None:
-            cursor_stmt = select(events_table.c.created_at).where(
-                events_table.c.id == str(after)
-            )
+            cursor_stmt = select(events_table.c.created_at).where(events_table.c.id == str(after))
             cursor_result = await self._session.execute(cursor_stmt)
             cursor_row = cursor_result.first()
             if cursor_row:
