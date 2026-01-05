@@ -6,7 +6,7 @@ No internal DI needed since all business logic lives in the server.
 
 import cyclopts
 
-from osa.cli.commands import admin, config, events, local, search, show, stats
+from osa.cli.commands import admin, events, local, search, show, stats
 
 app = cyclopts.App(
     name="osa",
@@ -14,7 +14,6 @@ app = cyclopts.App(
 )
 
 app.command(local.app, name="local")
-app.command(config.app, name="config")
 app.command(search.app, name="search")
 app.command(show.app, name="show")
 app.command(stats.app, name="stats")
