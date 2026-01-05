@@ -1,4 +1,4 @@
-"""Server start/stop commands."""
+"""Local development server commands (start/stop/logs/status)."""
 
 import sys
 import time
@@ -9,44 +9,30 @@ import cyclopts
 from osa.cli.console import get_console, relative_time
 from osa.cli.util import ConfigError, DaemonManager, OSAPaths, ServerStatus
 
-app = cyclopts.App(name="server", help="Server management commands")
+app = cyclopts.App(name="local", help="Local development server")
 
 
 # Local config override (for development)
 LOCAL_CONFIG = Path("osa.yaml")
 
 
-def _resolve_config(paths: OSAPaths, config: Path | None = None) -> Path:
-    """Resolve config file path.
+def _resolve_config(paths: OSAPaths) -> Path | None:
+    """Resolve config file path, returning None if no config exists.
 
     Resolution order:
-    1. Explicit config argument
-    2. ./osa.yaml (local development override)
-    3. ~/.config/osa/config.yaml (standard location)
+    1. ./osa.yaml (local development override)
+    2. $OSA_DATA_DIR/config/config.yaml (unified mode)
+    3. ~/.config/osa/config.yaml (XDG standard location)
 
-    Raises:
-        SystemExit: If no config found or config doesn't exist.
+    Returns:
+        Path to config file, or None if no config found (server will use defaults).
     """
-    console = get_console()
-
-    if config is None:
-        if LOCAL_CONFIG.exists():
-            config = LOCAL_CONFIG
-        elif paths.config_file.exists():
-            config = paths.config_file
-        else:
-            console.error(
-                "No configuration found",
-                hint="Run 'osa init' to set up OSA",
-            )
-            sys.exit(1)
-
-    assert config is not None  # Guaranteed by logic above
-    if not config.exists():
-        console.error(f"Config file not found: {config}")
-        sys.exit(1)
-
-    return config
+    if LOCAL_CONFIG.exists():
+        return LOCAL_CONFIG
+    elif paths.config_file.exists():
+        return paths.config_file
+    else:
+        return None
 
 
 @app.command
@@ -59,28 +45,33 @@ def start(
     Args:
         host: Host to bind to.
         port: Port to listen on.
-        config: Path to config file. Defaults to ~/.config/osa/config.yaml,
-                or ./osa.yaml if present (for local development).
     """
     console = get_console()
     paths = OSAPaths()
-    daemon = DaemonManager(paths)
 
+    # Auto-create directories (no init required)
+    paths.ensure_directories()
+
+    daemon = DaemonManager(paths)
     config = _resolve_config(paths)
 
     try:
-        config_path = str(config.resolve())
+        config_path = str(config.resolve()) if config else None
         info = daemon.start(host=host, port=port, config_file=config_path)
         console.success(f"Server started on http://{host}:{port}")
         console.print(f"  [dim]PID:[/dim] {info.pid}")
-        console.print(f"  [dim]Config:[/dim] {config}")
+        if config:
+            console.print(f"  [dim]Config:[/dim] {config}")
+        else:
+            console.print("  [dim]Config:[/dim] (using defaults)")
         console.print(f"  [dim]Logs:[/dim] {daemon.paths.server_log}")
     except ConfigError as e:
         console.error(e.message)
         for detail in e.details:
             console.print(f"  [dim]•[/dim] {detail}")
         console.print()
-        console.info(f"Config file: {config}")
+        if config:
+            console.info(f"Config file: {config}")
         sys.exit(1)
     except RuntimeError as e:
         console.error(str(e))
@@ -102,15 +93,8 @@ def stop() -> None:
 
 
 @app.command
-def restart(
-    config: Path | None = None,
-) -> None:
-    """Restart the OSA server (stop + start).
-
-    Args:
-        config: Path to config file. If not specified, uses the same resolution
-                as 'start' (./osa.yaml or ~/.config/osa/config.yaml).
-    """
+def restart() -> None:
+    """Restart the OSA server (stop + start)."""
     console = get_console()
     paths = OSAPaths()
     daemon = DaemonManager(paths)
@@ -154,7 +138,7 @@ def status() -> None:
         console.print("[dim]Server is not running[/dim]")
     elif info.status == ServerStatus.STALE:
         console.warning(f"Stale server state (PID {info.pid} is dead)")
-        console.info("Run 'osa server stop' to clean up, or 'osa server start' to start fresh")
+        console.info("Run 'osa local stop' to clean up, or 'osa local start' to start fresh")
 
 
 @app.command

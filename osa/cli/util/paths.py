@@ -20,6 +20,7 @@ Supports two modes:
    ~/.cache/osa/       → CLI cache
 """
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,19 +38,21 @@ class ServerState:
 class OSAPaths:
     """Computes OSA paths for unified or XDG mode.
 
+    Reads OSA_DATA_DIR environment variable to determine mode:
+    - If set: unified mode (all paths under OSA_DATA_DIR)
+    - If not set: XDG mode (standard ~/.config, ~/.local paths)
+
     This class is purely for path computation - no file I/O operations.
     Use server_state.py and search_cache.py for reading/writing files.
     """
 
-    def __init__(self, *, unified_data_dir: Path | None = None) -> None:
-        """Initialize paths.
+    def __init__(self) -> None:
+        """Initialize paths based on OSA_DATA_DIR environment variable."""
+        env_data_dir = os.environ.get("OSA_DATA_DIR")
 
-        Args:
-            unified_data_dir: If set, derive all paths from this directory
-                (container mode). If None, use XDG defaults (local mode).
-        """
-        if unified_data_dir is not None:
+        if env_data_dir:
             # Unified mode: all paths under single directory
+            unified_data_dir = Path(env_data_dir)
             self._config_dir = unified_data_dir / "config"
             self._data_dir = unified_data_dir / "data"
             self._state_dir = unified_data_dir / "state"

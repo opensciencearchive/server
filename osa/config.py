@@ -15,27 +15,6 @@ from osa.infrastructure.index.vector.config import VectorBackendConfig
 
 
 # =============================================================================
-# Paths Configuration
-# =============================================================================
-
-
-class PathsConfig(BaseSettings):
-    """Configuration for OSA data paths.
-
-    When data_dir is set (e.g., OSA_DATA_DIR=/data), all paths are derived
-    from this single directory, enabling simple container deployments with
-    a single volume mount.
-
-    When data_dir is None (default), XDG Base Directory paths are used
-    (~/.config/osa, ~/.local/share/osa, etc.) for local development.
-    """
-
-    data_dir: Path | None = None  # OSA_DATA_DIR - unified data directory for containers
-
-    model_config = {"env_prefix": "OSA_"}
-
-
-# =============================================================================
 # Index Configuration
 # =============================================================================
 
@@ -162,9 +141,6 @@ class LoggingConfig(BaseModel):
 
 
 class Config(BaseSettings):
-    # Use default_factory for PathsConfig (BaseSettings) to ensure env vars are read
-    # at instantiation time, not class definition time (avoids Pydantic footgun)
-    paths: PathsConfig = Field(default_factory=PathsConfig)
     # These are BaseModel, so env_nested_delimiter handles their env vars
     server: Server = Server()
     frontend: Frontend = Frontend()
@@ -182,15 +158,16 @@ class Config(BaseSettings):
 
     @model_validator(mode="after")
     def derive_database_url(self) -> Self:
-        """Derive database URL from paths if not explicitly set.
+        """Derive database URL from OSAPaths if not explicitly set.
 
         When database.url is empty (sentinel value), compute the path from OSAPaths.
+        OSAPaths reads OSA_DATA_DIR directly from environment.
         This allows OSA_DATA_DIR to control the database location while still
         allowing explicit OSA_DATABASE__URL override.
         """
         if not self.database.url:
-            # URL is sentinel (empty), derive from paths
-            osa_paths = OSAPaths(unified_data_dir=self.paths.data_dir)
+            # URL is sentinel (empty), derive from OSAPaths
+            osa_paths = OSAPaths()
             self.database = DatabaseConfig(
                 url=f"sqlite+aiosqlite:///{osa_paths.database_file}",
                 echo=self.database.echo,

@@ -25,28 +25,35 @@ class TestVectorBackendConfig:
 class TestVectorPersistDirDerivation:
     """Tests for vector persist_dir derivation from OSAPaths."""
 
-    def test_persist_dir_derived_from_osa_data_dir(self) -> None:
-        """T034: Vector persist_dir should derive from OSA_DATA_DIR when set."""
-        paths = OSAPaths(unified_data_dir=Path("/data"))
+    def test_persist_dir_derived_from_osa_data_dir(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Vector persist_dir should derive from OSA_DATA_DIR when set."""
+        monkeypatch.setenv("OSA_DATA_DIR", "/data")
+
+        paths = OSAPaths()
 
         # Verify paths derives vectors_dir correctly
         assert paths.vectors_dir == Path("/data/data/vectors")
 
     def test_persist_dir_derived_from_xdg_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """T035: Vector persist_dir should derive from XDG defaults when OSA_DATA_DIR not set."""
+        """Vector persist_dir should derive from XDG defaults when OSA_DATA_DIR not set."""
+        monkeypatch.delenv("OSA_DATA_DIR", raising=False)
         # Patch Path.home() to use a test path
         test_home = Path("/test/home")
         monkeypatch.setattr(Path, "home", lambda: test_home)
 
-        paths = OSAPaths(unified_data_dir=None)
+        paths = OSAPaths()
 
         # Should derive vectors path from XDG data directory
         expected_path = test_home / ".local" / "share" / "osa" / "vectors"
         assert paths.vectors_dir == expected_path
 
-    def test_persist_dir_with_tmp_path(self, tmp_path: Path) -> None:
+    def test_persist_dir_with_tmp_path(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """Vector persist_dir should work with actual tmp directories."""
-        paths = OSAPaths(unified_data_dir=tmp_path)
+        monkeypatch.setenv("OSA_DATA_DIR", str(tmp_path))
+
+        paths = OSAPaths()
         paths.ensure_directories()
 
         # Verify the vectors directory exists

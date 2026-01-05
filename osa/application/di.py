@@ -15,8 +15,8 @@ from osa.util.di.scope import Scope
 def create_container() -> AsyncContainer:
     config = Config()
 
-    # Create OSAPaths from config, supporting both unified and XDG modes
-    paths = OSAPaths(unified_data_dir=config.paths.data_dir)
+    # OSAPaths reads OSA_DATA_DIR from environment automatically
+    paths = OSAPaths()
 
     return make_async_container(
         PersistenceProvider(),
