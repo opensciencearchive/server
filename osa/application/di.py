@@ -1,5 +1,6 @@
 from dishka import AsyncContainer, make_async_container
 
+from osa.cli.util.paths import OSAPaths
 from osa.config import Config
 from osa.domain.deposition.util.di import DepositionProvider
 from osa.domain.validation.util.di import ValidationProvider
@@ -14,6 +15,9 @@ from osa.util.di.scope import Scope
 def create_container() -> AsyncContainer:
     config = Config()
 
+    # OSAPaths reads OSA_DATA_DIR from environment automatically
+    paths = OSAPaths()
+
     return make_async_container(
         PersistenceProvider(),
         OciProvider(),
@@ -22,6 +26,6 @@ def create_container() -> AsyncContainer:
         EventProvider(),
         DepositionProvider(),
         ValidationProvider(),
-        context={Config: config},
+        context={Config: config, OSAPaths: paths},
         scopes=Scope,  # type: ignore[arg-type]  # Custom scope class
     )

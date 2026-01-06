@@ -6,7 +6,7 @@ import cyclopts
 
 from osa.cli.console import get_console
 from osa.cli.models import SearchHit
-from osa.cli.util import OSAPaths
+from osa.cli.util import OSAPaths, read_search_cache
 
 app = cyclopts.App(name="show", help="Show record details from last search")
 
@@ -20,7 +20,7 @@ def show(ref: str, /) -> None:
     """
     console = get_console()
     paths = OSAPaths()
-    cache = paths.read_search_cache()
+    cache = read_search_cache(paths.search_cache_file)
 
     if cache is None:
         console.error(

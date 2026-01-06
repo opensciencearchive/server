@@ -11,6 +11,11 @@ from enum import Enum
 from pydantic import ValidationError
 
 from osa.cli.util.paths import OSAPaths
+from osa.cli.util.server_state import (
+    read_server_state,
+    remove_server_state,
+    write_server_state,
+)
 
 
 class ServerStatus(Enum):
@@ -54,7 +59,7 @@ class DaemonManager:
 
     def status(self) -> ServerInfo:
         """Get server status."""
-        state = self._paths.read_server_state()
+        state = read_server_state(self._paths.server_state_file)
 
         if state is None:
             return ServerInfo(status=ServerStatus.STOPPED)
@@ -105,7 +110,7 @@ class DaemonManager:
 
         if current.status == ServerStatus.STALE:
             # Clean up stale state file
-            self._paths.remove_server_state()
+            remove_server_state(self._paths.server_state_file)
 
         self._paths.ensure_directories()
 
@@ -165,13 +170,13 @@ class DaemonManager:
         )
 
         # Write server state
-        state = self._paths.write_server_state(process.pid, host, port)
+        state = write_server_state(self._paths.server_state_file, process.pid, host, port)
 
         # Wait briefly and verify it started
         time.sleep(0.5)
         if process.poll() is not None:
             # Process exited immediately - error
-            self._paths.remove_server_state()
+            remove_server_state(self._paths.server_state_file)
             raise RuntimeError(f"Server failed to start. Check logs at {self._paths.server_log}")
 
         return ServerInfo(
@@ -201,7 +206,7 @@ class DaemonManager:
 
         if current.status == ServerStatus.STALE:
             # Just clean up the stale state file
-            self._paths.remove_server_state()
+            remove_server_state(self._paths.server_state_file)
             return ServerInfo(status=ServerStatus.STOPPED)
 
         pid = current.pid
@@ -212,14 +217,14 @@ class DaemonManager:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
             # Process already dead
-            self._paths.remove_server_state()
+            remove_server_state(self._paths.server_state_file)
             return ServerInfo(status=ServerStatus.STOPPED)
 
         # Wait for process to exit
         start_time = time.time()
         while time.time() - start_time < timeout:
             if not self._is_process_running(pid):
-                self._paths.remove_server_state()
+                remove_server_state(self._paths.server_state_file)
                 return ServerInfo(status=ServerStatus.STOPPED)
             time.sleep(0.1)
 
@@ -230,7 +235,7 @@ class DaemonManager:
         except ProcessLookupError:
             pass
 
-        self._paths.remove_server_state()
+        remove_server_state(self._paths.server_state_file)
         return ServerInfo(status=ServerStatus.STOPPED)
 
     def _is_process_running(self, pid: int) -> bool:

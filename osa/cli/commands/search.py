@@ -11,7 +11,7 @@ import httpx
 
 from osa.cli.console import get_console
 from osa.cli.models import RecordMetadata, SearchHit
-from osa.cli.util import OSAPaths
+from osa.cli.util import OSAPaths, write_search_cache
 
 app = cyclopts.App(name="search", help="Search commands")
 
@@ -97,7 +97,7 @@ def search(
         # Save to cache for `osa show <number>` lookup
         if hits:
             paths = OSAPaths()
-            paths.write_search_cache(index=index, query=query, results=hits)
+            write_search_cache(paths.search_cache_file, index=index, query=query, results=hits)
             console.search_hint()
 
     except httpx.ConnectError:

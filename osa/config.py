@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import Annotated, Any, Union
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
+from typing_extensions import Self
 
+from osa.cli.util.paths import OSAPaths
 from osa.infrastructure.index.vector.config import VectorBackendConfig
 
 
@@ -97,24 +99,37 @@ class YamlConfigSettingsSource(PydanticBaseSettingsSource):
         return {}
 
 
-class Frontend(BaseSettings):
+class Frontend(BaseModel):
+    """Frontend configuration (nested in Config, uses env_nested_delimiter)."""
+
     url: str = "http://localhost:3000"
 
 
-class Server(BaseSettings):
+class Server(BaseModel):
+    """Server configuration (nested in Config, uses env_nested_delimiter)."""
+
     name: str = "Open Science Archive"
     version: str = "0.0.1"  # TODO: better type?
     description: str = "An open platform for depositing scientific data"
     domain: str = "localhost"  # Node domain for SRN construction
 
 
-class DatabaseConfig(BaseSettings):
-    url: str = "sqlite+aiosqlite:///~/.local/share/osa/osa.db"  # XDG data directory
+class DatabaseConfig(BaseModel):
+    """Database configuration (nested in Config, uses env_nested_delimiter).
+
+    The url field uses empty string as sentinel to indicate "derive from OSAPaths".
+    When user doesn't override via OSA_DATABASE__URL, we compute the actual path
+    in Config's model_validator.
+    """
+
+    url: str = ""  # Empty string = derive from paths; explicit value = use as-is
     echo: bool = False
     auto_migrate: bool = True  # Auto-migrate for SQLite, manual for PostgreSQL
 
 
-class LoggingConfig(BaseSettings):
+class LoggingConfig(BaseModel):
+    """Logging configuration (nested in Config, uses env_nested_delimiter)."""
+
     level: str = "DEBUG"  # Root log level (DEBUG for development)
     format: str = "%(asctime)s %(levelname)-8s [%(name)s] %(message)s"
     date_format: str = "%Y-%m-%d %H:%M:%S"
@@ -126,6 +141,7 @@ class LoggingConfig(BaseSettings):
 
 
 class Config(BaseSettings):
+    # These are BaseModel, so env_nested_delimiter handles their env vars
     server: Server = Server()
     frontend: Frontend = Frontend()
     database: DatabaseConfig = DatabaseConfig()
@@ -133,10 +149,31 @@ class Config(BaseSettings):
     indexes: list[IndexConfig] = []  # list of index configs
     ingestors: list[IngestConfig] = []  # list of ingestor configs
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        env_nested_delimiter = "__"  # Allows OSA_DATABASE__URL override
+    model_config = {
+        "env_prefix": "OSA_",
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "env_nested_delimiter": "__",  # Allows OSA_DATABASE__URL override
+    }
+
+    @model_validator(mode="after")
+    def derive_database_url(self) -> Self:
+        """Derive database URL from OSAPaths if not explicitly set.
+
+        When database.url is empty (sentinel value), compute the path from OSAPaths.
+        OSAPaths reads OSA_DATA_DIR directly from environment.
+        This allows OSA_DATA_DIR to control the database location while still
+        allowing explicit OSA_DATABASE__URL override.
+        """
+        if not self.database.url:
+            # URL is sentinel (empty), derive from OSAPaths
+            osa_paths = OSAPaths()
+            self.database = DatabaseConfig(
+                url=f"sqlite+aiosqlite:///{osa_paths.database_file}",
+                echo=self.database.echo,
+                auto_migrate=self.database.auto_migrate,
+            )
+        return self
 
     @classmethod
     def settings_customise_sources(

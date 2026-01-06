@@ -1,30 +1,28 @@
-"""Manages OSA directory structure following XDG Base Directory spec.
+"""Manages OSA directory structure.
 
-Directory layout:
-    ~/.config/osa/
-        config.yaml         # User configuration
+Supports two modes:
 
-    ~/.local/share/osa/
-        osa.db              # SQLite database
-        vectors/            # Vector index (ChromaDB)
+1. **Unified mode** (OSA_DATA_DIR set): All data under a single directory
+   for container deployments with single volume mount.
 
-    ~/.local/state/osa/
-        server.json         # Daemon state (PID, host, port)
-        logs/
-            server.log      # Server logs
+   OSA_DATA_DIR=/data
+     /data/config/     → config files
+     /data/data/       → database, vectors
+     /data/state/      → logs, server state
+     /data/cache/      → CLI cache
 
-    ~/.cache/osa/
-        last_search.json    # CLI search cache
+2. **XDG mode** (default): Follows XDG Base Directory specification
+   for local development.
+
+   ~/.config/osa/      → config files
+   ~/.local/share/osa/ → database, vectors
+   ~/.local/state/osa/ → logs, server state
+   ~/.cache/osa/       → CLI cache
 """
 
-import json
-from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+import os
+from dataclasses import dataclass
 from pathlib import Path
-
-from pydantic import ValidationError
-
-from osa.cli.models import SearchCache, SearchHit
 
 
 @dataclass
@@ -38,32 +36,34 @@ class ServerState:
 
 
 class OSAPaths:
-    """Manages OSA paths following XDG Base Directory specification.
+    """Computes OSA paths for unified or XDG mode.
 
-    Supports overriding individual directories for testing.
+    Reads OSA_DATA_DIR environment variable to determine mode:
+    - If set: unified mode (all paths under OSA_DATA_DIR)
+    - If not set: XDG mode (standard ~/.config, ~/.local paths)
+
+    This class is purely for path computation - no file I/O operations.
+    Use server_state.py and search_cache.py for reading/writing files.
     """
 
-    def __init__(
-        self,
-        *,
-        config_dir: Path | None = None,
-        data_dir: Path | None = None,
-        state_dir: Path | None = None,
-        cache_dir: Path | None = None,
-    ) -> None:
-        """Initialize paths.
+    def __init__(self) -> None:
+        """Initialize paths based on OSA_DATA_DIR environment variable."""
+        env_data_dir = os.environ.get("OSA_DATA_DIR")
 
-        Args:
-            config_dir: Override config directory (default: ~/.config/osa).
-            data_dir: Override data directory (default: ~/.local/share/osa).
-            state_dir: Override state directory (default: ~/.local/state/osa).
-            cache_dir: Override cache directory (default: ~/.cache/osa).
-        """
-        home = Path.home()
-        self._config_dir = config_dir or home / ".config" / "osa"
-        self._data_dir = data_dir or home / ".local" / "share" / "osa"
-        self._state_dir = state_dir or home / ".local" / "state" / "osa"
-        self._cache_dir = cache_dir or home / ".cache" / "osa"
+        if env_data_dir:
+            # Unified mode: all paths under single directory
+            unified_data_dir = Path(env_data_dir)
+            self._config_dir = unified_data_dir / "config"
+            self._data_dir = unified_data_dir / "data"
+            self._state_dir = unified_data_dir / "state"
+            self._cache_dir = unified_data_dir / "cache"
+        else:
+            # XDG mode: standard paths for local development
+            home = Path.home()
+            self._config_dir = home / ".config" / "osa"
+            self._data_dir = home / ".local" / "share" / "osa"
+            self._state_dir = home / ".local" / "state" / "osa"
+            self._cache_dir = home / ".cache" / "osa"
 
     # -------------------------------------------------------------------------
     # Base directories
@@ -156,65 +156,3 @@ class OSAPaths:
     def is_initialized(self) -> bool:
         """Check if OSA has been initialized (config file exists)."""
         return self.config_file.exists()
-
-    # -------------------------------------------------------------------------
-    # Server state
-    # -------------------------------------------------------------------------
-
-    def read_server_state(self) -> ServerState | None:
-        """Read server state from file."""
-        if not self.server_state_file.exists():
-            return None
-        try:
-            data = json.loads(self.server_state_file.read_text())
-            return ServerState(**data)
-        except (json.JSONDecodeError, TypeError, KeyError, OSError):
-            return None
-
-    def write_server_state(self, pid: int, host: str, port: int) -> ServerState:
-        """Write server state to file."""
-        self._state_dir.mkdir(parents=True, exist_ok=True)
-        state = ServerState(
-            pid=pid,
-            host=host,
-            port=port,
-            started_at=datetime.now(UTC).isoformat(),
-        )
-        self.server_state_file.write_text(json.dumps(asdict(state), indent=2))
-        return state
-
-    def remove_server_state(self) -> None:
-        """Remove server state file."""
-        if self.server_state_file.exists():
-            self.server_state_file.unlink()
-
-    # -------------------------------------------------------------------------
-    # Search cache
-    # -------------------------------------------------------------------------
-
-    def read_search_cache(self) -> SearchCache | None:
-        """Read cached search results."""
-        if not self.search_cache_file.exists():
-            return None
-        try:
-            data = json.loads(self.search_cache_file.read_text())
-            return SearchCache.model_validate(data)
-        except (json.JSONDecodeError, ValidationError, OSError):
-            return None
-
-    def write_search_cache(
-        self,
-        index: str,
-        query: str,
-        results: list[SearchHit],
-    ) -> SearchCache:
-        """Write search results to cache for numbered lookup."""
-        self._cache_dir.mkdir(parents=True, exist_ok=True)
-        cache = SearchCache(
-            index=index,
-            query=query,
-            searched_at=datetime.now(UTC).isoformat(),
-            results=results,
-        )
-        self.search_cache_file.write_text(cache.model_dump_json(indent=2))
-        return cache

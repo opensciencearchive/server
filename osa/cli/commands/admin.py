@@ -1,101 +1,13 @@
 """Administrative commands for OSA management."""
 
-import shutil
-import sys
 from pathlib import Path
 
 import cyclopts
 
 from osa.cli.console import get_console
-from osa.cli.util import DaemonManager, OSAPaths, ServerStatus
+from osa.cli.util import OSAPaths, read_server_state
 
 app = cyclopts.App(name="admin", help="Administrative commands")
-
-
-@app.command
-def clean(
-    force: bool = False,
-    keep_config: bool = False,
-    keep_logs: bool = False,
-) -> None:
-    """Wipe OSA data directories to start fresh.
-
-    Stops the server if running, then removes:
-    - ~/.local/share/osa/ (database, vectors)
-    - ~/.local/state/osa/ (server state, logs)
-    - ~/.cache/osa/ (search cache)
-    - ~/.config/osa/ (unless --keep-config)
-
-    Args:
-        force: Skip confirmation prompt.
-        keep_config: Keep the config directory (~/.config/osa).
-        keep_logs: Keep the logs directory.
-    """
-    console = get_console()
-    paths = OSAPaths()
-
-    # Check which directories exist
-    dirs_to_clean: list[tuple[str, Path]] = []
-    if paths.data_dir.exists():
-        dirs_to_clean.append(("Data", paths.data_dir))
-    if paths.state_dir.exists():
-        dirs_to_clean.append(("State", paths.state_dir))
-    if paths.cache_dir.exists():
-        dirs_to_clean.append(("Cache", paths.cache_dir))
-    if paths.config_dir.exists() and not keep_config:
-        dirs_to_clean.append(("Config", paths.config_dir))
-
-    if not dirs_to_clean:
-        console.info("Nothing to clean - no OSA directories exist")
-        return
-
-    # Check if server is running
-    daemon = DaemonManager()
-    status_info = daemon.status()
-
-    if status_info.status == ServerStatus.RUNNING:
-        if not force:
-            console.warning(f"Server is running (PID {status_info.pid})")
-            response = input("Stop server and clean? [y/N] ").strip().lower()
-            if response != "y":
-                console.info("Aborted")
-                sys.exit(1)
-        console.info("Stopping server...")
-        daemon.stop()
-
-    # Confirm before wiping
-    if not force:
-        console.print("[bold]This will delete:[/bold]")
-        for name, path in dirs_to_clean:
-            console.print(f"  [cyan]{path}[/cyan]  [dim]({name.lower()})[/dim]")
-        if keep_logs:
-            console.print(f"  [dim](keeping logs at {paths.logs_dir})[/dim]")
-        if keep_config and paths.config_dir.exists():
-            console.print(f"  [dim](keeping config at {paths.config_dir})[/dim]")
-        console.print()
-        response = input("Are you sure? [y/N] ").strip().lower()
-        if response != "y":
-            console.info("Aborted")
-            sys.exit(1)
-
-    # Perform cleanup
-    for name, path in dirs_to_clean:
-        if name == "State" and keep_logs:
-            # Delete everything in state except logs
-            for item in path.iterdir():
-                if item == paths.logs_dir:
-                    continue
-                if item.is_dir():
-                    shutil.rmtree(item)
-                else:
-                    item.unlink()
-            console.success(f"Cleaned {path} (logs preserved)")
-        else:
-            shutil.rmtree(path)
-            console.success(f"Removed {path}")
-
-    console.print()
-    console.info("Run 'osa init' to set up OSA again")
 
 
 @app.command
@@ -147,7 +59,7 @@ def info() -> None:
 
     # Server status
     console.print()
-    state = paths.read_server_state()
+    state = read_server_state(paths.server_state_file)
     if state:
         from osa.cli.console import relative_time
 
