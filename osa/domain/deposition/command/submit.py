@@ -30,7 +30,7 @@ class SubmitDepositionHandler(CommandHandler[SubmitDeposition, DepositionSubmitt
             event = DepositionSubmittedEvent(
                 id=EventId(uuid4()),
                 deposition_id=cmd.srn,
-                metadata={},  # Empty metadata for direct submission (not from ingest)
+                metadata={},  # Empty metadata for direct submission (not from source)
             )
             await self.outbox.append(event)
 

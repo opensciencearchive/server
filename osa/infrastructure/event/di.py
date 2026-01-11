@@ -7,8 +7,8 @@ from dishka import AsyncContainer, provide
 from osa.config import Config
 from osa.domain.curation.listener import AutoApproveCurationTool
 from osa.domain.index.listener import ProjectNewRecordToIndexes
-from osa.domain.ingest.listener import IngestFromUpstream, TriggerInitialIngestion
-from osa.domain.ingest.schedule import IngestSchedule
+from osa.domain.source.listener import PullFromSource, TriggerInitialSourceRun
+from osa.domain.source.schedule import SourceSchedule
 from osa.domain.record.listener import ConvertDepositionToRecord
 from osa.domain.shared.event_log import EventLog
 from osa.domain.shared.outbox import Outbox
@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 # All event listeners - single source of truth
 LISTENER_TYPES: Subscriptions = Subscriptions(
     [
-        TriggerInitialIngestion,
-        IngestFromUpstream,
+        TriggerInitialSourceRun,
+        PullFromSource,
         ValidateNewDeposition,
         AutoApproveCurationTool,
         ConvertDepositionToRecord,
@@ -60,8 +60,8 @@ class EventProvider(Provider):
     for _listener_type in LISTENER_TYPES:
         locals()[_listener_type.__name__] = provide(_listener_type, scope=Scope.UOW)
 
-    # UOW-scoped provider for IngestSchedule
-    ingest_schedule = provide(IngestSchedule, scope=Scope.UOW)
+    # UOW-scoped provider for SourceSchedule
+    source_schedule = provide(SourceSchedule, scope=Scope.UOW)
 
     @provide(scope=Scope.APP)
     def get_subscriptions(self) -> Subscriptions:
@@ -73,18 +73,18 @@ class EventProvider(Provider):
         """Build schedule configs from application config."""
         configs: list[ScheduleConfig] = []
 
-        for ingestor in config.ingestors:
-            if ingestor.schedule is None:
+        for source in config.sources:
+            if source.schedule is None:
                 continue
 
             configs.append(
                 ScheduleConfig(
-                    schedule_type=IngestSchedule,
-                    cron=ingestor.schedule.cron,
-                    id=f"ingest-{ingestor.name}",
+                    schedule_type=SourceSchedule,
+                    cron=source.schedule.cron,
+                    id=f"source-{source.name}",
                     params={
-                        "ingestor_name": ingestor.name,
-                        "limit": ingestor.schedule.limit,
+                        "source_name": source.name,
+                        "limit": source.schedule.limit,
                     },
                 )
             )

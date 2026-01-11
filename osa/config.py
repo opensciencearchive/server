@@ -34,41 +34,41 @@ class IndexConfig(BaseModel):
 
 
 # =============================================================================
-# Ingest Configuration
+# Source Configuration
 # =============================================================================
 
 
-class IngestSchedule(BaseModel):
-    """Schedule configuration for an ingestor."""
+class SourceSchedule(BaseModel):
+    """Schedule configuration for a source."""
 
     cron: str  # Cron expression (e.g., "0 * * * *" for hourly)
     limit: int | None = None  # Optional limit per scheduled run
 
 
 class InitialRun(BaseModel):
-    """Initial run configuration for an ingestor."""
+    """Initial run configuration for a source."""
 
     enabled: bool = False
     limit: int | None = 10  # Limit records for initial run
     since: datetime | None = None  # Optional: bootstrap from specific date
 
 
-class IngestConfig(BaseModel):
-    """Configuration for an ingestor.
+class SourceConfig(BaseModel):
+    """Configuration for a source.
 
-    The `config` field is validated at runtime based on the ingestor type,
-    allowing external ingestors to define their own config schemas.
+    The `config` field is validated at runtime based on the source type,
+    allowing external sources to define their own config schemas.
     """
 
-    ingestor: str  # "geo-entrez", etc. - matches entry point name
-    config: dict[str, Any] = {}  # Validated at runtime by ingestor's config_class
-    schedule: IngestSchedule | None = None  # Optional: if set, runs on schedule
+    source: str  # "geo-entrez", etc. - matches entry point name
+    config: dict[str, Any] = {}  # Validated at runtime by source's config_class
+    schedule: SourceSchedule | None = None  # Optional: if set, runs on schedule
     initial_run: InitialRun | None = None  # Optional: if set, runs on startup
 
     @property
     def name(self) -> str:
-        """The ingestor name (same as ingestor type for now)."""
-        return self.ingestor
+        """The source name (same as source type for now)."""
+        return self.source
 
 
 # =============================================================================
@@ -147,7 +147,7 @@ class Config(BaseSettings):
     database: DatabaseConfig = DatabaseConfig()
     logging: LoggingConfig = LoggingConfig()
     indexes: list[IndexConfig] = []  # list of index configs
-    ingestors: list[IngestConfig] = []  # list of ingestor configs
+    sources: list[SourceConfig] = []  # list of source configs
 
     model_config = {
         "env_prefix": "OSA_",

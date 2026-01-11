@@ -1,1 +1,0 @@
-"""Ingest infrastructure - ingestor implementations."""

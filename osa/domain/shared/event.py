@@ -82,14 +82,14 @@ class EventListener(Generic[E], metaclass=_EventListenerMeta):
     based on their generic parameter.
 
     Example:
-        class IngestListener(EventListener[IngestRequested]):
+        class SourceListener(EventListener[SourceRequested]):
             outbox: Outbox
             config: Config
 
-            async def handle(self, event: IngestRequested) -> None:
+            async def handle(self, event: SourceRequested) -> None:
                 ...
 
-        # IngestListener.__event_type__ == IngestRequested
+        # SourceListener.__event_type__ == SourceRequested
     """
 
     __event_type__: ClassVar[type[Event]]
@@ -112,12 +112,12 @@ class Schedule(ABC):
 
     Example:
         @dataclass
-        class IngestSchedule(Schedule):
+        class SourceSchedule(Schedule):
             outbox: Outbox
 
-            async def run(self, ingestor_name: str, limit: int | None = None) -> None:
-                last_run = await self.outbox.find_latest(IngestionRunCompleted)
-                await self.outbox.append(IngestRequested(...))
+            async def run(self, source_name: str, limit: int | None = None) -> None:
+                last_run = await self.outbox.find_latest(SourceRunCompleted)
+                await self.outbox.append(SourceRequested(...))
     """
 
     @abstractmethod
