@@ -58,6 +58,10 @@ cli *ARGS:
 init FIELD:
     uv run osa field init {{FIELD}}
 
+# Wipe all local OSA data (database, vectors, cache)
+wipe:
+    uv run osa local clean --force
+
 # === Complete Workflow ===
 
 # Set up everything for first time (start DB + run migrations)

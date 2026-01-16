@@ -13,7 +13,7 @@ class Deposition(Aggregate, Generic[T]):
     metadata: T
     files: list[DepositionFile] = []
     record_srn: RecordSRN | None = None
-    provenance: dict[str, Any] = {}  # Ingestor info, source tracking
+    provenance: dict[str, Any] = {}  # Source info, provenance tracking
 
     def remove_all_files(self) -> None:
         self.files = []

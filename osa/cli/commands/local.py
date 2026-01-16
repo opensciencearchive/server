@@ -37,9 +37,9 @@ server:
 # logging:
 #   level: "INFO"
 
-# GEO Ingestor - pulls from NCBI Gene Expression Omnibus via Entrez API
-ingestors:
-  - ingestor: geo-entrez
+# GEO Source - pulls from NCBI Gene Expression Omnibus via Entrez API
+sources:
+  - source: geo-entrez
     config:
       record_type: gse  # gse (~250k all) or gds (~5k curated)
       email: your@email.com  # Required by NCBI - please update this
@@ -77,9 +77,9 @@ server:
 # logging:
 #   level: "INFO"
 
-# Add your ingestors here:
-# ingestors:
-#   - ingestor: geo-entrez
+# Add your sources here:
+# sources:
+#   - source: geo-entrez
 #     config:
 #       email: your@email.com
 
