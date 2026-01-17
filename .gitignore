@@ -214,3 +214,27 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Monorepo - Server specific
+server/.venv/
+server/.coverage
+server/.coverage.*
+server/coverage.xml
+server/htmlcov/
+server/.pytest_cache/
+server/.ruff_cache/
+server/__pycache__/
+server/*.egg-info/
+
+# Monorepo - Web specific
+web/node_modules/
+web/.next/
+web/.env.local
+web/.turbo/
+
+# Docker
+.docker/
+
+# Environment
+.env
+!.env.example

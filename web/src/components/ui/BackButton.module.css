@@ -1,0 +1,14 @@
+.button {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: color 150ms ease;
+}
+
+.button:hover {
+  color: var(--color-accent);
+}

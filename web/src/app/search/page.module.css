@@ -1,0 +1,24 @@
+.main {
+  min-height: calc(100vh - 200px);
+  padding: var(--space-8) 0 var(--space-16);
+}
+
+.container {
+  max-width: var(--content-width-wide);
+  margin: 0 auto;
+  padding: 0 var(--space-6);
+}
+
+.searchHeader {
+  margin-bottom: var(--space-8);
+}
+
+@media (max-width: 640px) {
+  .main {
+    padding: var(--space-6) 0 var(--space-12);
+  }
+
+  .container {
+    padding: 0 var(--space-4);
+  }
+}
