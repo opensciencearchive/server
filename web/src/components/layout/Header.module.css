@@ -1,0 +1,53 @@
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border-subtle);
+  height: var(--header-height);
+}
+
+.inner {
+  max-width: var(--content-width-wide);
+  margin: 0 auto;
+  padding: 0 var(--space-6);
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  text-decoration: none;
+  color: var(--color-text);
+  transition: opacity 150ms ease;
+}
+
+.logo:hover {
+  opacity: 0.8;
+}
+
+.logoImage {
+  width: 28px;
+  height: 28px;
+}
+
+.logoText {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+@media (max-width: 640px) {
+  .inner {
+    padding: 0 var(--space-4);
+  }
+
+  .logoText {
+    font-size: var(--text-lg);
+  }
+}

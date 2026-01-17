@@ -1,0 +1,112 @@
+.form {
+  display: flex;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.inputWrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.searchIcon {
+  position: absolute;
+  left: var(--space-4);
+  color: var(--color-text-subtle);
+  pointer-events: none;
+  width: 18px;
+  height: 18px;
+}
+
+.input {
+  width: 100%;
+  padding: var(--space-4) var(--space-4) var(--space-4) var(--space-12);
+  font-size: var(--text-base);
+  font-family: var(--font-body);
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.large .input {
+  padding: var(--space-5) var(--space-5) var(--space-5) var(--space-12);
+  font-size: var(--text-lg);
+}
+
+.large .searchIcon {
+  left: var(--space-5);
+  width: 20px;
+  height: 20px;
+}
+
+.input::placeholder {
+  color: var(--color-text-subtle);
+}
+
+.input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-subtle);
+}
+
+.clearButton {
+  position: absolute;
+  right: var(--space-3);
+  padding: var(--space-2);
+  color: var(--color-text-subtle);
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: color 150ms ease, background 150ms ease;
+}
+
+.clearButton:hover {
+  color: var(--color-text);
+  background: var(--color-bg-alt);
+}
+
+.submitButton {
+  padding: var(--space-4) var(--space-6);
+  font-size: var(--text-base);
+  font-family: var(--font-body);
+  font-weight: 500;
+  color: white;
+  background: var(--color-accent);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background 150ms ease;
+  white-space: nowrap;
+}
+
+.large .submitButton {
+  padding: var(--space-5) var(--space-8);
+  font-size: var(--text-lg);
+}
+
+.submitButton:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.submitButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .form {
+    flex-direction: column;
+  }
+
+  .submitButton {
+    width: 100%;
+  }
+}
