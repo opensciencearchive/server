@@ -10,9 +10,9 @@
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> •
-  <a href="#templates">Templates</a> •
-  <a href="#usage">Usage</a> •
-  <a href="#development">Development</a>
+  <a href="#development">Development</a> •
+  <a href="#project-structure">Structure</a> •
+  <a href="#troubleshooting">Troubleshooting</a>
 </p>
 
 ---
@@ -21,107 +21,164 @@ OSA makes it easy to stand up [PDB](https://www.rcsb.org/)-level data infrastruc
 
 ## Quick Start
 
-**Requirements:** Python 3.13+, [uv](https://docs.astral.sh/uv/)
+### Self-Hosted Deployment
+
+Deploy the complete OSA stack with a single command:
+
+**Requirements:** Docker Desktop 4.x+ or Docker Engine 24.x+
 
 ```bash
-# Clone and install
-git clone https://github.com/opendatabank/osa.git
-cd osa
-uv sync
-source .venv/bin/activate
-
-# Initialize with the GEO template
-osa init geo
-
-# NOTE: update the config.yaml with your NCBI API key and increase the record ingestion limit
-
-# Start the server
-osa server start
-
-# Search datasets using natural language
-osa search vector "single cell RNA-seq alzheimer's disease"
+git clone https://github.com/opensciencearchive/server.git
+cd server
+docker compose up
 ```
 
-## Templates
+Access the web interface at `http://localhost:8080`
 
-OSA ships with pre-configured templates for different domains:
+### Environment Configuration
 
-| Template | Description |
-|----------|-------------|
-| **geo** | [NCBI GEO](https://www.ncbi.nlm.nih.gov/geo/) integration with vector search. Natural language search over gene expression datasets. |
-| **minimal** | Blank configuration for building your own archive. |
+Copy and customize the environment template:
 
 ```bash
-# See available templates
-osa init
-
-# Initialize with a specific template
-osa init geo
-osa init minimal
+cp .env.example .env
 ```
 
-More templates coming soon. Contributions welcome.
+Key variables:
 
-## Usage
-
-### CLI Commands
-
-```bash
-# Search for datasets
-osa search vector "breast cancer tumor microenvironment"
-
-# View details of a result (by number from search)
-osa show 1
-
-# Check system stats
-osa stats
-
-# Server management
-osa server status
-osa server logs --follow
-osa server stop
-```
-
-### Configuration
-
-Configuration lives in `~/.config/osa/config.yaml`. Data is stored in `~/.local/share/osa/`.
-
-#### GEO Template Setup
-
-After running `osa init geo`, edit your config file to:
-
-1. **Add your NCBI API key** (recommended for faster ingestion):
-   - Get a free API key at https://account.ncbi.nlm.nih.gov/settings/
-   - Without an API key, NCBI limits you to 3 requests/second
-   - With an API key, you get 10 requests/second
-
-2. **Increase the initial ingestion limit** for a more complete dataset:
-
-```yaml
-ingestors:
-  - ingestor: geo-entrez
-    config:
-      email: your@email.com
-      api_key: your_ncbi_api_key_here  # Optional but recommended
-    initial_run:
-      enabled: true
-      limit: 10000  # Increase from default 50 for fuller dataset
-```
-
-The GEO template uses the full GSE dataset (~250,000 series). Initial ingestion of 10,000 records takes roughly 20-30 minutes with an API key.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `POSTGRES_PASSWORD` | `osa` | Database password |
+| `WEB_PORT` | `8080` | External port for web interface |
+| `LOG_LEVEL` | `INFO` | Application log level |
 
 ## Development
 
+### Full-Stack Development
+
+Start all services with hot-reload enabled:
+
 ```bash
-# Install dev dependencies
-uv sync --group dev
+just dev
+```
 
-# Run tests
-uv run pytest
+Or using docker compose directly:
 
-# Type checking & linting
-uv run pyright
-uv run ruff check
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+```
+
+**What's running:**
+- Web UI: http://localhost:3000 (hot-reload)
+- API Server: http://localhost:8000 (auto-restart on changes)
+- PostgreSQL: localhost:5432
+
+### Individual Service Development
+
+**Frontend only:**
+
+```bash
+just web-dev
+# Or: cd web && pnpm dev
+```
+
+**Backend only:**
+
+```bash
+just server-dev
+# Or: cd server && just dev
+```
+
+### Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `just up` | Start production deployment |
+| `just down` | Stop all services |
+| `just logs` | View service logs |
+| `just dev` | Full-stack development with hot-reload |
+| `just web-dev` | Frontend development server |
+| `just web-build` | Production build of frontend |
+| `just web-lint` | Lint frontend code |
+| `just server-dev` | Backend development server |
+| `just status` | Show service status |
+
+## Project Structure
+
+```
+osa/
+├── server/                  # Python backend (FastAPI)
+│   ├── osa/                 # Application code
+│   ├── tests/               # Test suite
+│   ├── migrations/          # Database migrations
+│   ├── sources/             # Data source plugins
+│   ├── Dockerfile
+│   ├── pyproject.toml
+│   └── Justfile             # Server-specific commands
+├── web/                     # Next.js frontend
+│   ├── src/                 # Application code
+│   ├── public/              # Static assets
+│   ├── Dockerfile
+│   └── package.json
+├── docker-compose.yml       # Production orchestration
+├── docker-compose.dev.yml   # Development overrides
+├── Justfile                 # Root orchestration commands
+└── .env.example             # Environment template
+```
+
+## Troubleshooting
+
+### Port conflicts
+
+If port 8080 is already in use:
+
+```bash
+# Option 1: Change the port in .env
+echo "WEB_PORT=3001" >> .env
+docker compose up
+
+# Option 2: Stop the conflicting service
+lsof -i :8080
+```
+
+### Database connection issues
+
+Ensure the database container is healthy before starting other services:
+
+```bash
+docker compose ps
+```
+
+The `db` service should show `healthy` status. If not:
+
+```bash
+# Check database logs
+docker compose logs db
+
+# Restart just the database
+docker compose restart db
+```
+
+### Container build failures
+
+If builds fail, try cleaning and rebuilding:
+
+```bash
+# Clean up Docker resources
+just clean
+
+# Rebuild from scratch
+docker compose build --no-cache
+docker compose up
+```
+
+### Hot-reload not working
+
+For WSL2 users, hot-reload should work automatically (WATCHFILES_FORCE_POLLING is enabled). If it doesn't:
+
+```bash
+# Restart the dev environment
+docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
 ## License

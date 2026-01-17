@@ -23,14 +23,14 @@ repos:
     hooks:
       - id: ty-check
         name: ty type check
-        entry: uv run ty check osa
+        entry: env -u VIRTUAL_ENV uv run --directory server ty check osa
         language: system
         types: [python]
         pass_filenames: false
 
       - id: unit-tests
         name: unit tests
-        entry: uv run pytest tests/unit -q --tb=short
+        entry: env -u VIRTUAL_ENV uv run --directory server pytest tests/unit -q --tb=short
         language: system
         types: [python]
         pass_filenames: false

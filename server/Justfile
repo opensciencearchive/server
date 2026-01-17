@@ -1,0 +1,87 @@
+# Server Justfile
+# Development commands for the Python backend
+
+default:
+    @just --list
+
+# === Development ===
+
+# Run development server with hot-reload
+dev:
+    uv run uvicorn osa.application.api.rest.app:app --reload --host 0.0.0.0 --port 8000
+
+# Run with debug logging
+dev-debug:
+    LOG_LEVEL=DEBUG uv run uvicorn osa.application.api.rest.app:app --reload --host 0.0.0.0 --port 8000
+
+# === Testing ===
+
+# Run all tests
+test:
+    @TEST=1 uv run pytest tests -v --tb=short
+
+# Run unit tests
+test-unit:
+    @TEST=1 uv run pytest tests/unit -v --tb=short
+
+# Run tests with verbose logging
+test-s kind="unit":
+    @TEST=1 uv run pytest -s -o log_cli=True -o log_cli_level=DEBUG "tests/{{kind}}"
+
+# Run tests with coverage
+test-cov:
+    @TEST=1 uv run pytest tests/unit --cov=osa --cov-report=term-missing
+
+# === Code Quality ===
+
+# Run linter and type checker
+lint:
+    uv run ruff check osa
+    uv run ty check osa
+
+# Fix formatting and lint issues
+fix:
+    uv run ruff format osa
+    uv run ruff check --fix osa
+
+# Format code
+format:
+    uv run ruff format osa
+
+# === Database ===
+
+# Run migrations
+migrate:
+    uv run alembic upgrade head
+
+# Create new migration
+migration name:
+    uv run alembic revision -m "{{name}}"
+
+# Show current migration version
+migrate-status:
+    uv run alembic current
+
+# Show migration history
+migrate-history:
+    uv run alembic history
+
+# Rollback one migration
+migrate-down:
+    uv run alembic downgrade -1
+
+# === CLI ===
+
+# Run any osa CLI command
+cli *ARGS:
+    uv run osa {{ARGS}}
+
+# === Dependencies ===
+
+# Install/sync dependencies
+install:
+    uv sync
+
+# Update dependencies
+update:
+    uv sync --upgrade
