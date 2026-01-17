@@ -13,14 +13,10 @@ config = context.config
 # Uses OSA_DATABASE__URL (same as the app) for consistency
 # Convert async driver (asyncpg) to sync driver (psycopg2) for alembic
 database_url = os.environ.get("OSA_DATABASE__URL")
-print(f"[alembic env.py] OSA_DATABASE__URL = {database_url}")
 if database_url:
     # Alembic runs synchronously, so convert asyncpg to psycopg2
     sync_url = database_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
-    print(f"[alembic env.py] Using sync URL: {sync_url}")
     config.set_main_option("sqlalchemy.url", sync_url)
-else:
-    print("[alembic env.py] Falling back to alembic.ini URL")
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

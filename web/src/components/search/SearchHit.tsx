@@ -12,10 +12,9 @@ import styles from './SearchHit.module.css';
 
 interface SearchHitProps {
   hit: SearchHitType;
-  index: number;
 }
 
-export function SearchHit({ hit, index }: SearchHitProps) {
+export function SearchHit({ hit }: SearchHitProps) {
   const { srn, score, metadata } = hit;
 
   return (

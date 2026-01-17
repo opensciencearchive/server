@@ -53,8 +53,8 @@ export function SearchResults({ initialData }: SearchResultsProps) {
       </div>
 
       <div className={styles.list}>
-        {results.map((hit, index) => (
-          <SearchHit key={hit.srn} hit={hit} index={index} />
+        {results.map((hit) => (
+          <SearchHit key={hit.srn} hit={hit} />
         ))}
       </div>
 

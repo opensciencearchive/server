@@ -24,7 +24,7 @@ export default function RecordNotFound() {
         </div>
         <h1 className={styles.title}>Record not found</h1>
         <p className={styles.message}>
-          The record you're looking for doesn't exist or may have been removed.
+          The record you&apos;re looking for doesn&apos;t exist or may have been removed.
         </p>
         <div className={styles.link}>
           <BackButton fallbackHref="/search">

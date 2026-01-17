@@ -13,15 +13,22 @@ interface SearchPageProps {
 }
 
 async function SearchResultsLoader({ query }: { query: string }) {
+  let data;
+  let errorMessage: string | null = null;
+
   try {
-    const data = await api.search(query);
-    return <SearchResults initialData={data} />;
+    data = await api.search(query);
   } catch (error) {
-    const message = isApiError(error)
+    errorMessage = isApiError(error)
       ? error.detail
       : 'Failed to fetch search results. Please try again.';
-    return <ErrorMessage title="Search failed" message={message} />;
   }
+
+  if (errorMessage) {
+    return <ErrorMessage title="Search failed" message={errorMessage} />;
+  }
+
+  return <SearchResults initialData={data!} />;
 }
 
 export default async function SearchPage({ searchParams }: SearchPageProps) {
