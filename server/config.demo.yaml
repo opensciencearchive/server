@@ -1,0 +1,24 @@
+server:
+  name: "Lingual Bio"
+  domain: "lingual.bio"
+
+logging:
+  level: DEBUG
+
+indexes:
+  - name: vector
+    backend: vector
+    config:
+      embedding:
+        model: all-MiniLM-L6-v2
+        fields: [title, summary, organism, platform, entry_type]
+
+sources:
+  - source: geo-entrez
+    config:
+      record_type: gse
+      email: rory@rory.bio
+      api_key: ed9bbd42eed526bce03be6989308b2310d08
+    initial_run:
+      enabled: true
+      limit: null  # No limit - ingest all GEO records

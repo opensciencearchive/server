@@ -1,0 +1,41 @@
+# Demo Docker Compose - SQLite-based single-machine deployment
+# Use: docker compose -f docker-compose.demo.yml up --build
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    environment:
+      OSA_DATA_DIR: /data
+      OSA_LOGGING__LEVEL: INFO
+      OSA_CONFIG_FILE: /app/config.yaml
+    volumes:
+      - osa_data:/data
+      - ./server/config.demo.yaml:/app/config.yaml:ro
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        API_URL: http://server:8000
+        NEXT_PUBLIC_API_MODE: live
+        NEXT_PUBLIC_API_URL: /api/v1
+    environment:
+      API_URL: http://server:8000
+    ports:
+      - "${WEB_PORT:-8080}:3000"
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  osa_data:
