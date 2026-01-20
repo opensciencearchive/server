@@ -81,7 +81,7 @@ def search(
         # Build typed SearchHit models
         hits: list[SearchHit] = []
         for hit in results:
-            srn = hit.get("id", "")
+            srn = hit.get("srn", "")
             hits.append(
                 SearchHit(
                     srn=srn,

@@ -11,12 +11,21 @@ config = context.config
 
 # Override sqlalchemy.url from environment variable if set
 # Uses OSA_DATABASE__URL (same as the app) for consistency
-# Convert async driver (asyncpg) to sync driver (psycopg2) for alembic
+# Convert async driver (asyncpg/aiosqlite) to sync driver for alembic
 database_url = os.environ.get("OSA_DATABASE__URL")
 if database_url:
-    # Alembic runs synchronously, so convert asyncpg to psycopg2
+    # Alembic runs synchronously, so convert async drivers to sync
     sync_url = database_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+    sync_url = sync_url.replace("sqlite+aiosqlite://", "sqlite://")
     config.set_main_option("sqlalchemy.url", sync_url)
+else:
+    # Derive SQLite URL from OSA_DATA_DIR (same logic as Config class)
+    from osa.cli.util.paths import OSAPaths
+
+    paths = OSAPaths()
+    paths.ensure_directories()  # Create directories if they don't exist
+    sqlite_url = f"sqlite:///{paths.database_file}"
+    config.set_main_option("sqlalchemy.url", sqlite_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

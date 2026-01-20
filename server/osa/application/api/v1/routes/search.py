@@ -22,6 +22,7 @@ class SearchResponse(BaseModel):
     query: str
     index: str
     total: int
+    has_more: bool
     results: list[dict[str, Any]]
 
 
@@ -30,6 +31,7 @@ async def search_index(
     index_name: str,
     indexes: FromDishka[IndexRegistry],
     q: str = Query(..., description="Search query"),
+    offset: int = Query(0, ge=0, description="Number of results to skip"),
     limit: int = Query(20, ge=1, le=100, description="Maximum number of results"),
 ) -> SearchResponse:
     """Search a specific index by name."""
@@ -43,19 +45,24 @@ async def search_index(
             detail=f"Index '{index_name}' not found. Available: {indexes.names()}",
         )
 
-    result: QueryResult = await backend.query(q, limit=limit)
+    # Naive pagination: fetch offset+limit+1 to determine has_more, then slice
+    result: QueryResult = await backend.query(q, limit=offset + limit + 1)
+    all_hits = result.hits[offset:]  # Skip first `offset` results
+    has_more = len(all_hits) > limit
+    hits = all_hits[:limit]
 
     return SearchResponse(
         query=q,
         index=index_name,
-        total=len(result.hits),
+        total=len(hits),
+        has_more=has_more,
         results=[
             {
-                "id": hit.srn,
+                "srn": hit.srn,
                 "score": hit.score,
                 "metadata": hit.metadata,
             }
-            for hit in result.hits
+            for hit in hits
         ],
     )
 

@@ -25,6 +25,12 @@ COPY . .
 ARG API_URL=http://server:8000
 ENV API_URL=${API_URL}
 
+# Build-time environment variables for Next.js
+ARG NEXT_PUBLIC_API_MODE=live
+ARG NEXT_PUBLIC_API_URL=/api/v1
+ENV NEXT_PUBLIC_API_MODE=${NEXT_PUBLIC_API_MODE}
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
 RUN pnpm build
 
 # Stage 3: Runtime
