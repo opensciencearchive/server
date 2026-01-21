@@ -1,5 +1,5 @@
 /**
- * API types for Semantic Bio Search
+ * API types for Lingual Bio Search
  * Aligned with OSA Search API v1.0.0
  */
 

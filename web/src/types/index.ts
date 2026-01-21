@@ -1,5 +1,5 @@
 /**
- * Type exports for Semantic Bio Search
+ * Type exports for Lingual Bio Search
  */
 
 export type {

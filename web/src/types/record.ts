@@ -1,5 +1,5 @@
 /**
- * Record types for Semantic Bio Search
+ * Record types for Lingual Bio Search
  * Aligned with OSA Search API v1.0.0
  */
 

@@ -14,7 +14,7 @@ export function Header() {
             height={28}
             className={styles.logoImage}
           />
-          <span className={styles.logoText}>Semantic Bio</span>
+          <span className={styles.logoText}>Lingual Bio</span>
         </Link>
       </div>
     </header>

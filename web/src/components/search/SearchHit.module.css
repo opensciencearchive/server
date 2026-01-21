@@ -44,9 +44,9 @@
 }
 
 .title {
-  font-family: var(--font-display);
+  font-family: var(--font-sans-display);
   font-size: var(--text-xl);
-  font-weight: 400;
+  font-weight: 600;
   line-height: var(--leading-snug);
   color: var(--color-text);
   margin: 0 0 var(--space-2);
