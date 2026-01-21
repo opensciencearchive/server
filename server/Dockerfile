@@ -23,6 +23,7 @@ COPY migrations/ ./migrations/
 COPY alembic.ini ./
 COPY entrypoint.sh ./
 COPY README.md ./
+COPY config.demo.yaml ./config.yaml
 
 # Install the project
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -46,6 +47,7 @@ COPY --from=builder --chown=appuser:appuser /app/osa /app/osa
 COPY --from=builder --chown=appuser:appuser /app/sources /app/sources
 COPY --from=builder --chown=appuser:appuser /app/migrations /app/migrations
 COPY --from=builder --chown=appuser:appuser /app/alembic.ini /app/alembic.ini
+COPY --from=builder --chown=appuser:appuser /app/config.yaml /app/config.yaml
 
 # Ensure the virtualenv is used
 ENV PATH="/app/.venv/bin:$PATH"

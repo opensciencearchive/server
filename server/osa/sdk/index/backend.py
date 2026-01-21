@@ -61,3 +61,13 @@ class StorageBackend(Protocol):
             Number of indexed documents.
         """
         ...
+
+    async def flush(self) -> None:
+        """Flush any buffered operations to storage.
+
+        For backends that buffer writes for batch efficiency (e.g., batch embedding
+        generation), this method ensures all pending records are persisted.
+
+        Backends without internal buffering can implement this as a no-op.
+        """
+        ...

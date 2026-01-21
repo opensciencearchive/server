@@ -1,6 +1,8 @@
 """Unit tests for SourceService."""
 
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -11,6 +13,7 @@ from osa.domain.shared.outbox import Outbox
 from osa.domain.source.model.registry import SourceRegistry
 from osa.domain.source.service.source import SourceService
 from osa.sdk.source.record import UpstreamRecord
+from osa.sdk.source.source import PullResult
 
 
 class FakeSource:
@@ -21,9 +24,21 @@ class FakeSource:
     def __init__(self, records: list[UpstreamRecord]):
         self._records = records
 
-    async def pull(self, since: datetime | None = None, limit: int | None = None):
-        for record in self._records[: limit if limit else len(self._records)]:
-            yield record
+    async def pull(
+        self,
+        since: datetime | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        session: dict[str, Any] | None = None,
+    ) -> PullResult:
+        """Return records iterator and session (None for fake)."""
+        records_slice = self._records[offset : offset + limit if limit else len(self._records)]
+
+        async def generate() -> AsyncIterator[UpstreamRecord]:
+            for record in records_slice:
+                yield record
+
+        return generate(), session
 
 
 @pytest.fixture

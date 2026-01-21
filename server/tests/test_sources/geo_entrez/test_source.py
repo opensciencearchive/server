@@ -61,10 +61,12 @@ class TestGEOEntrezSourceIntegration:
         """Pulling records should yield valid UpstreamRecords."""
         records: list[UpstreamRecord] = []
 
-        async for record in geo_source.pull(limit=3):
+        records_iter, session = await geo_source.pull(limit=3)
+        async for record in records_iter:
             records.append(record)
 
         assert len(records) >= 1
+        assert session is not None  # Should have WebEnv session
 
         for record in records:
             assert isinstance(record, UpstreamRecord)

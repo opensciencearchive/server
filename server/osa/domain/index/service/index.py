@@ -40,6 +40,21 @@ class IndexService(Service):
         for name, backend in self.indexes.items():
             try:
                 await backend.ingest(srn_str, metadata)
-                logger.debug(f"Indexed {srn_str} into backend '{name}'")
+                logger.debug(f"Buffered {srn_str} for backend '{name}'")
             except Exception as e:
                 logger.error(f"Failed to index {srn_str} into '{name}': {e}")
+
+    async def flush_all(self) -> None:
+        """Flush all backends to ensure buffered records are persisted.
+
+        This should be called:
+        - When a source run's final chunk completes
+        - On application shutdown
+        - After bulk import operations
+        """
+        for name, backend in self.indexes.items():
+            try:
+                await backend.flush()
+                logger.info(f"Flushed index backend '{name}'")
+            except Exception as e:
+                logger.error(f"Failed to flush backend '{name}': {e}")

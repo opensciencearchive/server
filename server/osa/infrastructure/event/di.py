@@ -6,7 +6,7 @@ from dishka import AsyncContainer, provide
 
 from osa.config import Config
 from osa.domain.curation.listener import AutoApproveCurationTool
-from osa.domain.index.listener import ProjectNewRecordToIndexes
+from osa.domain.index.listener import FlushIndexesOnSourceComplete, ProjectNewRecordToIndexes
 from osa.domain.source.listener import PullFromSource, TriggerInitialSourceRun
 from osa.domain.source.schedule import SourceSchedule
 from osa.domain.record.listener import ConvertDepositionToRecord
@@ -35,6 +35,7 @@ LISTENER_TYPES: Subscriptions = Subscriptions(
         AutoApproveCurationTool,
         ConvertDepositionToRecord,
         ProjectNewRecordToIndexes,
+        FlushIndexesOnSourceComplete,
     ]
 )
 

@@ -49,7 +49,7 @@ class InitialRun(BaseModel):
     """Initial run configuration for a source."""
 
     enabled: bool = False
-    limit: int | None = 10  # Limit records for initial run
+    limit: int | None  # Required: number to limit, or null for no limit
     since: datetime | None = None  # Optional: bootstrap from specific date
 
 

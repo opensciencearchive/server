@@ -130,20 +130,25 @@ class BackgroundWorker:
 
     async def _poll_outbox(self) -> None:
         """Interval task: fetch pending events and dispatch each."""
-        # Fetch pending events in one scope
-        async with self._container(scope=Scope.UOW) as scope:
-            outbox = await scope.get(Outbox)
-            events = await outbox.fetch_pending(self._batch_size)
-            session = await scope.get(AsyncSession)
-            await session.commit()
+        try:
+            # Fetch pending events in one scope
+            async with self._container(scope=Scope.UOW) as scope:
+                outbox = await scope.get(Outbox)
+                events = await outbox.fetch_pending(self._batch_size)
+                session = await scope.get(AsyncSession)
+                await session.commit()
 
-        # Only log at INFO when processing events, DEBUG otherwise handled by dispatch
-        if events:
-            logger.debug(f"Processing {len(events)} pending events")
+            # Log when processing events
+            if events:
+                logger.info(f"Processing {len(events)} pending events")
 
-        # Dispatch each event in its own scope
-        for event in events:
-            await self._dispatch(event)
+            # Dispatch each event in its own scope
+            for event in events:
+                await self._dispatch(event)
+
+        except Exception as e:
+            # Log but don't re-raise - let the scheduler continue polling
+            logger.exception(f"Error in outbox poll cycle: {e}")
 
     async def _dispatch(self, event: Event) -> None:
         """Dispatch a single event to its listener in UOW scope."""

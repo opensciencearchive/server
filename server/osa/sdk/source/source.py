@@ -2,11 +2,14 @@
 
 from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import ClassVar, Protocol
+from typing import Any, ClassVar, Protocol
 
 from pydantic import BaseModel
 
 from osa.sdk.source.record import UpstreamRecord
+
+# Type alias for pull() return: (records_iterator, session_for_next_chunk)
+PullResult = tuple[AsyncIterator[UpstreamRecord], dict[str, Any] | None]
 
 
 class Source(Protocol):
@@ -28,22 +31,29 @@ class Source(Protocol):
         """Initialize the source with validated configuration."""
         ...
 
-    def pull(
+    async def pull(
         self,
         since: datetime | None = None,
         limit: int | None = None,
-    ) -> AsyncIterator[UpstreamRecord]:
+        offset: int = 0,
+        session: dict[str, Any] | None = None,
+    ) -> PullResult:
         """Pull records from an upstream source.
 
-        This method returns an async iterator that yields records.
-        Implementations should use async generators.
+        This method returns an async iterator that yields records, plus
+        session state to pass to the next chunk for efficient pagination.
 
         Args:
             since: Only fetch records updated after this time.
             limit: Maximum number of records to fetch.
+            offset: Skip first N records (for chunked processing).
+            session: Opaque pagination state from previous chunk (e.g., NCBI WebEnv).
 
-        Yields:
-            UpstreamRecord for each ingested item.
+        Returns:
+            Tuple of (records_iterator, session_for_next_chunk).
+            The session is opaque state to pass to the next chunk.
+            Returns None for session if no more chunks are needed or
+            if the source doesn't support session-based pagination.
         """
         ...
 

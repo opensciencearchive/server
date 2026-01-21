@@ -56,3 +56,20 @@ asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100
+
+# Ensure lock file works on both macOS (dev) and Linux (production)
+[tool.uv]
+environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+
+# Use CPU-only PyTorch (excludes ~4GB of CUDA libraries)
+# explicit = true ensures only torch uses this index, not transitive deps
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }

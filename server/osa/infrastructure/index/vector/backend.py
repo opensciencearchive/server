@@ -1,6 +1,7 @@
 """Vector storage backend using ChromaDB and sentence-transformers."""
 
 import asyncio
+import logging
 from typing import Any
 
 import chromadb
@@ -9,18 +10,29 @@ from sentence_transformers import SentenceTransformer
 from osa.infrastructure.index.vector.config import VectorBackendConfig
 from osa.sdk.index.result import QueryResult, SearchHit
 
+logger = logging.getLogger(__name__)
+
 
 class VectorStorageBackend:
     """Vector similarity backend using ChromaDB + sentence-transformers.
 
     All blocking operations (embedding generation, ChromaDB I/O) are run
     in a thread pool to avoid blocking the async event loop.
+
+    Supports internal buffering for batch efficiency:
+    - Records are buffered until batch_size is reached
+    - Embeddings are generated in batch for better GPU/CPU utilization
+    - Use flush() to ensure all buffered records are persisted
     """
 
     def __init__(self, name: str, config: VectorBackendConfig) -> None:
         self._name = name
         self._config = config
         self._model = SentenceTransformer(config.embedding.model.value)
+
+        # Internal buffer for batch processing
+        self._buffer: list[tuple[str, dict[str, Any]]] = []
+        self._lock = asyncio.Lock()
 
         # persist_dir must be set by DI (derived from OSAPaths if not explicit)
         if config.persist_dir is None:
@@ -41,23 +53,58 @@ class VectorStorageBackend:
         return self._name
 
     async def ingest(self, srn: str, record: dict[str, Any]) -> None:
-        """Store a record in the index."""
-        text = self._to_text(record)
+        """Buffer a record for batch indexing.
 
-        # Run CPU-bound embedding in thread pool and convert to list
-        embedding = await asyncio.to_thread(lambda: self._model.encode(text).tolist())
+        Records are buffered until batch_size is reached, then flushed
+        with batch embedding generation for efficiency.
+        """
+        async with self._lock:
+            self._buffer.append((srn, record))
 
-        # Filter metadata to ChromaDB-compatible types
-        safe_meta = {k: v for k, v in record.items() if isinstance(v, (str, int, float, bool))}
+            # Flush when batch size is reached
+            if len(self._buffer) >= self._config.batch_size:
+                await self._flush_buffer()
 
-        # Run ChromaDB I/O in thread pool
+    async def flush(self) -> None:
+        """Flush any buffered records to storage."""
+        async with self._lock:
+            if self._buffer:
+                await self._flush_buffer()
+
+    async def _flush_buffer(self) -> None:
+        """Internal: flush buffered records with batch embedding generation.
+
+        Must be called while holding self._lock.
+        """
+        if not self._buffer:
+            return
+
+        # Prepare batch data
+        ids = []
+        texts = []
+        metadatas = []
+
+        for srn, record in self._buffer:
+            ids.append(srn)
+            texts.append(self._to_text(record))
+            # Filter metadata to ChromaDB-compatible types
+            safe_meta = {k: v for k, v in record.items() if isinstance(v, (str, int, float, bool))}
+            metadatas.append(safe_meta)
+
+        # Generate embeddings in batch (much more efficient than one-by-one)
+        embeddings = await asyncio.to_thread(lambda: self._model.encode(texts).tolist())
+
+        # Bulk upsert to ChromaDB
         await asyncio.to_thread(
             self._collection.upsert,
-            ids=[srn],
-            embeddings=[embedding],
-            metadatas=[safe_meta],
-            documents=[text],
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=texts,
         )
+
+        logger.debug(f"Flushed {len(self._buffer)} records to vector index '{self._name}'")
+        self._buffer.clear()
 
     async def delete(self, srn: str) -> None:
         """Remove a record from the index."""

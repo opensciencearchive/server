@@ -9,6 +9,7 @@ class PullFromSource(EventListener[SourceRequested]):
     """Pulls from a data source and creates depositions.
 
     This listener delegates to SourceService for all business logic.
+    Supports chunked processing with continuation events.
     """
 
     service: SourceService
@@ -19,4 +20,7 @@ class PullFromSource(EventListener[SourceRequested]):
             source_name=event.source_name,
             since=event.since,
             limit=event.limit,
+            offset=event.offset,
+            chunk_size=event.chunk_size,
+            session=event.session,
         )

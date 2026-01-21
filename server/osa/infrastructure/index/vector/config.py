@@ -39,3 +39,4 @@ class VectorBackendConfig(BackendConfig):
 
     persist_dir: Path | None = None  # None = derive from OSAPaths
     embedding: EmbeddingConfig = EmbeddingConfig()
+    batch_size: int = 256  # Records to buffer before flushing (batch embedding)
