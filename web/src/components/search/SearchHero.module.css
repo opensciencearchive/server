@@ -2,24 +2,49 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-20) var(--space-6);
-  min-height: calc(100vh - var(--header-height) - 200px);
+  min-height: calc(100vh - var(--header-height) - 180px);
+  padding: var(--space-16) var(--space-6);
+  background: linear-gradient(
+    180deg,
+    var(--color-bg) 0%,
+    hsl(210, 20%, 97%) 100%
+  );
+  position: relative;
+  overflow: hidden;
+}
+
+/* Subtle grid pattern overlay */
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(hsl(210, 15%, 92%) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(210, 15%, 92%) 1px, transparent 1px);
+  background-size: 60px 60px;
+  opacity: 0.4;
+  pointer-events: none;
 }
 
 .content {
-  max-width: 640px;
+  max-width: 680px;
   width: 100%;
   text-align: center;
+  position: relative;
+  z-index: 1;
 }
 
 .title {
-  font-family: var(--font-display);
-  font-size: var(--text-5xl);
-  font-weight: 400;
-  line-height: var(--leading-tight);
-  letter-spacing: -0.02em;
+  font-size: clamp(2.5rem, 6vw, 3.5rem);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
   color: var(--color-text);
-  margin: 0 0 var(--space-4);
+  margin: 0 0 var(--space-5);
+}
+
+.titleAccent {
+  color: var(--color-accent);
 }
 
 .subtitle {
@@ -27,72 +52,126 @@
   line-height: var(--leading-relaxed);
   color: var(--color-text-muted);
   margin: 0 0 var(--space-10);
-  max-width: 480px;
+  max-width: 520px;
   margin-left: auto;
   margin-right: auto;
 }
 
 .searchWrapper {
-  margin-bottom: var(--space-8);
+  margin-bottom: var(--space-6);
 }
 
 .examples {
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  line-height: var(--leading-relaxed);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-12);
 }
 
 .examplesLabel {
+  font-size: var(--text-sm);
   color: var(--color-text-subtle);
-  margin-right: var(--space-2);
+}
+
+.exampleChips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
 }
 
 .example {
-  color: var(--color-accent);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  background: var(--color-bg-elevated);
+  padding: var(--space-2) var(--space-4);
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
   text-decoration: none;
-  transition: color 150ms ease;
+  transition: all 150ms ease;
+  box-shadow: 0 1px 2px hsl(210, 15%, 90%);
 }
 
 .example:hover {
-  color: var(--color-accent-hover);
+  color: var(--color-text);
+  background: var(--color-bg);
+  border-color: var(--color-accent);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px hsl(210, 15%, 85%);
 }
 
-.separator {
-  margin: 0 var(--space-2);
-  color: var(--color-border);
+.stats {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-10);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.statValue {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.statLabel {
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 @media (max-width: 768px) {
   .hero {
-    padding: var(--space-12) var(--space-4);
+    padding: var(--space-12) var(--space-5);
     min-height: auto;
   }
 
   .title {
-    font-size: var(--text-4xl);
+    font-size: var(--text-3xl);
   }
 
   .subtitle {
     font-size: var(--text-base);
   }
+
+  .stats {
+    gap: var(--space-6);
+  }
+
+  .statValue {
+    font-size: var(--text-xl);
+  }
 }
 
 @media (max-width: 480px) {
+  .hero {
+    padding: var(--space-10) var(--space-4);
+  }
+
   .title {
-    font-size: var(--text-3xl);
+    font-size: var(--text-2xl);
   }
 
   .examples {
-    display: flex;
     flex-direction: column;
-    gap: var(--space-2);
+    gap: var(--space-3);
   }
 
-  .separator {
-    display: none;
+  .stats {
+    flex-wrap: wrap;
+    gap: var(--space-4);
   }
 
-  .examplesLabel {
-    margin-bottom: var(--space-1);
+  .stat {
+    min-width: calc(50% - var(--space-2));
   }
 }

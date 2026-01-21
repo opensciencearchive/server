@@ -41,11 +41,13 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
 
   return (
     <main className={styles.main}>
-      <div className={styles.container}>
-        <header className={styles.searchHeader}>
+      <div className={styles.toolbar}>
+        <div className={styles.searchWrapper}>
           <SearchInput initialQuery={query} />
-        </header>
+        </div>
+      </div>
 
+      <div className={styles.content}>
         <Suspense fallback={<LoadingSpinner size="md" label="Searching..." />}>
           <SearchResultsLoader query={query} />
         </Suspense>

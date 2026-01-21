@@ -1,11 +1,23 @@
 .container {
-  padding: var(--space-12) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-10) var(--space-6);
+  text-align: center;
   max-width: 400px;
   margin: 0 auto;
 }
 
+.icon {
+  width: 32px;
+  height: 32px;
+  color: var(--color-text-subtle);
+  margin-bottom: var(--space-4);
+}
+
 .title {
-  font-size: var(--text-lg);
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--color-text);
   margin: 0 0 var(--space-2);
@@ -14,14 +26,14 @@
 .message {
   font-size: var(--text-sm);
   color: var(--color-text-muted);
-  line-height: var(--leading-normal);
+  line-height: var(--leading-relaxed);
   margin: 0;
 }
 
 .suggestion {
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   color: var(--color-text-subtle);
   margin: var(--space-4) 0 0;
   padding-top: var(--space-4);
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid var(--color-border-subtle);
 }

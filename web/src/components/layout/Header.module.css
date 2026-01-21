@@ -8,9 +8,7 @@
 }
 
 .inner {
-  max-width: var(--content-width-wide);
-  margin: 0 auto;
-  padding: 0 var(--space-6);
+  padding: 0 24px;
   height: 100%;
   display: flex;
   align-items: center;
@@ -20,7 +18,7 @@
 .logo {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   text-decoration: none;
   color: var(--color-text);
   transition: opacity 150ms ease;
@@ -36,10 +34,9 @@
 }
 
 .logoText {
-  font-family: var(--font-display);
-  font-size: var(--text-xl);
-  font-weight: 400;
-  letter-spacing: -0.01em;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 @media (max-width: 640px) {
@@ -48,6 +45,6 @@
   }
 
   .logoText {
-    font-size: var(--text-lg);
+    font-size: var(--text-base);
   }
 }

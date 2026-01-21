@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, FormEvent } from 'react';
+import { useState, useCallback, useEffect, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import styles from './SearchInput.module.css';
 
@@ -19,6 +19,11 @@ export function SearchInput({
 }: SearchInputProps) {
   const router = useRouter();
   const [query, setQuery] = useState(initialQuery);
+
+  // Sync local state when URL query changes
+  useEffect(() => {
+    setQuery(initialQuery);
+  }, [initialQuery]);
 
   const handleSubmit = useCallback(
     (e: FormEvent) => {
@@ -84,13 +89,15 @@ export function SearchInput({
           </button>
         )}
       </div>
-      <button
-        type="submit"
-        className={styles.submitButton}
-        disabled={!query.trim()}
-      >
-        Search
-      </button>
+      {size === 'large' && (
+        <button
+          type="submit"
+          className={styles.submitButton}
+          disabled={!query.trim()}
+        >
+          Search
+        </button>
+      )}
     </form>
   );
 }

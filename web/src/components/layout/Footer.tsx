@@ -22,13 +22,21 @@ export function Footer() {
             <span className={styles.brandName}>Open Science Archive</span>
           </a>
           <p className={styles.mission}>
-            An open-source, domain-agnostic scientific database
+            Open-source, domain-agnostic scientific data infrastructure
           </p>
         </div>
 
         <nav className={styles.nav}>
           <div className={styles.navGroup}>
             <h4 className={styles.navTitle}>Resources</h4>
+            <a
+              href="https://opensciencearchive.org"
+              className={styles.navLink}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              OSA Home
+            </a>
             <a
               href="https://spec.opensciencearchive.org"
               className={styles.navLink}
@@ -62,7 +70,7 @@ export function Footer() {
               target="_blank"
               rel="noopener noreferrer"
             >
-              Chat
+              Zulip Chat
             </a>
           </div>
         </nav>
@@ -70,8 +78,9 @@ export function Footer() {
 
       <div className={styles.bottom}>
         <p className={styles.copyright}>
-          Open source under MIT License
+          Apache 2.0 License
         </p>
+        <span className={styles.version}>v0.1.0</span>
       </div>
     </footer>
   );

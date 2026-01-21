@@ -1,31 +1,16 @@
 import type { Metadata } from 'next';
-import { DM_Serif_Display, Inter, JetBrains_Mono, Source_Sans_3 } from 'next/font/google';
+import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 
-const dmSerif = DM_Serif_Display({
-  weight: ['400'],
-  style: ['normal', 'italic'],
-  subsets: ['latin'],
-  display: 'swap',
-  variable: '--font-display',
-});
-
-const sourceSans = Source_Sans_3({
-  weight: ['400', '600'],
-  subsets: ['latin'],
-  display: 'swap',
-  variable: '--font-sans-display',
-});
-
-const inter = Inter({
+const geist = Geist({
   subsets: ['latin'],
   display: 'swap',
   variable: '--font-body',
 });
 
-const jetbrainsMono = JetBrains_Mono({
+const geistMono = Geist_Mono({
   subsets: ['latin'],
   display: 'swap',
   variable: '--font-mono',
@@ -43,8 +28,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${dmSerif.variable} ${sourceSans.variable} ${inter.variable} ${jetbrainsMono.variable}`}>
-      <body className={inter.className}>
+    <html lang="en" className={`${geist.variable} ${geistMono.variable}`}>
+      <body className={geist.className}>
         <Header />
         {children}
         <Footer />

@@ -1,6 +1,6 @@
 .form {
   display: flex;
-  gap: var(--space-3);
+  gap: 10px;
   width: 100%;
 }
 
@@ -13,7 +13,7 @@
 
 .searchIcon {
   position: absolute;
-  left: var(--space-4);
+  left: 16px;
   color: var(--color-text-subtle);
   pointer-events: none;
   width: 18px;
@@ -22,26 +22,28 @@
 
 .input {
   width: 100%;
-  padding: var(--space-4) var(--space-4) var(--space-4) var(--space-12);
-  font-size: var(--text-base);
+  padding: 14px 42px 14px 44px;
+  font-size: 16px;
   font-family: var(--font-body);
   color: var(--color-text);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   outline: none;
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
-.large .input {
-  padding: var(--space-5) var(--space-5) var(--space-5) var(--space-12);
-  font-size: var(--text-lg);
-}
-
 .large .searchIcon {
-  left: var(--space-5);
+  left: 20px;
   width: 20px;
   height: 20px;
+}
+
+.large .input {
+  padding: 18px 50px 18px 54px;
+  font-size: 17px;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
 }
 
 .input::placeholder {
@@ -53,10 +55,14 @@
   box-shadow: 0 0 0 3px var(--color-accent-subtle);
 }
 
+.large .input:focus {
+  box-shadow: var(--shadow-md), 0 0 0 3px var(--color-accent-subtle);
+}
+
 .clearButton {
   position: absolute;
-  right: var(--space-3);
-  padding: var(--space-2);
+  right: 14px;
+  padding: 6px;
   color: var(--color-text-subtle);
   background: none;
   border: none;
@@ -65,35 +71,42 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-sm);
-  transition: color 150ms ease, background 150ms ease;
+  transition: all 150ms ease;
 }
 
 .clearButton:hover {
-  color: var(--color-text);
+  color: var(--color-text-muted);
   background: var(--color-bg-alt);
 }
 
 .submitButton {
-  padding: var(--space-4) var(--space-6);
-  font-size: var(--text-base);
-  font-family: var(--font-body);
-  font-weight: 500;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
   color: white;
   background: var(--color-accent);
   border: none;
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background 150ms ease;
+  transition: all 150ms ease;
   white-space: nowrap;
 }
 
 .large .submitButton {
-  padding: var(--space-5) var(--space-8);
-  font-size: var(--text-lg);
+  padding: 14px 28px;
+  font-size: 15px;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 2px 8px hsla(160, 30%, 40%, 0.2);
 }
 
 .submitButton:hover:not(:disabled) {
   background: var(--color-accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px hsla(160, 30%, 40%, 0.25);
+}
+
+.submitButton:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .submitButton:disabled {
@@ -104,9 +117,19 @@
 @media (max-width: 640px) {
   .form {
     flex-direction: column;
+    gap: var(--space-2);
   }
 
   .submitButton {
     width: 100%;
+  }
+
+  .large .input {
+    padding: 12px 12px 12px 38px;
+    font-size: 14px;
+  }
+
+  .large .searchIcon {
+    left: 12px;
   }
 }
