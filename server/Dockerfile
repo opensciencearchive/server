@@ -23,7 +23,7 @@ COPY migrations/ ./migrations/
 COPY alembic.ini ./
 COPY entrypoint.sh ./
 COPY README.md ./
-COPY config.demo.yaml ./config.yaml
+COPY osa.yaml ./config.yaml
 
 # Install the project
 RUN --mount=type=cache,target=/root/.cache/uv \

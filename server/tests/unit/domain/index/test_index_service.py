@@ -1,127 +1,97 @@
 """Unit tests for IndexService."""
 
-from typing import Any
 from unittest.mock import AsyncMock
-from uuid import uuid4
 
 import pytest
 
 from osa.domain.index.model.registry import IndexRegistry
 from osa.domain.index.service.index import IndexService
-from osa.domain.shared.model.srn import Domain, LocalId, RecordSRN, RecordVersion
 
 
 class FakeBackend:
     """Fake storage backend for testing."""
 
-    def __init__(self):
-        self.ingested: list[tuple[str, dict]] = []
-        self.ingest = AsyncMock(side_effect=self._ingest)
+    def __init__(self, name: str, count: int = 0, healthy: bool = True):
+        self._name = name
+        self._count = count
+        self._healthy = healthy
+        self.count = AsyncMock(return_value=count)
+        self.health = AsyncMock(return_value=healthy)
 
-    async def _ingest(self, record_id: str, metadata: dict[str, Any]) -> None:
-        self.ingested.append((record_id, metadata))
-
-
-class FailingBackend:
-    """Backend that always fails for testing error handling."""
-
-    def __init__(self):
-        self.ingest = AsyncMock(side_effect=Exception("Backend failure"))
-
-
-@pytest.fixture
-def sample_record_srn() -> RecordSRN:
-    """Create a sample record SRN."""
-    return RecordSRN(
-        domain=Domain("test.example.com"),
-        id=LocalId(str(uuid4())),
-        version=RecordVersion(1),
-    )
-
-
-@pytest.fixture
-def sample_metadata() -> dict:
-    """Create sample metadata for testing."""
-    return {
-        "title": "Test Record",
-        "organism": "human",
-        "platform": "GPL570",
-    }
+    @property
+    def name(self) -> str:
+        return self._name
 
 
 class TestIndexService:
     """Tests for IndexService."""
 
     @pytest.mark.asyncio
-    async def test_index_record_indexes_to_all_backends(
-        self,
-        sample_record_srn: RecordSRN,
-        sample_metadata: dict,
-    ):
-        """Service should index record to all configured backends."""
+    async def test_get_count_returns_backend_count(self):
+        """get_count should return the backend's document count."""
         # Arrange
-        backend1 = FakeBackend()
-        backend2 = FakeBackend()
-        registry = IndexRegistry({"backend1": backend1, "backend2": backend2})
-
+        backend = FakeBackend("vector", count=42)
+        registry = IndexRegistry({"vector": backend})
         service = IndexService(indexes=registry)
 
         # Act
-        await service.index_record(
-            record_srn=sample_record_srn,
-            metadata=sample_metadata,
-        )
+        result = await service.get_count("vector")
 
         # Assert
-        assert len(backend1.ingested) == 1
-        assert len(backend2.ingested) == 1
-        assert backend1.ingested[0][0] == str(sample_record_srn)
-        assert backend1.ingested[0][1] == sample_metadata
+        assert result == 42
+        backend.count.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_index_record_handles_backend_failure(
-        self,
-        sample_record_srn: RecordSRN,
-        sample_metadata: dict,
-    ):
-        """Service should continue indexing to other backends if one fails."""
-        # Arrange
-        failing_backend = FailingBackend()
-        working_backend = FakeBackend()
-        registry = IndexRegistry(
-            {
-                "failing": failing_backend,
-                "working": working_backend,
-            }
-        )
-
-        service = IndexService(indexes=registry)
-
-        # Act - should not raise, just log error
-        await service.index_record(
-            record_srn=sample_record_srn,
-            metadata=sample_metadata,
-        )
-
-        # Assert - working backend should still have received the record
-        assert len(working_backend.ingested) == 1
-        assert working_backend.ingested[0][0] == str(sample_record_srn)
-
-    @pytest.mark.asyncio
-    async def test_index_record_empty_registry(
-        self,
-        sample_record_srn: RecordSRN,
-        sample_metadata: dict,
-    ):
-        """Service should handle empty registry gracefully."""
+    async def test_get_count_returns_none_for_unknown_backend(self):
+        """get_count should return None for unknown backend."""
         # Arrange
         registry = IndexRegistry({})
         service = IndexService(indexes=registry)
 
-        # Act - should not raise
-        await service.index_record(
-            record_srn=sample_record_srn,
-            metadata=sample_metadata,
-        )
+        # Act
+        result = await service.get_count("unknown")
 
-        # Assert - no exception means success
+        # Assert
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_check_health_returns_backend_health(self):
+        """check_health should return the backend's health status."""
+        # Arrange
+        backend = FakeBackend("vector", healthy=True)
+        registry = IndexRegistry({"vector": backend})
+        service = IndexService(indexes=registry)
+
+        # Act
+        result = await service.check_health("vector")
+
+        # Assert
+        assert result is True
+        backend.health.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_check_health_returns_none_for_unknown_backend(self):
+        """check_health should return None for unknown backend."""
+        # Arrange
+        registry = IndexRegistry({})
+        service = IndexService(indexes=registry)
+
+        # Act
+        result = await service.check_health("unknown")
+
+        # Assert
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_check_health_returns_false_for_unhealthy_backend(self):
+        """check_health should return False for unhealthy backend."""
+        # Arrange
+        backend = FakeBackend("vector", healthy=False)
+        registry = IndexRegistry({"vector": backend})
+        service = IndexService(indexes=registry)
+
+        # Act
+        result = await service.check_health("vector")
+
+        # Assert
+        assert result is False

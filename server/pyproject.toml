@@ -57,11 +57,12 @@ asyncio_mode = "auto"
 [tool.ruff]
 line-length = 100
 
-# Ensure lock file works on both macOS (dev) and Linux (production)
+# Ensure lock file works on macOS (dev) and Linux (production)
 [tool.uv]
 environments = [
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
 ]
 
 # Use CPU-only PyTorch (excludes ~4GB of CUDA libraries)

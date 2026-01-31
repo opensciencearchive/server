@@ -1,9 +1,10 @@
 """BackgroundWorker - unified background work using APScheduler."""
 
 import logging
+from collections import defaultdict
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
-from typing import Any, NewType
+from typing import Any, NewType, Union, cast
 from uuid import uuid4
 
 from apscheduler import AsyncScheduler
@@ -13,7 +14,7 @@ from dishka import AsyncContainer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.application.event import ServerStarted
-from osa.domain.shared.event import Event, EventId, EventListener, Schedule
+from osa.domain.shared.event import BatchEventListener, Event, EventId, EventListener, Schedule
 from osa.domain.shared.outbox import Outbox
 from osa.util.di.scope import Scope
 
@@ -21,7 +22,9 @@ logger = logging.getLogger(__name__)
 
 
 # Type aliases for DI
-Subscriptions = NewType("Subscriptions", list[type[EventListener[Any]]])
+# Listener can be either EventListener (single event) or BatchEventListener (batch of events)
+ListenerType = Union[type[EventListener[Any]], type[BatchEventListener[Any]]]
+Subscriptions = NewType("Subscriptions", list[ListenerType])
 
 
 @dataclass
@@ -64,11 +67,22 @@ class BackgroundWorker:
         self._batch_size = batch_size
 
         # Maps event type -> listener TYPE (not instance!)
-        self._listener_types: dict[type[Event], type[EventListener[Any]]] = {}
+        # Supports both EventListener (single) and BatchEventListener (batch)
+        self._listener_types: dict[type[Event], ListenerType] = {}
+        self._batch_listener_types: set[type[Event]] = set()
+
         for listener_type in subscriptions:
             event_type = listener_type.__event_type__
             self._listener_types[event_type] = listener_type
-            logger.debug(f"Registered {listener_type.__name__} for {event_type.__name__}")
+
+            # Track which event types use batch listeners
+            if hasattr(listener_type, "handle_batch"):
+                self._batch_listener_types.add(event_type)
+                logger.debug(
+                    f"Registered batch listener {listener_type.__name__} for {event_type.__name__}"
+                )
+            else:
+                logger.debug(f"Registered {listener_type.__name__} for {event_type.__name__}")
 
         # Schedule configs
         self._schedules = schedules
@@ -129,7 +143,11 @@ class BackgroundWorker:
         logger.info("ServerStarted event emitted")
 
     async def _poll_outbox(self) -> None:
-        """Interval task: fetch pending events and dispatch each."""
+        """Interval task: fetch pending events and dispatch.
+
+        Events are grouped by type. Batch listeners receive all events of their
+        type together, while regular listeners receive events one-by-one.
+        """
         try:
             # Fetch pending events in one scope
             async with self._container(scope=Scope.UOW) as scope:
@@ -138,13 +156,25 @@ class BackgroundWorker:
                 session = await scope.get(AsyncSession)
                 await session.commit()
 
-            # Log when processing events
-            if events:
-                logger.info(f"Processing {len(events)} pending events")
+            if not events:
+                return
 
-            # Dispatch each event in its own scope
+            logger.info(f"Processing {len(events)} pending events")
+
+            # Group events by type for batch processing
+            by_type: dict[type[Event], list[Event]] = defaultdict(list)
             for event in events:
-                await self._dispatch(event)
+                by_type[type(event)].append(event)
+
+            # Process each event type
+            for event_type, type_events in by_type.items():
+                if event_type in self._batch_listener_types:
+                    # Batch listener - dispatch all events together
+                    await self._dispatch_batch(type_events)
+                else:
+                    # Regular listener - dispatch one-by-one
+                    for event in type_events:
+                        await self._dispatch(event)
 
         except Exception as e:
             # Log but don't re-raise - let the scheduler continue polling
@@ -166,7 +196,7 @@ class BackgroundWorker:
         try:
             async with self._container(scope=Scope.UOW) as scope:
                 # Dishka creates a fresh listener instance with injected deps
-                listener = await scope.get(listener_type)
+                listener = cast(EventListener[Any], await scope.get(listener_type))
                 await listener.handle(event)
 
                 # Mark delivered and commit
@@ -183,6 +213,61 @@ class BackgroundWorker:
             async with self._container(scope=Scope.UOW) as scope:
                 outbox = await scope.get(Outbox)
                 await outbox.mark_failed(event.id, str(e))
+                session = await scope.get(AsyncSession)
+                await session.commit()
+
+    async def _dispatch_batch(self, events: list[Event]) -> None:
+        """Dispatch a batch of events to a BatchEventListener in UOW scope.
+
+        All events in the batch are of the same type and processed together.
+        On success, all events are marked delivered. On failure, all are marked failed.
+        """
+        if not events:
+            return
+
+        event_type = type(events[0])
+        listener_type = self._listener_types.get(event_type)
+
+        if listener_type is None:
+            # No listener - mark all as delivered
+            async with self._container(scope=Scope.UOW) as scope:
+                outbox = await scope.get(Outbox)
+                for event in events:
+                    await outbox.mark_delivered(event.id)
+                session = await scope.get(AsyncSession)
+                await session.commit()
+            logger.debug(
+                f"No listener for {event_type.__name__}, marked {len(events)} as delivered"
+            )
+            return
+
+        event_ids = [e.id for e in events]
+
+        try:
+            async with self._container(scope=Scope.UOW) as scope:
+                # Dishka creates a fresh batch listener instance with injected deps
+                listener = cast(BatchEventListener[Any], await scope.get(listener_type))
+                await listener.handle_batch(events)
+
+                # Mark all as delivered and commit
+                outbox = await scope.get(Outbox)
+                for event_id in event_ids:
+                    await outbox.mark_delivered(event_id)
+                session = await scope.get(AsyncSession)
+                await session.commit()
+
+            logger.debug(f"Delivered batch of {len(events)} {event_type.__name__} events")
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(
+                f"Failed to handle batch of {len(events)} {event_type.__name__} events: {error_msg}"
+            )
+            # Mark all as failed in a new scope
+            async with self._container(scope=Scope.UOW) as scope:
+                outbox = await scope.get(Outbox)
+                for event_id in event_ids:
+                    await outbox.mark_failed(event_id, error_msg)
                 session = await scope.get(AsyncSession)
                 await session.commit()
 

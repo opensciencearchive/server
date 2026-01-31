@@ -1,60 +1,48 @@
 """IndexService - orchestrates indexing of records into storage backends."""
 
 import logging
-from typing import Any
 
 from osa.domain.index.model.registry import IndexRegistry
-from osa.domain.shared.model.srn import RecordSRN
 from osa.domain.shared.service import Service
 
 logger = logging.getLogger(__name__)
 
 
 class IndexService(Service):
-    """Projects records into configured index backends.
+    """Service for index-related operations.
 
-    This service encapsulates the business logic for indexing that was previously
-    embedded in the ProjectNewRecordToIndexes listener. It can be called from
-    multiple entry points (event listeners, CLI commands, bulk operations).
+    Note: Direct indexing (index_record, flush_all) has been replaced by the
+    event-driven approach using FanOutToIndexBackends and IndexRecordBatch
+    listeners. This service is retained for query operations and future
+    index management commands.
     """
 
     indexes: IndexRegistry
 
-    async def index_record(
-        self,
-        record_srn: RecordSRN,
-        metadata: dict[str, Any],
-    ) -> None:
-        """Index a record into all configured backends.
+    async def get_count(self, backend_name: str) -> int | None:
+        """Get the document count for a specific backend.
 
         Args:
-            record_srn: SRN of the record to index.
-            metadata: The record metadata to index.
+            backend_name: Name of the backend to query.
 
-        Note:
-            This method logs errors but does not raise exceptions for individual
-            backend failures, allowing indexing to continue for other backends.
+        Returns:
+            Document count, or None if backend not found.
         """
-        srn_str = str(record_srn)
+        backend = self.indexes.get(backend_name)
+        if backend is None:
+            return None
+        return await backend.count()
 
-        for name, backend in self.indexes.items():
-            try:
-                await backend.ingest(srn_str, metadata)
-                logger.debug(f"Buffered {srn_str} for backend '{name}'")
-            except Exception as e:
-                logger.error(f"Failed to index {srn_str} into '{name}': {e}")
+    async def check_health(self, backend_name: str) -> bool | None:
+        """Check health of a specific backend.
 
-    async def flush_all(self) -> None:
-        """Flush all backends to ensure buffered records are persisted.
+        Args:
+            backend_name: Name of the backend to check.
 
-        This should be called:
-        - When a source run's final chunk completes
-        - On application shutdown
-        - After bulk import operations
+        Returns:
+            True if healthy, False if unhealthy, None if backend not found.
         """
-        for name, backend in self.indexes.items():
-            try:
-                await backend.flush()
-                logger.info(f"Flushed index backend '{name}'")
-            except Exception as e:
-                logger.error(f"Failed to flush backend '{name}': {e}")
+        backend = self.indexes.get(backend_name)
+        if backend is None:
+            return None
+        return await backend.health()

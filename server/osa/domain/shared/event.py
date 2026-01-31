@@ -50,10 +50,11 @@ class Event(Entity):
 
 
 def _extract_event_type(cls: type) -> type["Event"] | None:
-    """Extract the event type E from EventListener[E] in class bases."""
+    """Extract the event type E from EventListener[E] or BatchEventListener[E] in class bases."""
     for base in getattr(cls, "__orig_bases__", []):
         origin = get_origin(base)
-        if origin is not None and getattr(origin, "__name__", None) == "EventListener":
+        origin_name = getattr(origin, "__name__", None)
+        if origin is not None and origin_name in ("EventListener", "BatchEventListener"):
             args = get_args(base)
             if args and isinstance(args[0], type) and issubclass(args[0], Event):
                 return args[0]
@@ -97,6 +98,42 @@ class EventListener(Generic[E], metaclass=_EventListenerMeta):
     @abstractmethod
     async def handle(self, event: Any) -> None:
         """Handle the event. Subclasses should type event as their specific event type."""
+        ...
+
+
+class BatchEventListener(Generic[E], metaclass=_EventListenerMeta):
+    """Base class for event listeners that process events in batches.
+
+    The BackgroundWorker detects batch listeners and groups events
+    by type before calling handle_batch(). This enables efficient
+    batch operations (e.g., batch embedding generation).
+
+    Events in a batch are all of the same type and should be processed
+    atomically - all succeed or all fail together.
+
+    Example:
+        class IndexRecordBatch(BatchEventListener[IndexRecord]):
+            indexes: IndexRegistry
+
+            async def handle_batch(self, events: list[IndexRecord]) -> None:
+                # Group by backend and call ingest_batch
+                ...
+
+        # IndexRecordBatch.__event_type__ == IndexRecord
+    """
+
+    __event_type__: ClassVar[type[Event]]
+
+    @abstractmethod
+    async def handle_batch(self, events: list[Any]) -> None:
+        """Process a batch of events.
+
+        Args:
+            events: List of events to process (all same type)
+
+        Raises:
+            Exception: If batch processing fails (all events will be retried)
+        """
         ...
 
 

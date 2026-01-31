@@ -19,20 +19,14 @@ class VectorStorageBackend:
     All blocking operations (embedding generation, ChromaDB I/O) are run
     in a thread pool to avoid blocking the async event loop.
 
-    Supports internal buffering for batch efficiency:
-    - Records are buffered until batch_size is reached
-    - Embeddings are generated in batch for better GPU/CPU utilization
-    - Use flush() to ensure all buffered records are persisted
+    This backend is stateless - batching is handled at the event level by
+    the BackgroundWorker. Use ingest_batch() for efficient batch operations.
     """
 
     def __init__(self, name: str, config: VectorBackendConfig) -> None:
         self._name = name
         self._config = config
         self._model = SentenceTransformer(config.embedding.model.value)
-
-        # Internal buffer for batch processing
-        self._buffer: list[tuple[str, dict[str, Any]]] = []
-        self._lock = asyncio.Lock()
 
         # persist_dir must be set by DI (derived from OSAPaths if not explicit)
         if config.persist_dir is None:
@@ -53,30 +47,27 @@ class VectorStorageBackend:
         return self._name
 
     async def ingest(self, srn: str, record: dict[str, Any]) -> None:
-        """Buffer a record for batch indexing.
+        """Index a single record.
 
-        Records are buffered until batch_size is reached, then flushed
-        with batch embedding generation for efficiency.
+        Delegates to ingest_batch() for consistent behavior.
+        For efficiency, prefer using ingest_batch() directly when
+        processing multiple records.
         """
-        async with self._lock:
-            self._buffer.append((srn, record))
+        await self.ingest_batch([(srn, record)])
 
-            # Flush when batch size is reached
-            if len(self._buffer) >= self._config.batch_size:
-                await self._flush_buffer()
+    async def ingest_batch(self, records: list[tuple[str, dict[str, Any]]]) -> None:
+        """Index a batch of records atomically with batch embedding generation.
 
-    async def flush(self) -> None:
-        """Flush any buffered records to storage."""
-        async with self._lock:
-            if self._buffer:
-                await self._flush_buffer()
+        Generates embeddings for all records in a single batch call to
+        the embedding model, then bulk upserts to ChromaDB.
 
-    async def _flush_buffer(self) -> None:
-        """Internal: flush buffered records with batch embedding generation.
+        Args:
+            records: List of (srn, metadata) tuples to index
 
-        Must be called while holding self._lock.
+        Raises:
+            Exception: If any record fails to index (none are committed)
         """
-        if not self._buffer:
+        if not records:
             return
 
         # Prepare batch data
@@ -84,7 +75,7 @@ class VectorStorageBackend:
         texts = []
         metadatas = []
 
-        for srn, record in self._buffer:
+        for srn, record in records:
             ids.append(srn)
             texts.append(self._to_text(record))
             # Filter metadata to ChromaDB-compatible types
@@ -103,8 +94,16 @@ class VectorStorageBackend:
             documents=texts,
         )
 
-        logger.debug(f"Flushed {len(self._buffer)} records to vector index '{self._name}'")
-        self._buffer.clear()
+        logger.debug(f"Indexed {len(records)} records to vector index '{self._name}'")
+
+    async def flush(self) -> None:
+        """No-op: batching is now handled at the event level.
+
+        Deprecated: This method is retained for backward compatibility
+        but does nothing. Batching is handled by the BackgroundWorker
+        using the outbox as a durable buffer.
+        """
+        pass
 
     async def delete(self, srn: str) -> None:
         """Remove a record from the index."""
