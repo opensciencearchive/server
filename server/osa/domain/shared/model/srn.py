@@ -223,34 +223,34 @@ class SRN(ValueObject):
 
 class RecordSRN(SRN):
     type: ResourceType = Field(default=ResourceType.rec, frozen=True)
-    version: RecordVersion  # type: ignore
+    version: RecordVersion
 
 
 class SchemaSRN(SRN):
     type: ResourceType = Field(default=ResourceType.schema, frozen=True)
-    version: Semver  # type: ignore
+    version: Semver
 
 
 class VocabSRN(SRN):
     type: ResourceType = Field(default=ResourceType.vocab, frozen=True)
-    version: Semver  # type: ignore
+    version: Semver
 
 
 class DepositionSRN(SRN):
     type: ResourceType = Field(default=ResourceType.dep, frozen=True)
-    version: None = None  # type: ignore
+    version: None = None
 
 
 class ValidationRunSRN(SRN):
     type: ResourceType = Field(default=ResourceType.val, frozen=True)
-    version: None = None  # type: ignore
+    version: None = None
 
 
 class SnapshotSRN(SRN):
     type: ResourceType = Field(default=ResourceType.snap, frozen=True)
-    version: None = None  # type: ignore
+    version: None = None
 
 
 class EventSRN(SRN):
     type: ResourceType = Field(default=ResourceType.evt, frozen=True)
-    version: None = None  # type: ignore
+    version: None = None

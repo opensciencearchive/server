@@ -22,7 +22,7 @@ class _CommandHandlerMeta(ABCMeta):
     def __new__(mcs, name: str, bases: tuple, namespace: dict):
         cls = super().__new__(mcs, name, bases, namespace)
         if any(isinstance(b, mcs) for b in bases):
-            return dataclass(cls)  # type: ignore[return-value]
+            return dataclass(cls)
         return cls
 
 

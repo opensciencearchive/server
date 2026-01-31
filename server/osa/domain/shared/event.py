@@ -68,10 +68,10 @@ class _EventListenerMeta(ABCMeta):
         cls = super().__new__(mcs, name, bases, namespace)
         # Apply dataclass and extract event type for concrete subclasses
         if any(isinstance(b, mcs) for b in bases):
-            cls = dataclass(cls)  # type: ignore[assignment]
+            cls = dataclass(cls)
             event_type = _extract_event_type(cls)
             if event_type is not None:
-                cls.__event_type__ = event_type  # type: ignore[attr-defined]
+                cls.__event_type__ = event_type
         return cls
 
 
