@@ -16,7 +16,7 @@ services:
 
   server:
     build:
-      context: ./server
+      context: ../server
       dockerfile: Dockerfile
     environment:
       OSA_DATABASE__URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-osa}@db:5432/${POSTGRES_DB:-osa}
@@ -37,7 +37,7 @@ services:
 
   web:
     build:
-      context: ./web
+      context: ../web
       dockerfile: Dockerfile
       args:
         API_URL: http://server:8000

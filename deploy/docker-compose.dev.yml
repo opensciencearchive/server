@@ -1,14 +1,14 @@
 # Development overrides for docker-compose.yml
-# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Usage: docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up
 
 services:
   server:
     build:
-      context: ./server
+      context: ../server
       dockerfile: Dockerfile
       target: builder
     volumes:
-      - ./server:/app
+      - ../server:/app
       - /app/.venv
     environment:
       OSA_DATABASE__URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-osa}@db:5432/${POSTGRES_DB:-osa}
@@ -25,11 +25,11 @@ services:
 
   web:
     build:
-      context: ./web
+      context: ../web
       dockerfile: Dockerfile
       target: deps
     volumes:
-      - ./web:/app
+      - ../web:/app
       - /app/node_modules
       - /app/.next
     environment:

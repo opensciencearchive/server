@@ -30,7 +30,7 @@ Deploy the complete OSA stack with a single command:
 ```bash
 git clone https://github.com/opensciencearchive/server.git
 cd server
-docker compose up
+docker compose -f deploy/docker-compose.yml up
 ```
 
 Access the web interface at `http://localhost:8080`
@@ -40,7 +40,7 @@ Access the web interface at `http://localhost:8080`
 Copy and customize the environment template:
 
 ```bash
-cp .env.example .env
+cp deploy/.env.example deploy/.env
 ```
 
 Key variables:
@@ -64,7 +64,7 @@ just dev
 Or using docker compose directly:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up
 ```
 
 **What's running:**
@@ -119,10 +119,11 @@ osa/
 │   ├── public/              # Static assets
 │   ├── Dockerfile
 │   └── package.json
-├── docker-compose.yml       # Production orchestration
-├── docker-compose.dev.yml   # Development overrides
-├── Justfile                 # Root orchestration commands
-└── .env.example             # Environment template
+├── deploy/                  # Deployment configuration
+│   ├── docker-compose.yml   # Production orchestration
+│   ├── docker-compose.dev.yml # Development overrides
+│   └── .env.example         # Environment template
+└── Justfile                 # Root orchestration commands
 ```
 
 ## Troubleshooting
@@ -132,9 +133,9 @@ osa/
 If port 8080 is already in use:
 
 ```bash
-# Option 1: Change the port in .env
-echo "WEB_PORT=3001" >> .env
-docker compose up
+# Option 1: Change the port in deploy/.env
+echo "WEB_PORT=3001" >> deploy/.env
+docker compose -f deploy/docker-compose.yml up
 
 # Option 2: Stop the conflicting service
 lsof -i :8080
@@ -145,17 +146,17 @@ lsof -i :8080
 Ensure the database container is healthy before starting other services:
 
 ```bash
-docker compose ps
+docker compose -f deploy/docker-compose.yml ps
 ```
 
 The `db` service should show `healthy` status. If not:
 
 ```bash
 # Check database logs
-docker compose logs db
+docker compose -f deploy/docker-compose.yml logs db
 
 # Restart just the database
-docker compose restart db
+docker compose -f deploy/docker-compose.yml restart db
 ```
 
 ### Container build failures
@@ -167,8 +168,8 @@ If builds fail, try cleaning and rebuilding:
 just clean
 
 # Rebuild from scratch
-docker compose build --no-cache
-docker compose up
+docker compose -f deploy/docker-compose.yml build --no-cache
+docker compose -f deploy/docker-compose.yml up
 ```
 
 ### Hot-reload not working
@@ -177,8 +178,8 @@ For WSL2 users, hot-reload should work automatically (WATCHFILES_FORCE_POLLING i
 
 ```bash
 # Restart the dev environment
-docker compose -f docker-compose.yml -f docker-compose.dev.yml down
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml down
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up --build
 ```
 
 ## License
