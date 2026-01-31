@@ -1,0 +1,135 @@
+.form {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+
+.inputWrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 16px;
+  color: var(--color-text-subtle);
+  pointer-events: none;
+  width: 18px;
+  height: 18px;
+}
+
+.input {
+  width: 100%;
+  padding: 14px 42px 14px 44px;
+  font-size: 16px;
+  font-family: var(--font-body);
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.large .searchIcon {
+  left: 20px;
+  width: 20px;
+  height: 20px;
+}
+
+.large .input {
+  padding: 18px 50px 18px 54px;
+  font-size: 17px;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
+}
+
+.input::placeholder {
+  color: var(--color-text-subtle);
+}
+
+.input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-subtle);
+}
+
+.large .input:focus {
+  box-shadow: var(--shadow-md), 0 0 0 3px var(--color-accent-subtle);
+}
+
+.clearButton {
+  position: absolute;
+  right: 14px;
+  padding: 6px;
+  color: var(--color-text-subtle);
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: all 150ms ease;
+}
+
+.clearButton:hover {
+  color: var(--color-text-muted);
+  background: var(--color-bg-alt);
+}
+
+.submitButton {
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+  background: var(--color-accent);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 150ms ease;
+  white-space: nowrap;
+}
+
+.large .submitButton {
+  padding: 14px 28px;
+  font-size: 15px;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 2px 8px hsla(160, 30%, 40%, 0.2);
+}
+
+.submitButton:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px hsla(160, 30%, 40%, 0.25);
+}
+
+.submitButton:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.submitButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .form {
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .submitButton {
+    width: 100%;
+  }
+
+  .large .input {
+    padding: 12px 12px 12px 38px;
+    font-size: 14px;
+  }
+
+  .large .searchIcon {
+    left: 12px;
+  }
+}

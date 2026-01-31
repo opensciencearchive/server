@@ -1,0 +1,96 @@
+import os
+from logging.config import fileConfig
+
+from sqlalchemy import engine_from_config, pool
+
+from alembic import context
+
+# this is the Alembic Config object, which provides
+# access to the values within the .ini file in use.
+config = context.config
+
+# Override sqlalchemy.url from environment variable if set
+# Uses OSA_DATABASE__URL (same as the app) for consistency
+# Convert async driver (asyncpg/aiosqlite) to sync driver for alembic
+database_url = os.environ.get("OSA_DATABASE__URL")
+if database_url:
+    # Alembic runs synchronously, so convert async drivers to sync
+    sync_url = database_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+    sync_url = sync_url.replace("sqlite+aiosqlite://", "sqlite://")
+    config.set_main_option("sqlalchemy.url", sync_url)
+else:
+    # Derive SQLite URL from OSA_DATA_DIR (same logic as Config class)
+    from osa.cli.util.paths import OSAPaths
+
+    paths = OSAPaths()
+    paths.ensure_directories()  # Create directories if they don't exist
+    sqlite_url = f"sqlite:///{paths.database_file}"
+    config.set_main_option("sqlalchemy.url", sqlite_url)
+
+# Interpret the config file for Python logging.
+# This line sets up loggers basically.
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+# add your model's MetaData object here
+# for 'autogenerate' support
+from osa.infrastructure.persistence.tables import metadata  # noqa: E402
+
+target_metadata = metadata
+
+# other values from the config, defined by the needs of env.py,
+# can be acquired:
+# my_important_option = config.get_main_option("my_important_option")
+# ... etc.
+
+
+def run_migrations_offline() -> None:
+    """Run migrations in 'offline' mode.
+
+    This configures the context with just a URL
+    and not an Engine, though an Engine is acceptable
+    here as well.  By skipping the Engine creation
+    we don't even need a DBAPI to be available.
+
+    Calls to context.execute() here emit the given string to the
+    script output.
+
+    """
+    url = config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    """Run migrations in 'online' mode.
+
+    In this scenario we need to create an Engine
+    and associate a connection with the context.
+
+    """
+    connectable = engine_from_config(
+        config.get_section(config.config_ini_section, {}),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+
+    with connectable.connect() as connection:
+        context.configure(connection=connection, target_metadata=target_metadata)
+
+        with context.begin_transaction():
+            context.run_migrations()
+
+    connectable.dispose()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()

@@ -1,0 +1,102 @@
+/*
+ * Lingual Bio — Global Styles
+ * Clean scientific interface
+ */
+
+/* OSA Design System - using direct paths to bypass exports resolution */
+@import '../../node_modules/@opensciencearchive/ui/ui/tokens/index.css';
+@import '../../node_modules/@opensciencearchive/ui/ui/base/reset.css';
+@import '../../node_modules/@opensciencearchive/ui/ui/base/elements.css';
+
+:root {
+  /* Layout */
+  --content-width: 720px;
+  --content-width-wide: 960px;
+  --content-width-full: 1400px;
+  --header-height: 56px;
+
+  /* Clean, modern palette */
+  --color-bg: hsl(0, 0%, 98%);
+  --color-bg-alt: hsl(0, 0%, 96%);
+  --color-bg-elevated: hsl(0, 0%, 100%);
+  --color-bg-hover: hsl(0, 0%, 97%);
+  --color-bg-dark: hsl(220, 15%, 12%);
+
+  /* Text */
+  --color-text: hsl(220, 15%, 18%);
+  --color-text-muted: hsl(220, 8%, 40%);
+  --color-text-subtle: hsl(220, 5%, 58%);
+
+  /* Borders */
+  --color-border: hsl(220, 10%, 90%);
+  --color-border-subtle: hsl(220, 8%, 94%);
+
+  /* Friendly radius */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
+  /* Soft shadows */
+  --shadow-sm: 0 1px 3px hsla(220, 20%, 20%, 0.04);
+  --shadow-md: 0 4px 12px hsla(220, 20%, 20%, 0.06);
+  --shadow-lg: 0 8px 24px hsla(220, 20%, 20%, 0.08);
+}
+
+html {
+  font-family: var(--font-body);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+a {
+  text-decoration: none;
+  color: var(--color-accent);
+  transition: color 100ms ease;
+}
+
+a:hover {
+  color: var(--color-accent-hover);
+}
+
+:focus-visible {
+  outline: 1.5px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+input, textarea {
+  font-family: inherit;
+}
+
+code, pre, kbd {
+  font-family: var(--font-mono);
+}
+
+::selection {
+  background: var(--color-accent-subtle);
+  color: var(--color-text);
+}
+
+/* Utility: mono text */
+.mono {
+  font-family: var(--font-mono);
+}

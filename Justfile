@@ -1,142 +1,119 @@
-# Import deployment commands
-# mod local 'deployment/local/local.just'
+# OSA Monorepo Justfile
+# Production deployment and development orchestration commands
 
 default:
     @just --list
 
-# === PostgreSQL (Docker) ===
+# === Production Deployment ===
 
-# Start PostgreSQL in Docker
+# Start all services in production mode
+up:
+    docker compose -f deploy/docker-compose.yml up -d
+
+# Start all services with logs visible
+up-attached:
+    docker compose -f deploy/docker-compose.yml up
+
+# Stop all services
+down:
+    docker compose -f deploy/docker-compose.yml down
+
+# View logs from all services
+logs:
+    docker compose -f deploy/docker-compose.yml logs -f
+
+# View logs from a specific service
+logs-service service:
+    docker compose -f deploy/docker-compose.yml logs -f {{service}}
+
+# View server logs
+server-logs:
+    docker compose -f deploy/docker-compose.yml logs -f server
+
+# View last N lines of server logs (default: 100)
+server-logs-tail lines="100":
+    docker compose -f deploy/docker-compose.yml logs --tail {{lines}} server
+
+# View server logs with timestamps
+server-logs-time:
+    docker compose -f deploy/docker-compose.yml logs -f -t server
+
+# View server logs since a time (e.g., "10m", "1h", "2024-01-01")
+server-logs-since since:
+    docker compose -f deploy/docker-compose.yml logs -f --since {{since}} server
+
+# Shell into the server container
+server-shell:
+    docker compose -f deploy/docker-compose.yml exec server bash
+
+# Restart just the server
+server-restart:
+    docker compose -f deploy/docker-compose.yml restart server
+
+# Restart all services
+restart:
+    docker compose -f deploy/docker-compose.yml restart
+
+# Rebuild and restart services
+rebuild:
+    docker compose -f deploy/docker-compose.yml up -d --build
+
+# === Development Mode ===
+
+# Start full-stack development with hot-reload
+dev:
+    docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up
+
+# Start development in background
+dev-detached:
+    docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d
+
+# Stop development environment
+dev-down:
+    docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml down
+
+# === Individual Service Development ===
+
+# Run server independently (requires database)
+server-dev:
+    cd server && just dev
+
+# Run web frontend independently
+web-dev:
+    cd web && pnpm dev
+
+# Build web frontend for production
+web-build:
+    cd web && pnpm build
+
+# Lint web frontend code
+web-lint:
+    cd web && pnpm lint
+
+# === Database ===
+
+# Start only the database
 db-up:
-    @just local up
+    docker compose -f deploy/docker-compose.yml up -d db
 
-# Stop PostgreSQL
+# Stop the database
 db-down:
-    @just local down
+    docker compose -f deploy/docker-compose.yml stop db
 
-# View PostgreSQL logs
+# View database logs
 db-logs:
-    @just local logs
+    docker compose -f deploy/docker-compose.yml logs -f db
 
-# Connect to PostgreSQL with psql
+# Connect to PostgreSQL
 db-connect:
-    @just local db-connect
+    docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d osa
 
-# Reset database (WARNING: deletes all data)
-db-wipe:
-    @just local wipe
+# === Maintenance ===
 
-# === Migrations (Local) ===
+# Clean up Docker resources (volumes, images, etc.)
+clean:
+    docker compose -f deploy/docker-compose.yml down -v --rmi local
 
-# Run migrations against Docker PostgreSQL
-migrate:
-    uv run alembic upgrade head
-
-# Create new migration
-migration name:
-    uv run alembic revision -m "{{name}}"
-
-# Show current migration version
-migrate-status:
-    uv run alembic current
-
-# Show migration history
-migrate-history:
-    uv run alembic history
-
-# Rollback one migration
-migrate-down:
-    uv run alembic downgrade -1
-
-# === CLI (Local) ===
-
-# Run any osa CLI command
-cli *ARGS:
-    uv run osa {{ARGS}}
-
-# Initialize a field
-init FIELD:
-    uv run osa field init {{FIELD}}
-
-# Wipe all local OSA data (database, vectors, cache)
-wipe:
-    uv run osa local clean --force
-
-# === Complete Workflow ===
-
-# Set up everything for first time (start DB + run migrations)
-setup:
-    @echo "Starting PostgreSQL..."
-    @just db-up
-    @echo "Waiting for PostgreSQL to be ready..."
-    @sleep 3
-    @echo "Running migrations..."
-    @just migrate
-    @echo "Setup complete! Database is ready."
-
-# Aliases for common commands
-up: db-up
-down: db-down
-
-# Testing commands
-test kind="unit":
-    @TEST=1 uv run pytest "tests/{{kind}}" -v --tb=short
-
-test-s kind="unit":
-    @TEST=1 uv run pytest -s -o log_cli=True -o log_cli_level=DEBUG "tests/{{kind}}"
-
-test-unit:
-    @TEST=1 uv run pytest tests/unit
-
-[working-directory: 'deployment/local']
-test-e2e:
-    docker compose --profile test-e2e up --build --abort-on-container-exit test-e2e
-
-[working-directory: 'deployment/local']
-test-integration:
-    docker compose --profile test up --build --abort-on-container-exit test
-
-# Code quality commands
-fix thing="osa":
-    uv run ruff format {{thing}}
-    uv run ruff check --fix {{thing}}
-
-lint thing="osa":
-    uv run ruff check {{thing}}
-    uv run ty check {{thing}}
-
-# Docker commands (standalone)
-docker-build:
-    docker build -t osa-api:latest .
-
-docker-run PORT="8000":
-    docker run -p {{PORT}}:8000 --env-file .env osa-api:latest
-
-docker-serve PORT="8000":
-    just docker-build && docker run -p {{PORT}}:8000 --env-file .env osa-api:latest
-
-docker-shell docker-build:
-    docker run -it --rm osa-api:latest bash
-
-docker-stop:
-    docker stop osa-api && docker rm osa-api || true
-
-# Run database migrations locally
-db-migrate:
-    uv run alembic upgrade head
-
-# Create new migration
-db-migration name:
-    uv run alembic revision -m "{{name}}"
-
-# Show migration history
-db-history:
-    uv run alembic history
-
-# Show current migration version
-db-current:
-    uv run alembic current
-
-# Downgrade migration
-db-downgrade:
-    uv run alembic downgrade -1
+# Show service status
+status:
+    docker compose -f deploy/docker-compose.yml ps
