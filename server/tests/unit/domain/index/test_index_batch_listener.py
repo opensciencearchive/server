@@ -9,6 +9,7 @@ import pytest
 from osa.domain.index.event.index_record import IndexRecord
 from osa.domain.index.listener.index_batch_listener import IndexRecordBatch
 from osa.domain.index.model.registry import IndexRegistry
+from osa.domain.shared.error import SkippedEventsError
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.srn import Domain, LocalId, RecordSRN, RecordVersion
 
@@ -135,25 +136,23 @@ class TestIndexRecordBatch:
         assert len(backend.batches) == 0
 
     @pytest.mark.asyncio
-    async def test_skips_unknown_backend(self):
-        """Listener should skip events for unknown backends."""
+    async def test_raises_skipped_for_unknown_backend(self):
+        """Unknown backend should raise SkippedEventsError."""
         # Arrange
         vector_backend = FakeBackend("vector")
         registry = IndexRegistry({"vector": vector_backend})
 
         listener = IndexRecordBatch(indexes=registry)
 
-        events = [
-            make_index_record("vector", metadata={"id": 1}),
-            make_index_record("unknown", metadata={"id": 2}),  # Unknown backend
-        ]
+        unknown_event = make_index_record("unknown", metadata={"id": 1})
+        events = [unknown_event]
 
-        # Act - should not raise
-        await listener.handle_batch(events)
+        # Act & Assert - should raise SkippedEventsError
+        with pytest.raises(SkippedEventsError) as exc_info:
+            await listener.handle_batch(events)
 
-        # Assert - vector backend received its event
-        assert len(vector_backend.batches) == 1
-        assert len(vector_backend.batches[0]) == 1
+        assert unknown_event.id in exc_info.value.event_ids
+        assert "unknown" in exc_info.value.reason
 
     @pytest.mark.asyncio
     async def test_raises_on_backend_failure(self):

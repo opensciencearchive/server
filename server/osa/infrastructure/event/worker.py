@@ -1,5 +1,6 @@
 """BackgroundWorker - unified background work using APScheduler."""
 
+import asyncio
 import logging
 from collections import defaultdict
 from contextlib import AsyncExitStack
@@ -14,6 +15,7 @@ from dishka import AsyncContainer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.application.event import ServerStarted
+from osa.domain.shared.error import SkippedEventsError
 from osa.domain.shared.event import BatchEventListener, Event, EventId, EventListener, Schedule
 from osa.domain.shared.outbox import Outbox
 from osa.util.di.scope import Scope
@@ -89,6 +91,9 @@ class BackgroundWorker:
 
         self._scheduler = AsyncScheduler()
         self._exit_stack: AsyncExitStack | None = None
+
+        # Track schedule failures for alerting
+        self._schedule_failures: dict[str, int] = {}
 
     async def __aenter__(self) -> "BackgroundWorker":
         """Start the background worker."""
@@ -178,6 +183,9 @@ class BackgroundWorker:
                     for event in type_events:
                         await self._dispatch(event)
 
+        except (asyncio.CancelledError, SystemExit, KeyboardInterrupt):
+            # Let control exceptions propagate for graceful shutdown
+            raise
         except Exception as e:
             # Log but don't re-raise - let the scheduler continue polling
             logger.exception(f"Error in outbox poll cycle: {e}")
@@ -264,6 +272,18 @@ class BackgroundWorker:
 
             logger.debug(f"Delivered batch of {len(events)} {event_type.__name__} events")
 
+        except SkippedEventsError as e:
+            # Mark specific events as skipped (not the whole batch)
+            logger.warning(
+                f"Skipping {len(e.event_ids)} events for {event_type.__name__}: {e.reason}"
+            )
+            async with self._container(scope=Scope.UOW) as scope:
+                outbox = await scope.get(Outbox)
+                for event_id in e.event_ids:
+                    await outbox.mark_skipped(event_id, e.reason)
+                session = await scope.get(AsyncSession)
+                await session.commit()
+
         except Exception as e:
             error_msg = str(e)
             logger.error(
@@ -286,7 +306,17 @@ class BackgroundWorker:
                 session = await scope.get(AsyncSession)
                 await session.commit()
 
+            # Reset failure counter on success
+            self._schedule_failures.pop(config.id, None)
             logger.debug(f"Ran schedule {config.id}")
 
+        except (asyncio.CancelledError, SystemExit, KeyboardInterrupt):
+            # Let control exceptions propagate for graceful shutdown
+            raise
         except Exception as e:
-            logger.error(f"Failed to run schedule {config.id}: {e}")
+            # Track consecutive failures
+            failures = self._schedule_failures.get(config.id, 0) + 1
+            self._schedule_failures[config.id] = failures
+            logger.error(f"Failed to run schedule {config.id} (failures: {failures}): {e}")
+            if failures >= 5:
+                logger.critical(f"Schedule {config.id} has failed {failures} consecutive times")

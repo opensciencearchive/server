@@ -1,5 +1,6 @@
 """SQLAlchemy adapter implementing EventRepository."""
 
+import logging
 from datetime import UTC, datetime
 from typing import TypeVar
 
@@ -9,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from osa.domain.shared.event import Event, EventId
 from osa.domain.shared.port.event_repository import EventRepository
 from osa.infrastructure.persistence.tables import events_table
+
+logger = logging.getLogger(__name__)
 
 E = TypeVar("E", bound=Event)
 
@@ -200,8 +203,13 @@ class SQLAlchemyEventRepository(EventRepository):
         """Deserialize an event from stored data."""
         event_cls = Event._registry.get(event_type)
         if event_cls is None:
+            logger.warning(f"Unknown event type '{event_type}' - skipping")
             return None
 
-        if isinstance(payload, str):
-            return event_cls.model_validate_json(payload)
-        return event_cls.model_validate(payload)
+        try:
+            if isinstance(payload, str):
+                return event_cls.model_validate_json(payload)
+            return event_cls.model_validate(payload)
+        except Exception as e:
+            logger.error(f"Failed to deserialize event type '{event_type}': {e}")
+            return None

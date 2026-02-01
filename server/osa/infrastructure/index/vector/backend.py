@@ -146,7 +146,8 @@ class VectorStorageBackend:
         try:
             await asyncio.to_thread(self._collection.count)
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Health check failed for backend '{self._name}': {e}")
             return False
 
     async def count(self) -> int:

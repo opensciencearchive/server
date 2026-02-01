@@ -5,6 +5,7 @@ from collections import defaultdict
 
 from osa.domain.index.event.index_record import IndexRecord
 from osa.domain.index.model.registry import IndexRegistry
+from osa.domain.shared.error import SkippedEventsError
 from osa.domain.shared.event import BatchEventListener
 
 logger = logging.getLogger(__name__)
@@ -19,8 +20,10 @@ class IndexRecordBatch(BatchEventListener[IndexRecord]):
 
     This enables:
     - Efficient batch embedding generation
-    - Per-backend failure isolation (handled at event level)
     - Crash-safe processing (events remain in outbox until committed)
+
+    Note: If a backend is not found (e.g., removed from config), raises
+    SkippedEventsError so those events are marked as skipped rather than failed.
     """
 
     indexes: IndexRegistry
@@ -32,7 +35,8 @@ class IndexRecordBatch(BatchEventListener[IndexRecord]):
             events: List of IndexRecord events to process
 
         Raises:
-            Exception: If any backend fails to index (events will be retried)
+            SkippedEventsError: If backend not found (events should be skipped)
+            RuntimeError: If backend fails to index (events will be retried)
         """
         if not events:
             return
@@ -50,14 +54,19 @@ class IndexRecordBatch(BatchEventListener[IndexRecord]):
         for backend_name, backend_events in by_backend.items():
             backend = self.indexes.get(backend_name)
             if backend is None:
-                # Graceful handling for removed backends (T027)
-                # Log warning with record SRNs for visibility
+                # Backend not found (may have been removed from config)
+                # Raise SkippedEventsError so events are marked as skipped, not failed
                 record_srns = [str(e.record_srn) for e in backend_events]
-                logger.warning(
-                    f"Backend '{backend_name}' not found, skipping {len(backend_events)} events. "
+                reason = (
+                    f"Backend '{backend_name}' not found (may have been removed). "
+                    f"Skipping {len(backend_events)} events. "
                     f"Records: {record_srns[:5]}{'...' if len(record_srns) > 5 else ''}"
                 )
-                continue
+                logger.error(reason)
+                raise SkippedEventsError(
+                    event_ids=[e.id for e in backend_events],
+                    reason=reason,
+                )
 
             # Prepare records for batch ingestion
             records = [(str(event.record_srn), event.metadata) for event in backend_events]
