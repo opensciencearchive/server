@@ -89,9 +89,13 @@ class GEOEntrezSource:
         if effective_limit <= 0:
             logger.warning(f"No UIDs to fetch (effective_limit={effective_limit})")
 
+            # Return empty iterator so callers can always use `async for` without
+            # checking for None. The `if False: yield` makes this an async generator
+            # that yields nothing (the yield is never reached but its presence
+            # tells Python this is a generator function).
             async def empty_generator() -> AsyncIterator[UpstreamRecord]:
-                return
-                yield  # Make it a generator
+                if False:
+                    yield
 
             return empty_generator(), session
 
