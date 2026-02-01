@@ -30,8 +30,14 @@ class EventRepository(Protocol):
         """Update an event's delivery status."""
         ...
 
-    async def find_pending(self, limit: int = 100) -> list[Event]:
-        """Find events with pending status."""
+    async def find_pending(self, limit: int = 100, fair: bool = True) -> list[Event]:
+        """Find events with pending status.
+
+        Args:
+            limit: Maximum number of events to return.
+            fair: If True, fetch equally from each event type (round-robin).
+                  If False, use strict FIFO ordering (oldest first).
+        """
         ...
 
     async def find_latest_by_type(self, event_type: type[E]) -> E | None:

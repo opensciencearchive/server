@@ -1,6 +1,9 @@
 """Index domain listeners."""
 
-from osa.domain.index.listener.flush_listener import FlushIndexesOnSourceComplete
-from osa.domain.index.listener.index_projector import ProjectNewRecordToIndexes
+from osa.domain.index.listener.fanout_listener import FanOutToIndexBackends
+from osa.domain.index.listener.index_batch_listener import IndexRecordBatch
 
-__all__ = ["FlushIndexesOnSourceComplete", "ProjectNewRecordToIndexes"]
+__all__ = [
+    "FanOutToIndexBackends",
+    "IndexRecordBatch",
+]

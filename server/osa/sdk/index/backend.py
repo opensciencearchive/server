@@ -69,5 +69,23 @@ class StorageBackend(Protocol):
         generation), this method ensures all pending records are persisted.
 
         Backends without internal buffering can implement this as a no-op.
+
+        Deprecated: With event-level batching, backends should be stateless.
+        This method will be removed in a future version.
+        """
+        ...
+
+    async def ingest_batch(self, records: list[tuple[str, dict[str, Any]]]) -> None:
+        """Index a batch of records atomically.
+
+        All records in the batch must succeed or all must fail together.
+        This method should be optimized for batch operations (e.g., batch
+        embedding generation, bulk database inserts).
+
+        Args:
+            records: List of (srn, metadata) tuples to index
+
+        Raises:
+            Exception: If any record fails to index (none are committed)
         """
         ...

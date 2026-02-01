@@ -140,12 +140,23 @@ class LoggingConfig(BaseModel):
         return os.environ.get("OSA_LOG_FILE")
 
 
+class WorkerConfig(BaseModel):
+    """Background worker configuration (nested in Config, uses env_nested_delimiter).
+
+    Controls the behavior of the outbox polling worker that processes events.
+    """
+
+    poll_interval: float = 0.5  # Seconds between outbox polls
+    batch_size: int = 100  # Maximum events to fetch per poll cycle
+
+
 class Config(BaseSettings):
     # These are BaseModel, so env_nested_delimiter handles their env vars
     server: Server = Server()
     frontend: Frontend = Frontend()
     database: DatabaseConfig = DatabaseConfig()
     logging: LoggingConfig = LoggingConfig()
+    worker: WorkerConfig = WorkerConfig()  # Background worker settings
     indexes: list[IndexConfig] = []  # list of index configs
     sources: list[SourceConfig] = []  # list of source configs
 

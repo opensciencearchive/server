@@ -23,6 +23,10 @@ class TriggerInitialSourceRun(EventListener[ServerStarted]):
 
     async def handle(self, event: ServerStarted) -> None:
         """Check each source config and emit SourceRequested if initial_run is enabled."""
+        logger.info(
+            f"TriggerInitialSourceRun: checking {len(self.config.sources)} configured sources"
+        )
+
         for source_config in self.config.sources:
             if source_config.initial_run is None:
                 continue

@@ -23,7 +23,7 @@ COPY migrations/ ./migrations/
 COPY alembic.ini ./
 COPY entrypoint.sh ./
 COPY README.md ./
-COPY config.demo.yaml ./config.yaml
+COPY osa.yaml ./config.yaml
 
 # Install the project
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -55,6 +55,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Create data directory
 RUN mkdir -p /data && chown appuser:appuser /data
 ENV OSA_DATA_DIR=/data
+ENV OSA_CONFIG_FILE=/app/config.yaml
 
 COPY --from=builder --chown=appuser:appuser /app/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh

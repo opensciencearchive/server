@@ -1,6 +1,8 @@
 # OSA Monorepo Justfile
 # Production deployment and development orchestration commands
 
+mod server
+
 default:
     @just --list
 

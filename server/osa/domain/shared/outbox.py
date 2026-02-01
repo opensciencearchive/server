@@ -23,9 +23,14 @@ class Outbox(Service):
         """Add an event to the outbox for delivery."""
         await self._repo.save(event, status="pending")
 
-    async def fetch_pending(self, limit: int = 100) -> list[Event]:
-        """Fetch events awaiting delivery."""
-        return await self._repo.find_pending(limit)
+    async def fetch_pending(self, limit: int = 100, fair: bool = True) -> list[Event]:
+        """Fetch events awaiting delivery.
+
+        Args:
+            limit: Maximum events to return.
+            fair: If True, round-robin across event types. If False, strict FIFO.
+        """
+        return await self._repo.find_pending(limit, fair=fair)
 
     async def mark_delivered(self, event_id: EventId) -> None:
         """Mark an event as successfully delivered."""
@@ -34,6 +39,10 @@ class Outbox(Service):
     async def mark_failed(self, event_id: EventId, error: str) -> None:
         """Mark an event as failed with an error message."""
         await self._repo.update_status(event_id, status="failed", error=error)
+
+    async def mark_skipped(self, event_id: EventId, reason: str) -> None:
+        """Mark an event as skipped (e.g., backend removed)."""
+        await self._repo.update_status(event_id, status="skipped", error=reason)
 
     async def find_latest(self, event_type: type[E]) -> E | None:
         """Find the most recent event of a given type."""

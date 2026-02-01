@@ -1,5 +1,6 @@
 """SQLAlchemy adapter implementing EventRepository."""
 
+import logging
 from datetime import UTC, datetime
 from typing import TypeVar
 
@@ -9,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from osa.domain.shared.event import Event, EventId
 from osa.domain.shared.port.event_repository import EventRepository
 from osa.infrastructure.persistence.tables import events_table
+
+logger = logging.getLogger(__name__)
 
 E = TypeVar("E", bound=Event)
 
@@ -66,14 +69,51 @@ class SQLAlchemyEventRepository(EventRepository):
         stmt = update(events_table).where(events_table.c.id == str(event_id)).values(**values)
         await self._session.execute(stmt)
 
-    async def find_pending(self, limit: int = 100) -> list[Event]:
-        """Find events with pending status."""
-        stmt = (
-            select(events_table.c.event_type, events_table.c.payload)
-            .where(events_table.c.delivery_status == "pending")
-            .order_by(events_table.c.created_at.asc())
-            .limit(limit)
-        )
+    async def find_pending(self, limit: int = 100, fair: bool = True) -> list[Event]:
+        """Find events with pending status.
+
+        Args:
+            limit: Maximum number of events to return.
+            fair: If True, fetch equally from each event type (round-robin).
+                  If False, use strict FIFO ordering (oldest first).
+        """
+        if not fair:
+            # Strict FIFO: oldest events first regardless of type
+            stmt = (
+                select(events_table.c.event_type, events_table.c.payload)
+                .where(events_table.c.delivery_status == "pending")
+                .order_by(events_table.c.created_at.asc())
+                .limit(limit)
+            )
+        else:
+            # Round-robin: fetch equally from each event type
+            # Uses window function to rank events within each type by created_at
+            row_num = (
+                func.row_number()
+                .over(
+                    partition_by=events_table.c.event_type,
+                    order_by=events_table.c.created_at.asc(),
+                )
+                .label("rn")
+            )
+
+            subq = (
+                select(
+                    events_table.c.event_type,
+                    events_table.c.payload,
+                    events_table.c.created_at,
+                    row_num,
+                ).where(events_table.c.delivery_status == "pending")
+            ).subquery()
+
+            # Order by rank first (ensures round-robin), then by created_at
+            # This interleaves: rank 1 of each type, then rank 2 of each type, etc.
+            stmt = (
+                select(subq.c.event_type, subq.c.payload)
+                .order_by(subq.c.rn, subq.c.created_at)
+                .limit(limit)
+            )
+
         result = await self._session.execute(stmt)
         rows = result.fetchall()
 
@@ -163,8 +203,13 @@ class SQLAlchemyEventRepository(EventRepository):
         """Deserialize an event from stored data."""
         event_cls = Event._registry.get(event_type)
         if event_cls is None:
+            logger.warning(f"Unknown event type '{event_type}' - skipping")
             return None
 
-        if isinstance(payload, str):
-            return event_cls.model_validate_json(payload)
-        return event_cls.model_validate(payload)
+        try:
+            if isinstance(payload, str):
+                return event_cls.model_validate_json(payload)
+            return event_cls.model_validate(payload)
+        except Exception as e:
+            logger.error(f"Failed to deserialize event type '{event_type}': {e}")
+            return None

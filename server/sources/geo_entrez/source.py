@@ -81,12 +81,31 @@ class GEOEntrezSource:
 
         # Calculate how many UIDs to fetch for this chunk
         effective_limit = limit if limit is not None else total_count - offset
+        logger.info(
+            f"Fetching UIDs: offset={offset}, limit={limit}, effective_limit={effective_limit}, "
+            f"total_count={total_count}"
+        )
+
+        if effective_limit <= 0:
+            logger.warning(f"No UIDs to fetch (effective_limit={effective_limit})")
+
+            # Return empty iterator so callers can always use `async for` without
+            # checking for None. The `if False: yield` makes this an async generator
+            # that yields nothing (the yield is never reached but its presence
+            # tells Python this is a generator function).
+            async def empty_generator() -> AsyncIterator[UpstreamRecord]:
+                if False:
+                    yield
+
+            return empty_generator(), session
+
         uids = await self._fetch_uids_from_history(
             web_env=session["web_env"],
             query_key=session["query_key"],
             offset=offset,
             limit=effective_limit,
         )
+        logger.info(f"Fetched {len(uids)} UIDs from NCBI history")
 
         async def generate() -> AsyncIterator[UpstreamRecord]:
             # Fetch metadata in batches

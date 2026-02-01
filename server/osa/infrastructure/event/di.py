@@ -6,7 +6,7 @@ from dishka import AsyncContainer, provide
 
 from osa.config import Config
 from osa.domain.curation.listener import AutoApproveCurationTool
-from osa.domain.index.listener import FlushIndexesOnSourceComplete, ProjectNewRecordToIndexes
+from osa.domain.index.listener import FanOutToIndexBackends, IndexRecordBatch
 from osa.domain.source.listener import PullFromSource, TriggerInitialSourceRun
 from osa.domain.source.schedule import SourceSchedule
 from osa.domain.record.listener import ConvertDepositionToRecord
@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 # All event listeners - single source of truth
+# Includes both EventListener (single event) and BatchEventListener (batch of events)
 LISTENER_TYPES: Subscriptions = Subscriptions(
     [
         TriggerInitialSourceRun,
@@ -34,8 +35,9 @@ LISTENER_TYPES: Subscriptions = Subscriptions(
         ValidateNewDeposition,
         AutoApproveCurationTool,
         ConvertDepositionToRecord,
-        ProjectNewRecordToIndexes,
-        FlushIndexesOnSourceComplete,
+        # Index listeners: FanOut creates IndexRecord events, IndexRecordBatch processes them
+        FanOutToIndexBackends,
+        IndexRecordBatch,
     ]
 )
 
@@ -98,6 +100,13 @@ class EventProvider(Provider):
         container: AsyncContainer,
         subscriptions: Subscriptions,
         schedules: ScheduleConfigs,
+        config: Config,
     ) -> BackgroundWorker:
         """BackgroundWorker that polls outbox and runs scheduled tasks."""
-        return BackgroundWorker(container, subscriptions, schedules)
+        return BackgroundWorker(
+            container,
+            subscriptions,
+            schedules,
+            poll_interval=config.worker.poll_interval,
+            batch_size=config.worker.batch_size,
+        )

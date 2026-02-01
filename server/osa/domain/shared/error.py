@@ -70,3 +70,21 @@ class ExternalServiceError(InfrastructureError):
 
 class ConfigurationError(InfrastructureError):
     """System misconfiguration detected."""
+
+
+# =============================================================================
+# Event Processing Errors
+# =============================================================================
+
+
+class SkippedEventsError(Exception):
+    """Raised when some events should be skipped (not failed, not delivered).
+
+    Used when a backend is intentionally removed and leftover events should
+    be marked as skipped for clean semantic separation from failures.
+    """
+
+    def __init__(self, event_ids: list, reason: str) -> None:
+        self.event_ids = event_ids
+        self.reason = reason
+        super().__init__(reason)
