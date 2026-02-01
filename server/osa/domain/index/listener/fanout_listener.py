@@ -1,5 +1,6 @@
 """FanOutToIndexBackends - creates per-backend IndexRecord events from RecordPublished."""
 
+import logging
 from uuid import uuid4
 
 from osa.domain.index.event.index_record import IndexRecord
@@ -7,6 +8,8 @@ from osa.domain.index.model.registry import IndexRegistry
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.shared.event import EventId, EventListener
 from osa.domain.shared.outbox import Outbox
+
+logger = logging.getLogger(__name__)
 
 
 class FanOutToIndexBackends(EventListener[RecordPublished]):
@@ -25,7 +28,10 @@ class FanOutToIndexBackends(EventListener[RecordPublished]):
 
     async def handle(self, event: RecordPublished) -> None:
         """Create IndexRecord events for each registered backend."""
-        for backend_name in self.indexes:
+        backend_names = list(self.indexes)
+        logger.debug(f"FanOut: {event.record_srn} -> {len(backend_names)} backends")
+
+        for backend_name in backend_names:
             index_event = IndexRecord(
                 id=EventId(uuid4()),
                 backend_name=backend_name,

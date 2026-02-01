@@ -83,6 +83,7 @@ class VectorStorageBackend:
             metadatas.append(safe_meta)
 
         # Generate embeddings in batch (much more efficient than one-by-one)
+        logger.debug(f"Generating embeddings for {len(texts)} records")
         embeddings = await asyncio.to_thread(lambda: self._model.encode(texts).tolist())
 
         # Bulk upsert to ChromaDB
@@ -94,7 +95,7 @@ class VectorStorageBackend:
             documents=texts,
         )
 
-        logger.debug(f"Indexed {len(records)} records to vector index '{self._name}'")
+        logger.info(f"Indexed {len(records)} records (embedded + upserted)")
 
     async def flush(self) -> None:
         """No-op: batching is now handled at the event level.

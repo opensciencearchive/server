@@ -88,6 +88,31 @@ class SourceService(Service):
         # If we have an overall limit, cap to remaining records
         if limit is not None:
             remaining = limit - offset
+            if remaining <= 0:
+                # Already hit the limit - nothing more to fetch
+                logger.info(f"Limit reached: offset={offset} >= limit={limit}, marking as final")
+                completed_at = datetime.now(UTC)
+                await self.outbox.append(
+                    SourceRunCompleted(
+                        id=EventId(uuid4()),
+                        source_name=source_name,
+                        source_type=source.name,
+                        started_at=started_at,
+                        completed_at=completed_at,
+                        record_count=0,
+                        since=since,
+                        limit=limit,
+                        offset=offset,
+                        chunk_size=chunk_size,
+                        is_final_chunk=True,
+                    )
+                )
+                return SourceResult(
+                    source_name=source_name,
+                    record_count=0,
+                    started_at=started_at,
+                    completed_at=completed_at,
+                )
             effective_chunk_size = min(chunk_size, remaining)
         else:
             effective_chunk_size = chunk_size

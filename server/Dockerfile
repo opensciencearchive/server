@@ -55,6 +55,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Create data directory
 RUN mkdir -p /data && chown appuser:appuser /data
 ENV OSA_DATA_DIR=/data
+ENV OSA_CONFIG_FILE=/app/config.yaml
 
 COPY --from=builder --chown=appuser:appuser /app/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh

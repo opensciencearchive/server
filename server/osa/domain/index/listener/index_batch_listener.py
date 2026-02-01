@@ -43,7 +43,7 @@ class IndexRecordBatch(BatchEventListener[IndexRecord]):
             by_backend[event.backend_name].append(event)
 
         logger.debug(
-            f"Processing batch of {len(events)} IndexRecord events for {len(by_backend)} backends"
+            f"IndexRecordBatch: grouping {len(events)} events for {len(by_backend)} backends"
         )
 
         # Process each backend's batch
@@ -69,7 +69,7 @@ class IndexRecordBatch(BatchEventListener[IndexRecord]):
 
             try:
                 await backend.ingest_batch(records)
-                logger.info(f"Indexed batch of {len(records)} records to backend '{backend_name}'")
+                logger.debug(f"Indexed {len(records)} records to backend '{backend_name}'")
             except Exception as e:
                 # Enhanced error with backend name and record SRNs (T025, T026)
                 record_srns = [srn for srn, _ in records]

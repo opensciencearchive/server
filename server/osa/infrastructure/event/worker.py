@@ -159,12 +159,14 @@ class BackgroundWorker:
             if not events:
                 return
 
-            logger.info(f"Processing {len(events)} pending events")
-
             # Group events by type for batch processing
             by_type: dict[type[Event], list[Event]] = defaultdict(list)
             for event in events:
                 by_type[type(event)].append(event)
+
+            # Log the distribution of event types (shows round-robin working)
+            type_counts = {t.__name__: len(evts) for t, evts in by_type.items()}
+            logger.info(f"Processing {len(events)} events: {type_counts}")
 
             # Process each event type
             for event_type, type_events in by_type.items():
@@ -194,6 +196,7 @@ class BackgroundWorker:
             return
 
         try:
+            logger.debug(f"Dispatching {type(event).__name__} -> {listener_type.__name__}")
             async with self._container(scope=Scope.UOW) as scope:
                 # Dishka creates a fresh listener instance with injected deps
                 listener = cast(EventListener[Any], await scope.get(listener_type))
@@ -244,6 +247,9 @@ class BackgroundWorker:
         event_ids = [e.id for e in events]
 
         try:
+            logger.debug(
+                f"Dispatching batch of {len(events)} {event_type.__name__} -> {listener_type.__name__}"
+            )
             async with self._container(scope=Scope.UOW) as scope:
                 # Dishka creates a fresh batch listener instance with injected deps
                 listener = cast(BatchEventListener[Any], await scope.get(listener_type))
