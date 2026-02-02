@@ -1,11 +1,11 @@
-"""ValidationListener - handles DepositionSubmitted events."""
+"""ValidateDeposition - handles DepositionSubmitted events."""
 
 import logging
 from uuid import uuid4
 
 from osa.config import Config
 from osa.domain.deposition.event.submitted import DepositionSubmittedEvent
-from osa.domain.shared.event import EventId, EventListener
+from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.model.srn import Domain, LocalId, ValidationRunSRN
 from osa.domain.shared.outbox import Outbox
 from osa.domain.validation.event.validation_completed import ValidationCompleted
@@ -14,7 +14,7 @@ from osa.domain.validation.model import RunStatus
 logger = logging.getLogger(__name__)
 
 
-class ValidateNewDeposition(EventListener[DepositionSubmittedEvent]):
+class ValidateDeposition(EventHandler[DepositionSubmittedEvent]):
     """Runs validation on depositions. 0 validators = instant pass."""
 
     outbox: Outbox
@@ -55,6 +55,5 @@ class ValidateNewDeposition(EventListener[DepositionSubmittedEvent]):
         )
 
         await self.outbox.append(completed)
-        # Session commit handled by BackgroundWorker
 
         logger.debug(f"Validation completed for: {event.deposition_id}")

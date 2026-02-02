@@ -1,32 +1,31 @@
-"""BackgroundWorker - unified background work using APScheduler."""
+"""Worker and WorkerPool for pull-based event processing."""
 
 import asyncio
 import logging
-from collections import defaultdict
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
-from typing import Any, NewType, Union, cast
+from typing import Any, NewType
 from uuid import uuid4
 
 from apscheduler import AsyncScheduler
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 from dishka import AsyncContainer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.application.event import ServerStarted
 from osa.domain.shared.error import SkippedEventsError
-from osa.domain.shared.event import BatchEventListener, Event, EventId, EventListener, Schedule
+from osa.domain.shared.event import (
+    EventHandler,
+    EventId,
+    Schedule,
+    WorkerConfig,
+    WorkerState,
+    WorkerStatus,
+)
 from osa.domain.shared.outbox import Outbox
 from osa.util.di.scope import Scope
 
 logger = logging.getLogger(__name__)
-
-
-# Type aliases for DI
-# Listener can be either EventListener (single event) or BatchEventListener (batch of events)
-ListenerType = Union[type[EventListener[Any]], type[BatchEventListener[Any]]]
-Subscriptions = NewType("Subscriptions", list[ListenerType])
 
 
 @dataclass
@@ -42,74 +41,315 @@ class ScheduleConfig:
 ScheduleConfigs = NewType("ScheduleConfigs", list[ScheduleConfig])
 
 
-class BackgroundWorker:
-    """Unified background worker: outbox polling + scheduled tasks.
+class Worker:
+    """Pull-based event worker that delegates to an EventHandler.
 
-    Uses APScheduler for all timing. APP-scoped, spawns UOW scopes per work unit.
+    Workers claim events from the outbox using FOR UPDATE SKIP LOCKED,
+    enabling concurrent processing without coordination. The Worker
+    handles all polling/transaction logic while the EventHandler
+    contains the business logic.
 
-    - Outbox polling: IntervalTrigger, dispatches events to EventListeners
-    - Scheduled tasks: CronTrigger, runs Schedule.run() with params
+    Configuration is read from the handler's class variables:
+        __event_type__: Event type to claim
+        __routing_key__: Optional routing key filter
+        __batch_size__: Max events per batch
+        __batch_timeout__: Timeout for partial batches
+        __poll_interval__: Seconds between polls when idle
+        __max_retries__: Max retry attempts before marking failed
+        __claim_timeout__: Seconds before claim considered stale
 
-    Usage:
-        async with worker:
-            # worker is running, yield to application
-            ...
+    Example:
+        class VectorIndexHandler(EventHandler[IndexRecord]):
+            __routing_key__ = "vector"
+            __batch_size__ = 100
+
+            _backend: VectorStorageBackend
+
+            async def handle_batch(self, events: list[IndexRecord]) -> None:
+                records = [(str(e.record_srn), e.metadata) for e in events]
+                await self._backend.ingest_batch(records)
+
+        # Worker created from handler type
+        worker = Worker(VectorIndexHandler)
+        worker.set_container(container)
+        worker.start()
+    """
+
+    def __init__(self, handler_type: type[EventHandler[Any]]) -> None:
+        """Initialize worker from handler type.
+
+        Args:
+            handler_type: EventHandler subclass with config in classvars.
+        """
+        self._handler_type = handler_type
+
+        # Read config from handler classvars
+        self._event_type = handler_type.__event_type__
+        self._routing_key = handler_type.__routing_key__
+        self._batch_size = handler_type.__batch_size__
+        self._batch_timeout = handler_type.__batch_timeout__
+        self._poll_interval = handler_type.__poll_interval__
+        self._max_retries = handler_type.__max_retries__
+        self._claim_timeout = handler_type.__claim_timeout__
+
+        # Create WorkerConfig for state tracking (backwards compat)
+        self._config = WorkerConfig(
+            name=handler_type.__name__,
+            event_types=(self._event_type,),
+            routing_key=self._routing_key,
+            batch_size=self._batch_size,
+            batch_timeout=self._batch_timeout,
+            poll_interval=self._poll_interval,
+            max_retries=self._max_retries,
+            claim_timeout=self._claim_timeout,
+        )
+        self._state = WorkerState(config=self._config)
+        self._shutdown = False
+        self._task: asyncio.Task | None = None
+        self._container: AsyncContainer | None = None
+
+    @property
+    def name(self) -> str:
+        """Worker name (handler class name)."""
+        return self._handler_type.__name__
+
+    @property
+    def handler_type(self) -> type[EventHandler[Any]]:
+        """The EventHandler type this worker delegates to."""
+        return self._handler_type
+
+    @property
+    def config(self) -> WorkerConfig:
+        """Worker configuration (derived from handler classvars)."""
+        return self._config
+
+    @property
+    def state(self) -> WorkerState:
+        """Current worker state."""
+        return self._state
+
+    def set_container(self, container: AsyncContainer) -> None:
+        """Set the DI container for scoped dependency resolution."""
+        self._container = container
+
+    def start(self) -> asyncio.Task:
+        """Start the worker in a background task.
+
+        Returns:
+            The asyncio.Task running the worker.
+        """
+        if self._container is None:
+            raise RuntimeError("Container not set. Call set_container() first.")
+
+        self._shutdown = False
+        self._task = asyncio.create_task(self._run(), name=f"worker-{self.name}")
+        logger.info(f"Worker '{self.name}' started")
+        return self._task
+
+    def stop(self) -> None:
+        """Signal the worker to stop gracefully.
+
+        The worker will finish processing its current batch before stopping.
+        """
+        self._shutdown = True
+        self._state.status = WorkerStatus.STOPPING
+        logger.info(f"Worker '{self.name}' stopping...")
+
+    async def _run(self) -> None:
+        """Main worker loop."""
+        try:
+            while not self._shutdown:
+                await self._poll_once()
+        except asyncio.CancelledError:
+            logger.info(f"Worker '{self.name}' cancelled")
+            raise
+        except Exception as e:
+            logger.exception(f"Worker '{self.name}' crashed: {e}")
+            self._state.error = e
+            raise
+        finally:
+            logger.info(f"Worker '{self.name}' stopped")
+
+    async def _poll_once(self) -> None:
+        """Execute one poll cycle: claim, process, repeat within UOW scope."""
+        if self._container is None:
+            raise RuntimeError("Container not set")
+
+        self._state.status = WorkerStatus.CLAIMING
+
+        # Claim and process within a UOW scope
+        async with self._container(scope=Scope.UOW) as scope:
+            outbox = await scope.get(Outbox)
+            session = await scope.get(AsyncSession)
+
+            # Claim events
+            result = await outbox.claim(
+                event_types=[self._event_type],
+                limit=self._batch_size,
+                routing_key=self._routing_key,
+            )
+
+            if not result.events:
+                # No events available - commit and sleep
+                await session.commit()
+                self._state.status = WorkerStatus.IDLE
+                await asyncio.sleep(self._poll_interval)
+                return
+
+            # Process claimed events via handler
+            self._state.status = WorkerStatus.PROCESSING
+            self._state.current_batch = result.events
+            self._state.last_claim_at = result.claimed_at
+
+            try:
+                # Get handler instance from DI container
+                handler = await scope.get(self._handler_type)
+
+                # Delegate to handler's batch method
+                if self._batch_size > 1:
+                    await handler.handle_batch(result.events)
+                else:
+                    await handler.handle(result.events[0])
+
+                # Mark all events as delivered
+                for event in result.events:
+                    await outbox.mark_delivered(event.id)
+
+                await session.commit()
+                self._state.processed_count += len(result.events)
+
+            except SkippedEventsError as e:
+                # Mark specific events as skipped (not the whole batch)
+                logger.warning(
+                    f"Worker '{self.name}' skipping {len(e.event_ids)} events: {e.reason}"
+                )
+                for event_id in e.event_ids:
+                    await outbox.mark_skipped(event_id, e.reason)
+                # Mark remaining events as delivered
+                skipped_set = set(e.event_ids)
+                for event in result.events:
+                    if event.id not in skipped_set:
+                        await outbox.mark_delivered(event.id)
+                await session.commit()
+                self._state.processed_count += len(result.events) - len(e.event_ids)
+
+            except Exception as e:
+                self._state.failed_count += len(result.events)
+                self._state.error = e
+                logger.error(f"Worker '{self.name}' batch failed: {e}")
+                # Mark all as failed with retry
+                for event in result.events:
+                    await outbox.mark_failed_with_retry(
+                        event.id,
+                        str(e),
+                        max_retries=self._max_retries,
+                    )
+                await session.commit()
+
+            finally:
+                self._state.current_batch = []
+                self._state.status = WorkerStatus.IDLE
+
+
+class WorkerPool:
+    """Manages multiple workers, scheduled tasks, and handles stale claim cleanup.
+
+    Usage with handler types (preferred):
+        pool = WorkerPool(container)
+        pool.register(VectorIndexHandler)
+        pool.register(KeywordIndexHandler)
+
+        async with pool:
+            # Workers are running
+            await some_long_running_task()
+        # Workers are stopped
+
+    Legacy usage with Worker instances (deprecated):
+        pool = WorkerPool(container)
+        pool.add_worker(VectorIndexWorker(config, backend))
     """
 
     def __init__(
         self,
-        container: AsyncContainer,
-        subscriptions: Subscriptions,
-        schedules: ScheduleConfigs,
-        poll_interval: float = 0.5,
-        batch_size: int = 100,
+        container: AsyncContainer | None = None,
+        stale_claim_interval: float = 60.0,
+        schedules: "ScheduleConfigs | None" = None,
     ) -> None:
         self._container = container
-        self._poll_interval = poll_interval
-        self._batch_size = batch_size
-
-        # Maps event type -> listener TYPE (not instance!)
-        # Supports both EventListener (single) and BatchEventListener (batch)
-        self._listener_types: dict[type[Event], ListenerType] = {}
-        self._batch_listener_types: set[type[Event]] = set()
-
-        for listener_type in subscriptions:
-            event_type = listener_type.__event_type__
-            self._listener_types[event_type] = listener_type
-
-            # Track which event types use batch listeners
-            if hasattr(listener_type, "handle_batch"):
-                self._batch_listener_types.add(event_type)
-                logger.debug(
-                    f"Registered batch listener {listener_type.__name__} for {event_type.__name__}"
-                )
-            else:
-                logger.debug(f"Registered {listener_type.__name__} for {event_type.__name__}")
-
-        # Schedule configs
-        self._schedules = schedules
-
-        self._scheduler = AsyncScheduler()
+        self._workers: list[Worker] = []
+        self._stale_claim_interval = stale_claim_interval
+        self._stale_claim_task: asyncio.Task | None = None
+        self._shutdown = False
+        self._schedules = schedules or ScheduleConfigs([])
+        self._scheduler: AsyncScheduler | None = None
         self._exit_stack: AsyncExitStack | None = None
-
-        # Track schedule failures for alerting
         self._schedule_failures: dict[str, int] = {}
 
-    async def __aenter__(self) -> "BackgroundWorker":
-        """Start the background worker."""
+    def set_container(self, container: AsyncContainer) -> None:
+        """Set the DI container for all workers."""
+        self._container = container
+        for worker in self._workers:
+            worker.set_container(container)
+
+    @property
+    def workers(self) -> list[Worker]:
+        """List of managed workers."""
+        return self._workers
+
+    def register(self, handler_type: type[EventHandler[Any]]) -> Worker:
+        """Register an EventHandler type and create a Worker for it.
+
+        This is the preferred way to add handlers to the pool.
+        The Worker is created internally and configured from handler classvars.
+
+        Args:
+            handler_type: EventHandler subclass to register.
+
+        Returns:
+            The created Worker instance.
+        """
+        worker = Worker(handler_type)
+        if self._container is not None:
+            worker.set_container(self._container)
+        self._workers.append(worker)
+        logger.debug(f"Registered handler '{handler_type.__name__}' as worker")
+        return worker
+
+    def add_worker(self, worker: Worker) -> None:
+        """Add a worker to the pool.
+
+        DEPRECATED: Use register() with EventHandler types instead.
+        """
+        if self._container is not None:
+            worker.set_container(self._container)
+        self._workers.append(worker)
+        logger.debug(f"Added worker '{worker.name}' to pool")
+
+    def get_worker(self, name: str) -> Worker | None:
+        """Get a worker by name."""
+        for worker in self._workers:
+            if worker.name == name:
+                return worker
+        return None
+
+    async def start(self) -> None:
+        """Start all workers, scheduled tasks, and the stale claim cleanup task."""
+        if self._container is None:
+            raise RuntimeError("Container not set. Call set_container() first.")
+
+        self._shutdown = False
+
+        # Ensure all workers have the container
+        for worker in self._workers:
+            if worker._container is None:
+                worker.set_container(self._container)
+
+        # Setup scheduler for cron tasks
         self._exit_stack = AsyncExitStack()
         await self._exit_stack.__aenter__()
 
-        # Enter scheduler context (keeps it alive until __aexit__)
+        self._scheduler = AsyncScheduler()
         await self._exit_stack.enter_async_context(self._scheduler)
-
-        # Register outbox polling as interval task
-        await self._scheduler.add_schedule(
-            self._poll_outbox,
-            IntervalTrigger(seconds=self._poll_interval),
-            id="outbox-poll",
-        )
-        logger.debug(f"Registered outbox polling (interval={self._poll_interval}s)")
 
         # Register schedules as cron tasks
         for config in self._schedules:
@@ -119,27 +359,33 @@ class BackgroundWorker:
                 id=config.id,
                 kwargs={"config": config},
             )
-            logger.debug(f"Registered {config.id} (cron={config.cron})")
+            logger.debug(f"Registered schedule {config.id} (cron={config.cron})")
 
         await self._scheduler.start_in_background()
+
+        # Emit ServerStarted event to trigger startup handlers
+        await self._emit_server_started()
+
+        # Start all workers
+        for worker in self._workers:
+            worker.start()
+
+        # Start stale claim cleanup task
+        if self._stale_claim_interval > 0:
+            self._stale_claim_task = asyncio.create_task(
+                self._run_stale_claim_cleanup(), name="stale-claim-cleanup"
+            )
+
         logger.info(
-            f"BackgroundWorker started with {len(self._listener_types)} listeners, "
+            f"WorkerPool started with {len(self._workers)} workers, "
             f"{len(self._schedules)} schedules"
         )
 
-        # Emit ServerStarted to trigger startup listeners
-        await self._emit_server_started()
-
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:  # noqa: ANN001
-        """Stop the background worker."""
-        if self._exit_stack:
-            await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
-        logger.info("BackgroundWorker stopped")
-
     async def _emit_server_started(self) -> None:
-        """Emit ServerStarted event to trigger startup listeners."""
+        """Emit ServerStarted event to trigger startup handlers."""
+        if self._container is None:
+            return
+
         async with self._container(scope=Scope.UOW) as scope:
             outbox = await scope.get(Outbox)
             await outbox.append(ServerStarted(id=EventId(uuid4())))
@@ -147,158 +393,45 @@ class BackgroundWorker:
             await session.commit()
         logger.info("ServerStarted event emitted")
 
-    async def _poll_outbox(self) -> None:
-        """Interval task: fetch pending events and dispatch.
+    async def stop(self, timeout: float = 30.0) -> None:
+        """Stop all workers gracefully.
 
-        Events are grouped by type. Batch listeners receive all events of their
-        type together, while regular listeners receive events one-by-one.
+        Args:
+            timeout: Maximum time to wait for workers to stop.
         """
-        try:
-            # Fetch pending events in one scope
-            async with self._container(scope=Scope.UOW) as scope:
-                outbox = await scope.get(Outbox)
-                events = await outbox.fetch_pending(self._batch_size)
-                session = await scope.get(AsyncSession)
-                await session.commit()
+        self._shutdown = True
 
-            if not events:
-                return
+        # Signal all workers to stop
+        for worker in self._workers:
+            worker.stop()
 
-            # Group events by type for batch processing
-            by_type: dict[type[Event], list[Event]] = defaultdict(list)
-            for event in events:
-                by_type[type(event)].append(event)
+        # Stop stale claim cleanup task
+        if self._stale_claim_task and not self._stale_claim_task.done():
+            self._stale_claim_task.cancel()
+            try:
+                await self._stale_claim_task
+            except asyncio.CancelledError:
+                pass
 
-            # Log the distribution of event types (shows round-robin working)
-            type_counts = {t.__name__: len(evts) for t, evts in by_type.items()}
-            logger.info(f"Processing {len(events)} events: {type_counts}")
+        # Wait for workers to finish with timeout
+        tasks = [w._task for w in self._workers if w._task and not w._task.done()]
+        if tasks:
+            done, pending = await asyncio.wait(tasks, timeout=timeout)
+            for task in pending:
+                task.cancel()
 
-            # Process each event type
-            for event_type, type_events in by_type.items():
-                if event_type in self._batch_listener_types:
-                    # Batch listener - dispatch all events together
-                    await self._dispatch_batch(type_events)
-                else:
-                    # Regular listener - dispatch one-by-one
-                    for event in type_events:
-                        await self._dispatch(event)
+        # Stop scheduler
+        if self._exit_stack:
+            await self._exit_stack.__aexit__(None, None, None)
+            self._exit_stack = None
 
-        except (asyncio.CancelledError, SystemExit, KeyboardInterrupt):
-            # Let control exceptions propagate for graceful shutdown
-            raise
-        except Exception as e:
-            # Log but don't re-raise - let the scheduler continue polling
-            logger.exception(f"Error in outbox poll cycle: {e}")
+        logger.info("WorkerPool stopped")
 
-    async def _dispatch(self, event: Event) -> None:
-        """Dispatch a single event to its listener in UOW scope."""
-        listener_type = self._listener_types.get(type(event))
-        if listener_type is None:
-            # No listener - mark as delivered so it doesn't stay in outbox forever
-            async with self._container(scope=Scope.UOW) as scope:
-                outbox = await scope.get(Outbox)
-                await outbox.mark_delivered(event.id)
-                session = await scope.get(AsyncSession)
-                await session.commit()
-            logger.debug(f"No listener for {type(event).__name__}, marked as delivered")
-            return
-
-        try:
-            logger.debug(f"Dispatching {type(event).__name__} -> {listener_type.__name__}")
-            async with self._container(scope=Scope.UOW) as scope:
-                # Dishka creates a fresh listener instance with injected deps
-                listener = cast(EventListener[Any], await scope.get(listener_type))
-                await listener.handle(event)
-
-                # Mark delivered and commit
-                outbox = await scope.get(Outbox)
-                await outbox.mark_delivered(event.id)
-                session = await scope.get(AsyncSession)
-                await session.commit()
-
-            logger.debug(f"Delivered {type(event).__name__} (id={event.id})")
-
-        except Exception as e:
-            logger.error(f"Failed to handle {type(event).__name__} (id={event.id}): {e}")
-            # Mark failed in a new scope
-            async with self._container(scope=Scope.UOW) as scope:
-                outbox = await scope.get(Outbox)
-                await outbox.mark_failed(event.id, str(e))
-                session = await scope.get(AsyncSession)
-                await session.commit()
-
-    async def _dispatch_batch(self, events: list[Event]) -> None:
-        """Dispatch a batch of events to a BatchEventListener in UOW scope.
-
-        All events in the batch are of the same type and processed together.
-        On success, all events are marked delivered. On failure, all are marked failed.
-        """
-        if not events:
-            return
-
-        event_type = type(events[0])
-        listener_type = self._listener_types.get(event_type)
-
-        if listener_type is None:
-            # No listener - mark all as delivered
-            async with self._container(scope=Scope.UOW) as scope:
-                outbox = await scope.get(Outbox)
-                for event in events:
-                    await outbox.mark_delivered(event.id)
-                session = await scope.get(AsyncSession)
-                await session.commit()
-            logger.debug(
-                f"No listener for {event_type.__name__}, marked {len(events)} as delivered"
-            )
-            return
-
-        event_ids = [e.id for e in events]
-
-        try:
-            logger.debug(
-                f"Dispatching batch of {len(events)} {event_type.__name__} -> {listener_type.__name__}"
-            )
-            async with self._container(scope=Scope.UOW) as scope:
-                # Dishka creates a fresh batch listener instance with injected deps
-                listener = cast(BatchEventListener[Any], await scope.get(listener_type))
-                await listener.handle_batch(events)
-
-                # Mark all as delivered and commit
-                outbox = await scope.get(Outbox)
-                for event_id in event_ids:
-                    await outbox.mark_delivered(event_id)
-                session = await scope.get(AsyncSession)
-                await session.commit()
-
-            logger.debug(f"Delivered batch of {len(events)} {event_type.__name__} events")
-
-        except SkippedEventsError as e:
-            # Mark specific events as skipped (not the whole batch)
-            logger.warning(
-                f"Skipping {len(e.event_ids)} events for {event_type.__name__}: {e.reason}"
-            )
-            async with self._container(scope=Scope.UOW) as scope:
-                outbox = await scope.get(Outbox)
-                for event_id in e.event_ids:
-                    await outbox.mark_skipped(event_id, e.reason)
-                session = await scope.get(AsyncSession)
-                await session.commit()
-
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(
-                f"Failed to handle batch of {len(events)} {event_type.__name__} events: {error_msg}"
-            )
-            # Mark all as failed in a new scope
-            async with self._container(scope=Scope.UOW) as scope:
-                outbox = await scope.get(Outbox)
-                for event_id in event_ids:
-                    await outbox.mark_failed(event_id, error_msg)
-                session = await scope.get(AsyncSession)
-                await session.commit()
-
-    async def _run_schedule(self, config: ScheduleConfig) -> None:
+    async def _run_schedule(self, config: "ScheduleConfig") -> None:
         """Cron task: run a scheduled task in UOW scope."""
+        if self._container is None:
+            return
+
         try:
             async with self._container(scope=Scope.UOW) as scope:
                 schedule = await scope.get(config.schedule_type)
@@ -320,3 +453,39 @@ class BackgroundWorker:
             logger.error(f"Failed to run schedule {config.id} (failures: {failures}): {e}")
             if failures >= 5:
                 logger.critical(f"Schedule {config.id} has failed {failures} consecutive times")
+
+    async def __aenter__(self) -> "WorkerPool":
+        """Start the pool as async context manager."""
+        await self.start()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:  # noqa: ANN001
+        """Stop the pool on context exit."""
+        await self.stop()
+
+    async def _run_stale_claim_cleanup(self) -> None:
+        """Periodically reset stale claims."""
+        while not self._shutdown:
+            try:
+                await asyncio.sleep(self._stale_claim_interval)
+
+                if self._shutdown or self._container is None:
+                    break
+
+                # Get max claim_timeout from all workers
+                if self._workers:
+                    max_timeout = max(w.config.claim_timeout for w in self._workers)
+
+                    # Use a scoped outbox for cleanup
+                    async with self._container(scope=Scope.UOW) as scope:
+                        outbox = await scope.get(Outbox)
+                        session = await scope.get(AsyncSession)
+                        count = await outbox.reset_stale_claims(max_timeout)
+                        await session.commit()
+                        if count > 0:
+                            logger.info(f"Reset {count} stale claims")
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Stale claim cleanup failed: {e}")
