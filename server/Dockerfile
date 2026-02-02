@@ -29,6 +29,9 @@ COPY osa.yaml ./config.yaml
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
+# Pre-download embedding model to bake into image (avoids runtime download)
+RUN /app/.venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+
 # Stage 2: Runtime
 FROM python:3.13-slim-bookworm AS runtime
 
@@ -43,6 +46,9 @@ WORKDIR /app
 
 # Copy the virtual environment from builder
 COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
+
+# Copy pre-downloaded embedding model cache (avoids runtime download)
+COPY --from=builder --chown=appuser:appuser /root/.cache/huggingface /home/appuser/.cache/huggingface
 COPY --from=builder --chown=appuser:appuser /app/osa /app/osa
 COPY --from=builder --chown=appuser:appuser /app/sources /app/sources
 COPY --from=builder --chown=appuser:appuser /app/migrations /app/migrations
@@ -65,7 +71,7 @@ USER appuser
 EXPOSE 8000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=5s --timeout=10s --start-period=5s --retries=3 \
     CMD curl --fail http://localhost:8000/api/v1/health || exit 1
 
 ENTRYPOINT ["/app/entrypoint.sh"]
