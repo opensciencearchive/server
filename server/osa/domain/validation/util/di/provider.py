@@ -1,15 +1,13 @@
-from osa.util.di.scope import Scope
 from dishka import provide
 
 from osa.config import Config
 from osa.domain.shared.model.srn import Domain
-from osa.domain.validation.handler import BeginMockValidation
 from osa.domain.validation.service import ValidationService
 from osa.util.di.base import Provider
+from osa.util.di.scope import Scope
 
 
 class ValidationProvider(Provider):
-    validation_handler = provide(BeginMockValidation, scope=Scope.UOW)
     service = provide(ValidationService, scope=Scope.UOW)
 
     @provide(scope=Scope.UOW)

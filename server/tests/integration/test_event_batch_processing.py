@@ -42,7 +42,7 @@ class FakeOutbox:
     def __init__(self):
         self.events: list[Any] = []
 
-    async def append(self, event: Any) -> None:
+    async def append(self, event: Any, routing_key: str | None = None) -> None:
         self.events.append(event)
 
 

@@ -1,4 +1,4 @@
-"""Unit tests for FanOutToIndexBackends listener."""
+"""Unit tests for FanOutToIndexBackends handler."""
 
 from typing import Any
 from unittest.mock import AsyncMock
@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 from osa.domain.index.event.index_record import IndexRecord
-from osa.domain.index.listener.fanout_listener import FanOutToIndexBackends
+from osa.domain.index.handler.fanout_to_index_backends import FanOutToIndexBackends
 from osa.domain.index.model.registry import IndexRegistry
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.shared.event import EventId
@@ -32,7 +32,7 @@ class FakeOutbox:
         self.events: list[Any] = []
         self.append = AsyncMock(side_effect=self._append)
 
-    async def _append(self, event: Any) -> None:
+    async def _append(self, event: Any, routing_key: str | None = None) -> None:
         self.events.append(event)
 
 
@@ -66,7 +66,7 @@ def sample_metadata() -> dict:
 
 
 class TestFanOutToIndexBackends:
-    """Tests for FanOutToIndexBackends listener."""
+    """Tests for FanOutToIndexBackends handler."""
 
     @pytest.mark.asyncio
     async def test_creates_index_record_per_backend(
@@ -75,14 +75,14 @@ class TestFanOutToIndexBackends:
         sample_deposition_srn: DepositionSRN,
         sample_metadata: dict,
     ):
-        """Listener should create one IndexRecord event per registered backend."""
+        """Handler should create one IndexRecord event per registered backend."""
         # Arrange
         backend1 = FakeBackend("vector")
         backend2 = FakeBackend("keyword")
         registry = IndexRegistry({"vector": backend1, "keyword": backend2})
         outbox = FakeOutbox()
 
-        listener = FanOutToIndexBackends(indexes=registry, outbox=outbox)
+        handler = FanOutToIndexBackends(indexes=registry, outbox=outbox)
 
         event = RecordPublished(
             id=EventId(uuid4()),
@@ -92,7 +92,7 @@ class TestFanOutToIndexBackends:
         )
 
         # Act
-        await listener.handle(event)
+        await handler.handle(event)
 
         # Assert
         assert len(outbox.events) == 2
@@ -121,7 +121,7 @@ class TestFanOutToIndexBackends:
         )
         outbox = FakeOutbox()
 
-        listener = FanOutToIndexBackends(indexes=registry, outbox=outbox)
+        handler = FanOutToIndexBackends(indexes=registry, outbox=outbox)
 
         event = RecordPublished(
             id=EventId(uuid4()),
@@ -131,7 +131,7 @@ class TestFanOutToIndexBackends:
         )
 
         # Act
-        await listener.handle(event)
+        await handler.handle(event)
 
         # Assert
         event_ids = [e.id for e in outbox.events]
@@ -149,7 +149,7 @@ class TestFanOutToIndexBackends:
         registry = IndexRegistry({})
         outbox = FakeOutbox()
 
-        listener = FanOutToIndexBackends(indexes=registry, outbox=outbox)
+        handler = FanOutToIndexBackends(indexes=registry, outbox=outbox)
 
         event = RecordPublished(
             id=EventId(uuid4()),
@@ -159,7 +159,7 @@ class TestFanOutToIndexBackends:
         )
 
         # Act
-        await listener.handle(event)
+        await handler.handle(event)
 
         # Assert
         assert len(outbox.events) == 0
