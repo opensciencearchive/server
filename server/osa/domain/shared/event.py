@@ -17,7 +17,7 @@ from typing import (
 )
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from osa.domain.shared.model.entity import Entity
 
@@ -51,8 +51,7 @@ class Event(Entity):
 # --- Worker Infrastructure ---
 
 
-@dataclass(frozen=True)
-class WorkerConfig:
+class WorkerConfig(BaseModel):
     """Configuration for a single worker instance.
 
     Attributes:
@@ -66,29 +65,29 @@ class WorkerConfig:
         claim_timeout: Seconds before claim considered stale (default: 300.0).
     """
 
+    model_config = {"frozen": True}
+
     name: str
     event_types: tuple[type["Event"], ...]
     routing_key: str | None = None
-    batch_size: int = 1
-    batch_timeout: float = 5.0
-    poll_interval: float = 0.5
-    max_retries: int = 3
-    claim_timeout: float = 300.0
+    batch_size: int = Field(default=1, ge=1)
+    batch_timeout: float = Field(default=5.0, gt=0)
+    poll_interval: float = Field(default=0.5, gt=0)
+    max_retries: int = Field(default=3, ge=0)
+    claim_timeout: float = Field(default=300.0, gt=0)
 
-    def __post_init__(self) -> None:
-        """Validate configuration values."""
-        if not self.event_types:
+    @field_validator("event_types")
+    @classmethod
+    def event_types_not_empty(cls, v: tuple) -> tuple:
+        if not v:
             raise ValueError("event_types must not be empty")
-        if self.batch_size < 1:
-            raise ValueError("batch_size must be >= 1")
-        if self.batch_timeout <= 0:
-            raise ValueError("batch_timeout must be > 0")
-        if self.poll_interval <= 0:
-            raise ValueError("poll_interval must be > 0")
-        if self.max_retries < 0:
-            raise ValueError("max_retries must be >= 0")
+        return v
+
+    @model_validator(mode="after")
+    def claim_timeout_greater_than_batch_timeout(self) -> "WorkerConfig":
         if self.claim_timeout <= self.batch_timeout:
             raise ValueError("claim_timeout must be > batch_timeout")
+        return self
 
 
 class WorkerStatus(Enum):
