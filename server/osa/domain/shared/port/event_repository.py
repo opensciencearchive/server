@@ -2,7 +2,7 @@
 
 from typing import Protocol, TypeVar
 
-from osa.domain.shared.event import Event, EventId
+from osa.domain.shared.event import ClaimResult, Event, EventId
 
 E = TypeVar("E", bound=Event)
 
@@ -13,8 +13,10 @@ class EventRepository(Protocol):
     Delivery semantics (pending/delivered/failed) are handled by the Outbox service.
     """
 
-    async def save(self, event: Event, status: str = "pending") -> None:
-        """Persist an event with initial status."""
+    async def save(
+        self, event: Event, status: str = "pending", routing_key: str | None = None
+    ) -> None:
+        """Persist an event with initial status and optional routing key."""
         ...
 
     async def get(self, event_id: EventId) -> Event | None:
@@ -67,4 +69,61 @@ class EventRepository(Protocol):
 
     async def count(self, event_types: list[str] | None = None) -> int:
         """Count events, optionally filtered by types."""
+        ...
+
+    async def claim(
+        self,
+        event_types: list[str],
+        limit: int,
+        routing_key: str | None = None,
+    ) -> ClaimResult:
+        """Claim pending events for processing using FOR UPDATE SKIP LOCKED.
+
+        This atomically:
+        1. Selects pending events matching event_types and routing_key
+        2. Locks them with FOR UPDATE SKIP LOCKED (concurrent workers skip)
+        3. Sets status to 'claimed' and claimed_at to current timestamp
+
+        Args:
+            event_types: Event type names to claim (class names).
+            limit: Maximum number of events to claim.
+            routing_key: Optional routing key filter. If None, claims unrouted events only.
+
+        Returns:
+            ClaimResult containing claimed events and timestamp.
+        """
+        ...
+
+    async def reset_stale_claims(self, timeout_seconds: float) -> int:
+        """Reset events that have been claimed for longer than timeout.
+
+        Sets status back to 'pending' for events where:
+        - status = 'claimed'
+        - claimed_at < now() - timeout_seconds
+
+        Args:
+            timeout_seconds: Consider claims older than this as stale.
+
+        Returns:
+            Number of events reset.
+        """
+        ...
+
+    async def mark_failed_with_retry(
+        self,
+        event_id: "EventId",
+        error: str,
+        max_retries: int,
+    ) -> None:
+        """Mark an event as failed with retry logic.
+
+        If retry_count < max_retries, increments retry_count and resets
+        status to 'pending' for retry.
+        If retry_count >= max_retries, sets status to 'failed' permanently.
+
+        Args:
+            event_id: The event ID.
+            error: Error message to record.
+            max_retries: Maximum retry attempts before marking as failed.
+        """
         ...

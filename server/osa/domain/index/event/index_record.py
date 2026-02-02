@@ -18,9 +18,11 @@ class IndexRecord(Event):
         backend_name: Target backend name (e.g., "vector", "keyword").
         record_srn: Structured Resource Name of the record.
         metadata: Record metadata to index.
+        routing_key: Optional routing key for worker filtering (typically matches backend_name).
     """
 
     id: EventId
     backend_name: str
     record_srn: RecordSRN
     metadata: dict[str, Any]
+    routing_key: str | None = None

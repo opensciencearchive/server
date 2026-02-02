@@ -237,3 +237,4 @@ web/.turbo/
 # Environment
 .env
 !.env.example
+server/osa.yaml

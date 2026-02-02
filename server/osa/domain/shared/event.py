@@ -1,12 +1,14 @@
-"""Domain events, event listeners, and scheduled tasks."""
+"""Domain events, event handlers, scheduled tasks, and worker infrastructure."""
 
 from abc import ABC, ABCMeta, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import Enum
 from typing import (
     Any,
     ClassVar,
     Generic,
+    Iterator,
     NewType,
     TypeVar,
     dataclass_transform,
@@ -15,7 +17,7 @@ from typing import (
 )
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from osa.domain.shared.model.entity import Entity
 
@@ -46,15 +48,114 @@ class Event(Entity):
         cls._registry[cls.__name__] = cls
 
 
-# --- EventListener (Subscription) ---
+# --- Worker Infrastructure ---
+
+
+class WorkerConfig(BaseModel):
+    """Configuration for a single worker instance.
+
+    Attributes:
+        name: Unique worker identifier.
+        event_types: Event types to claim.
+        routing_key: Optional routing key filter.
+        batch_size: Max events per batch (default: 1).
+        batch_timeout: Max seconds to wait for batch (default: 5.0).
+        poll_interval: Seconds between polls when idle (default: 0.5).
+        max_retries: Max retry attempts before marking failed (default: 3).
+        claim_timeout: Seconds before claim considered stale (default: 300.0).
+    """
+
+    model_config = {"frozen": True}
+
+    name: str
+    event_types: tuple[type["Event"], ...]
+    routing_key: str | None = None
+    batch_size: int = Field(default=1, ge=1)
+    batch_timeout: float = Field(default=5.0, gt=0)
+    poll_interval: float = Field(default=0.5, gt=0)
+    max_retries: int = Field(default=3, ge=0)
+    claim_timeout: float = Field(default=300.0, gt=0)
+
+    @field_validator("event_types")
+    @classmethod
+    def event_types_not_empty(cls, v: tuple) -> tuple:
+        if not v:
+            raise ValueError("event_types must not be empty")
+        return v
+
+    @model_validator(mode="after")
+    def claim_timeout_greater_than_batch_timeout(self) -> "WorkerConfig":
+        if self.claim_timeout <= self.batch_timeout:
+            raise ValueError("claim_timeout must be > batch_timeout")
+        return self
+
+
+class WorkerStatus(Enum):
+    """Status of a running worker."""
+
+    IDLE = "idle"
+    CLAIMING = "claiming"
+    PROCESSING = "processing"
+    STOPPING = "stopping"
+
+
+@dataclass
+class WorkerState:
+    """Runtime state for a running worker (not persisted).
+
+    Attributes:
+        config: Worker configuration.
+        status: Current worker status.
+        current_batch: Events currently being processed.
+        last_claim_at: When last claim was made.
+        processed_count: Total events processed.
+        failed_count: Total events failed.
+        error: Last error if any.
+    """
+
+    config: WorkerConfig
+    status: WorkerStatus = WorkerStatus.IDLE
+    current_batch: list["Event"] = field(default_factory=list)
+    last_claim_at: datetime | None = None
+    processed_count: int = 0
+    failed_count: int = 0
+    error: Exception | None = None
+
+
+@dataclass(frozen=True)
+class ClaimResult:
+    """Result of a claim operation.
+
+    Attributes:
+        events: Claimed events (locked).
+        claimed_at: Timestamp of claim.
+    """
+
+    events: list["Event"]
+    claimed_at: datetime
+
+    def __bool__(self) -> bool:
+        """Return True if events are present."""
+        return len(self.events) > 0
+
+    def __len__(self) -> int:
+        """Return number of events."""
+        return len(self.events)
+
+    def __iter__(self) -> Iterator["Event"]:
+        """Iterate over events."""
+        return iter(self.events)
+
+
+# --- EventHandler ---
 
 
 def _extract_event_type(cls: type) -> type["Event"] | None:
-    """Extract the event type E from EventListener[E] or BatchEventListener[E] in class bases."""
+    """Extract the event type E from EventHandler[E] in class bases."""
     for base in getattr(cls, "__orig_bases__", []):
         origin = get_origin(base)
         origin_name = getattr(origin, "__name__", None)
-        if origin is not None and origin_name in ("EventListener", "BatchEventListener"):
+        if origin is not None and origin_name == "EventHandler":
             args = get_args(base)
             if args and isinstance(args[0], type) and issubclass(args[0], Event):
                 return args[0]
@@ -62,8 +163,8 @@ def _extract_event_type(cls: type) -> type["Event"] | None:
 
 
 @dataclass_transform()
-class _EventListenerMeta(ABCMeta):
-    """Metaclass that applies @dataclass and extracts __event_type__ from EventListener[E]."""
+class _EventHandlerMeta(ABCMeta):
+    """Metaclass that applies @dataclass and extracts __event_type__ from EventHandler[E]."""
 
     def __new__(mcs, name: str, bases: tuple[type, ...], namespace: dict[str, Any]) -> type:
         cls = super().__new__(mcs, name, bases, namespace)
@@ -76,65 +177,78 @@ class _EventListenerMeta(ABCMeta):
         return cls
 
 
-class EventListener(Generic[E], metaclass=_EventListenerMeta):
-    """Base class for event listeners (subscriptions).
+class EventHandler(Generic[E], metaclass=_EventHandlerMeta):
+    """Base class for pull-based event handlers.
 
-    Subclasses are automatically dataclasses and have __event_type__ set
-    based on their generic parameter.
+    EventHandler replaces both EventListener and BatchEventListener with a unified pattern.
+    Workers claim events from the outbox and delegate to handlers for processing.
 
-    Example:
-        class SourceListener(EventListener[SourceRequested]):
-            outbox: Outbox
-            config: Config
+    Subclasses are automatically dataclasses with DI-injected dependencies.
+    The __event_type__ is extracted from the generic parameter.
 
-            async def handle(self, event: SourceRequested) -> None:
-                ...
+    Configuration is via class variables:
+        __routing_key__: Optional filter for routing key (default: None)
+        __batch_size__: Max events to claim at once (default: 1)
+        __batch_timeout__: Timeout for partial batches in seconds (default: 5.0)
+        __poll_interval__: Seconds between polls when idle (default: 0.5)
+        __max_retries__: Max retry attempts before marking failed (default: 3)
+        __claim_timeout__: Seconds before claim considered stale (default: 300.0)
 
-        # SourceListener.__event_type__ == SourceRequested
-    """
+    Example (single event):
+        class TriggerInitialSourceRun(EventHandler[ServerStarted]):
+            _config: Config
+            _outbox: Outbox
 
-    __event_type__: ClassVar[type[Event]]
+            async def handle(self, event: ServerStarted) -> None:
+                for source in self._config.sources:
+                    if source.initial_run and source.initial_run.enabled:
+                        await self._outbox.append(SourceRequested(...))
 
-    @abstractmethod
-    async def handle(self, event: Any) -> None:
-        """Handle the event. Subclasses should type event as their specific event type."""
-        ...
+    Example (batch processing):
+        class VectorIndexHandler(EventHandler[IndexRecord]):
+            __routing_key__ = "vector"
+            __batch_size__ = 100
+            __batch_timeout__ = 5.0
 
-
-class BatchEventListener(Generic[E], metaclass=_EventListenerMeta):
-    """Base class for event listeners that process events in batches.
-
-    The BackgroundWorker detects batch listeners and groups events
-    by type before calling handle_batch(). This enables efficient
-    batch operations (e.g., batch embedding generation).
-
-    Events in a batch are all of the same type and should be processed
-    atomically - all succeed or all fail together.
-
-    Example:
-        class IndexRecordBatch(BatchEventListener[IndexRecord]):
-            indexes: IndexRegistry
+            _backend: VectorStorageBackend
 
             async def handle_batch(self, events: list[IndexRecord]) -> None:
-                # Group by backend and call ingest_batch
-                ...
-
-        # IndexRecordBatch.__event_type__ == IndexRecord
+                records = [(str(e.record_srn), e.metadata) for e in events]
+                await self._backend.ingest_batch(records)
     """
 
     __event_type__: ClassVar[type[Event]]
+    __routing_key__: ClassVar[str | None] = None
+    __batch_size__: ClassVar[int] = 1
+    __batch_timeout__: ClassVar[float] = 5.0
+    __poll_interval__: ClassVar[float] = 0.5
+    __max_retries__: ClassVar[int] = 3
+    __claim_timeout__: ClassVar[float] = 300.0
 
-    @abstractmethod
-    async def handle_batch(self, events: list[Any]) -> None:
-        """Process a batch of events.
+    async def handle(self, event: E) -> None:
+        """Handle a single event. Override for single-event processing.
 
         Args:
-            events: List of events to process (all same type)
+            event: The event to handle.
 
         Raises:
-            Exception: If batch processing fails (all events will be retried)
+            NotImplementedError: If neither handle() nor handle_batch() is overridden.
         """
-        ...
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement handle() or handle_batch()"
+        )
+
+    async def handle_batch(self, events: list[E]) -> None:
+        """Handle a batch of events. Override for batch processing.
+
+        Default implementation loops over handle() for each event.
+        Override for more efficient batch operations.
+
+        Args:
+            events: List of events to handle (all same type).
+        """
+        for event in events:
+            await self.handle(event)
 
 
 # --- Schedule ---
