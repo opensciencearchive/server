@@ -153,7 +153,6 @@ class TestIndexHandlers:
                     version=RecordVersion(1),
                 ),
                 metadata={"title": f"Record {i}"},
-                routing_key="vector",
             )
             for i in range(5)
         ]
@@ -184,7 +183,6 @@ class TestIndexHandlers:
                 version=RecordVersion(1),
             ),
             metadata={"title": "Record 1"},
-            routing_key="keyword",
         )
 
         # Process
@@ -213,7 +211,6 @@ class TestIndexHandlers:
                 version=RecordVersion(1),
             ),
             metadata={"title": "Record 1"},
-            routing_key="vector",
         )
 
         # Process - should raise (Worker handles retry)

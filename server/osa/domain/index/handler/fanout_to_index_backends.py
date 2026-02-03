@@ -43,6 +43,5 @@ class FanOutToIndexBackends(EventHandler[RecordPublished]):
                 backend_name=backend_name,
                 record_srn=event.record_srn,
                 metadata=event.metadata,
-                routing_key=backend_name,  # Route to backend-specific worker
             )
             await self.outbox.append(index_event, routing_key=backend_name)
