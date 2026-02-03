@@ -13,7 +13,7 @@ from dishka import AsyncContainer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.application.event import ServerStarted
-from osa.domain.shared.error import SkippedEventsError
+from osa.domain.shared.error import SkippedEvents
 from osa.domain.shared.event import (
     EventHandler,
     EventId,
@@ -159,7 +159,9 @@ class Worker:
         """Main worker loop."""
         try:
             while not self._shutdown:
-                await self._poll_once()
+                had_events = await self._poll_once()
+                if not had_events:
+                    await asyncio.sleep(self._poll_interval)
         except asyncio.CancelledError:
             logger.info(f"Worker '{self.name}' cancelled")
             raise
@@ -170,8 +172,12 @@ class Worker:
         finally:
             logger.info(f"Worker '{self.name}' stopped")
 
-    async def _poll_once(self) -> None:
-        """Execute one poll cycle: claim, process, repeat within UOW scope."""
+    async def _poll_once(self) -> bool:
+        """Execute one poll cycle: claim, process, repeat within UOW scope.
+
+        Returns:
+            True if events were processed, False if idle.
+        """
         if self._container is None:
             raise RuntimeError("Container not set")
 
@@ -190,11 +196,10 @@ class Worker:
             )
 
             if not result.events:
-                # No events available - commit and sleep
+                # No events available - commit and return
                 await session.commit()
                 self._state.status = WorkerStatus.IDLE
-                await asyncio.sleep(self._poll_interval)
-                return
+                return False
 
             # Process claimed events via handler
             self._state.status = WorkerStatus.PROCESSING
@@ -218,7 +223,7 @@ class Worker:
                 await session.commit()
                 self._state.processed_count += len(result.events)
 
-            except SkippedEventsError as e:
+            except SkippedEvents as e:
                 # Mark specific events as skipped (not the whole batch)
                 logger.warning(
                     f"Worker '{self.name}' skipping {len(e.event_ids)} events: {e.reason}"
@@ -249,6 +254,8 @@ class Worker:
             finally:
                 self._state.current_batch = []
                 self._state.status = WorkerStatus.IDLE
+
+        return True
 
 
 class WorkerPool:

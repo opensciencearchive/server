@@ -5,6 +5,7 @@ from typing import ClassVar
 
 from osa.domain.index.event.index_record import IndexRecord
 from osa.domain.index.model.registry import IndexRegistry
+from osa.domain.shared.error import SkippedEvents
 from osa.domain.shared.event import EventHandler
 
 logger = logging.getLogger(__name__)
@@ -26,8 +27,10 @@ class KeywordIndexHandler(EventHandler[IndexRecord]):
         """Process a single IndexRecord event."""
         backend = self.indexes.get("keyword")
         if backend is None:
-            logger.warning("Keyword backend not available, skipping event")
-            return
+            raise SkippedEvents(
+                event_ids=[event.id],
+                reason="Keyword backend not available",
+            )
 
         record = (str(event.record_srn), event.metadata)
 

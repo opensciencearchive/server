@@ -5,6 +5,7 @@ from typing import ClassVar
 
 from osa.domain.index.event.index_record import IndexRecord
 from osa.domain.index.model.registry import IndexRegistry
+from osa.domain.shared.error import SkippedEvents
 from osa.domain.shared.event import EventHandler
 
 logger = logging.getLogger(__name__)
@@ -33,8 +34,10 @@ class VectorIndexHandler(EventHandler[IndexRecord]):
 
         backend = self.indexes.get("vector")
         if backend is None:
-            logger.warning("Vector backend not available, skipping batch")
-            return
+            raise SkippedEvents(
+                event_ids=[e.id for e in events],
+                reason="Vector backend not available",
+            )
 
         # Prepare records for batch ingestion
         records = [(str(e.record_srn), e.metadata) for e in events]

@@ -5,13 +5,16 @@ Tests for Phase 7: Migration.
 
 import asyncio
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
 from osa.domain.index.event.index_record import IndexRecord
-from osa.domain.index.worker import KeywordIndexWorker, VectorIndexWorker
+from osa.domain.index.handler.keyword_index_handler import KeywordIndexHandler
+from osa.domain.index.handler.vector_index_handler import VectorIndexHandler
+from osa.domain.index.model.registry import IndexRegistry
 from osa.domain.shared.event import ClaimResult, EventId
 from osa.domain.shared.model.srn import Domain, LocalId, RecordSRN, RecordVersion
 from osa.infrastructure.event.worker import WorkerPool
@@ -32,8 +35,8 @@ class FakeBackend:
         self.ingested.extend(records)
 
 
-def make_mock_container():
-    """Create a mock DI container that provides scoped Outbox and Session.
+def make_mock_container(handler_type: type, handler_instance: Any):
+    """Create a mock DI container that provides scoped dependencies.
 
     Creates a container mock that returns scoped Outbox and AsyncSession
     when called as an async context manager with scope parameter.
@@ -48,10 +51,12 @@ def make_mock_container():
     session.commit = AsyncMock()
     session.rollback = AsyncMock()
 
-    async def get_dependency(cls):
+    async def get_dependency(cls: type) -> Any:
         """Return the appropriate dependency based on the requested class."""
         if cls == Outbox:
             return outbox
+        if cls == handler_type:
+            return handler_instance
         return session
 
     # Create scope that returns dependencies
@@ -76,14 +81,18 @@ class TestWorkerPoolLifecycle:
     @pytest.mark.asyncio
     async def test_worker_pool_starts_and_stops_cleanly(self):
         """WorkerPool should start and stop without errors."""
-        container, outbox, session = make_mock_container()
-
         vector_backend = FakeBackend("vector")
         keyword_backend = FakeBackend("keyword")
+        registry = IndexRegistry({"vector": vector_backend, "keyword": keyword_backend})
+
+        # Create handler instance
+        vector_handler = VectorIndexHandler(indexes=registry)
+
+        container, outbox, session = make_mock_container(VectorIndexHandler, vector_handler)
 
         pool = WorkerPool(container=container, stale_claim_interval=60.0)
-        pool.add_worker(VectorIndexWorker(vector_backend))
-        pool.add_worker(KeywordIndexWorker(keyword_backend))
+        pool.register(VectorIndexHandler)
+        pool.register(KeywordIndexHandler)
 
         # Start
         await pool.start()
@@ -105,10 +114,14 @@ class TestWorkerPoolLifecycle:
     @pytest.mark.asyncio
     async def test_worker_pool_as_context_manager(self):
         """WorkerPool should work as async context manager."""
-        container, outbox, session = make_mock_container()
+        vector_backend = FakeBackend("vector")
+        registry = IndexRegistry({"vector": vector_backend})
+        vector_handler = VectorIndexHandler(indexes=registry)
+
+        container, outbox, session = make_mock_container(VectorIndexHandler, vector_handler)
 
         pool = WorkerPool(container=container, stale_claim_interval=60.0)
-        pool.add_worker(VectorIndexWorker(FakeBackend("vector"), batch_size=10))
+        pool.register(VectorIndexHandler)
 
         async with pool:
             # Workers should be running
@@ -119,17 +132,15 @@ class TestWorkerPoolLifecycle:
         assert pool.workers[0]._shutdown is True
 
 
-class TestIndexWorkers:
-    """Tests for concrete index workers."""
+class TestIndexHandlers:
+    """Tests for concrete index handlers."""
 
     @pytest.mark.asyncio
-    async def test_vector_worker_processes_batch(self):
-        """VectorIndexWorker should process IndexRecord events in batches."""
-        outbox = AsyncMock()
-        session = AsyncMock()
+    async def test_vector_handler_processes_batch(self):
+        """VectorIndexHandler should process IndexRecord events in batches."""
         backend = FakeBackend("vector")
-
-        worker = VectorIndexWorker(backend, batch_size=10)
+        registry = IndexRegistry({"vector": backend})
+        handler = VectorIndexHandler(indexes=registry)
 
         # Create test events
         events = [
@@ -148,25 +159,20 @@ class TestIndexWorkers:
         ]
 
         # Process
-        await worker.process_events(events, outbox, session)
+        await handler.handle_batch(events)
 
         # Verify backend received all records
         assert len(backend.ingested) == 5
 
-        # Verify all events marked as delivered
-        assert outbox.mark_delivered.call_count == 5
-
     @pytest.mark.asyncio
-    async def test_keyword_worker_processes_individually(self):
-        """KeywordIndexWorker should process IndexRecord events one at a time."""
-        outbox = AsyncMock()
-        session = AsyncMock()
+    async def test_keyword_handler_processes_individually(self):
+        """KeywordIndexHandler should process IndexRecord events one at a time."""
         backend = FakeBackend("keyword")
-
-        worker = KeywordIndexWorker(backend)
+        registry = IndexRegistry({"keyword": backend})
+        handler = KeywordIndexHandler(indexes=registry)
 
         # batch_size should be 1
-        assert worker.config.batch_size == 1
+        assert KeywordIndexHandler.__batch_size__ == 1
 
         # Create test event
         event = IndexRecord(
@@ -182,23 +188,21 @@ class TestIndexWorkers:
         )
 
         # Process
-        await worker.process_events([event], outbox, session)
+        await handler.handle(event)
 
         # Verify
         assert len(backend.ingested) == 1
-        outbox.mark_delivered.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_worker_handles_backend_failure(self):
-        """Workers should mark events as failed when backend fails."""
-        outbox = AsyncMock()
-        session = AsyncMock()
-
+    async def test_handler_raises_on_backend_failure(self):
+        """Handlers should raise when backend fails (Worker handles retry)."""
         # Backend that fails
         failing_backend = AsyncMock()
+        failing_backend.name = "vector"
         failing_backend.ingest_batch = AsyncMock(side_effect=Exception("Backend error"))
 
-        worker = VectorIndexWorker(failing_backend, batch_size=10)
+        registry = IndexRegistry({"vector": failing_backend})
+        handler = VectorIndexHandler(indexes=registry)
 
         event = IndexRecord(
             id=EventId(uuid4()),
@@ -212,11 +216,6 @@ class TestIndexWorkers:
             routing_key="vector",
         )
 
-        # Process - should not raise
-        await worker.process_events([event], outbox, session)
-
-        # Event should be marked as failed with retry
-        outbox.mark_failed_with_retry.assert_called_once()
-        call_args = outbox.mark_failed_with_retry.call_args
-        assert call_args[0][0] == event.id
-        assert "Backend error" in call_args[0][1]
+        # Process - should raise (Worker handles retry)
+        with pytest.raises(Exception, match="Backend error"):
+            await handler.handle_batch([event])

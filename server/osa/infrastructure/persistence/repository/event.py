@@ -4,7 +4,9 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import TypeVar
 
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import func, insert, or_, select, update
+from sqlalchemy.dialects.postgresql import INTERVAL
+from sqlalchemy.sql import literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.shared.event import ClaimResult, Event, EventId
@@ -259,8 +261,17 @@ class SQLAlchemyEventRepository(EventRepository):
 
         # Backoff eligibility: either first attempt (retry_count=0) or enough time passed
         # Backoff formula: min(30, 5^retry_count) seconds
-        # For simplicity, we'll use a fixed formula in the application layer
-        # Here we just check if updated_at is old enough based on retry_count
+        # Events must have updated_at <= now - backoff_seconds to be eligible
+        backoff_seconds = func.least(
+            literal(30),
+            func.power(literal(5), events_table.c.retry_count),
+        )
+        backoff_interval = func.cast(func.concat(backoff_seconds, literal(" seconds")), INTERVAL)
+        backoff_eligible = or_(
+            events_table.c.retry_count == 0,
+            events_table.c.updated_at <= func.now() - backoff_interval,
+        )
+        where_clauses.append(backoff_eligible)
 
         # Select with FOR UPDATE SKIP LOCKED
         stmt = (

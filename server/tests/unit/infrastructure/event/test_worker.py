@@ -6,7 +6,7 @@ Tests for pull-based event processing with EventHandler pattern.
 import asyncio
 from datetime import UTC, datetime
 from typing import ClassVar
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -124,8 +124,8 @@ class TestWorkerPollLoop:
         outbox.mark_delivered.assert_called_once_with(event1.id)
 
     @pytest.mark.asyncio
-    async def test_worker_sleeps_when_no_events(self):
-        """Worker should sleep when no events are available."""
+    async def test_worker_returns_false_when_no_events(self):
+        """Worker._poll_once should return False when no events are available."""
         from osa.infrastructure.event.worker import Worker
 
         # Arrange
@@ -142,11 +142,11 @@ class TestWorkerPollLoop:
         worker.set_container(container)
 
         # Act
-        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-            await worker._poll_once()
+        had_events = await worker._poll_once()
 
-            # Assert - Should sleep for poll_interval when no events
-            mock_sleep.assert_called_once_with(0.1)
+        # Assert - Should return False when no events (sleep happens in _run())
+        assert had_events is False
+        assert worker.state.status == WorkerStatus.IDLE
 
     @pytest.mark.asyncio
     async def test_worker_updates_state_during_processing(self):
