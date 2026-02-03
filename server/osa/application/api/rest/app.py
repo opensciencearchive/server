@@ -9,12 +9,10 @@ from osa.application.api.v1.errors import map_osa_error
 from osa.application.api.v1.routes import events, health, records, search, stats, validation
 from osa.application.di import create_container
 from osa.config import Config, configure_logging
-from osa.domain.index.service import IndexService
 from osa.domain.shared.error import OSAError
-from osa.infrastructure.event.worker import BackgroundWorker
+from osa.infrastructure.event.worker import WorkerPool
 from osa.infrastructure.source.discovery import validate_sources_at_startup
 from osa.util.di.fastapi import setup_dishka
-from osa.util.di.scope import Scope
 
 logger = logging.getLogger(__name__)
 
@@ -23,16 +21,11 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     container = app.state.dishka_container
 
-    # Run background worker (emits ServerStarted internally)
-    worker = await container.get(BackgroundWorker)
-    async with worker:
-        yield
+    # Run unified worker pool (pull-based event handlers + scheduled tasks)
+    worker_pool = await container.get(WorkerPool)
 
-    # Flush all index backends on shutdown to ensure buffered records are persisted
-    logger.info("Flushing index backends on shutdown...")
-    async with container(scope=Scope.UOW) as scope:
-        index_service = await scope.get(IndexService)
-        await index_service.flush_all()
+    async with worker_pool:
+        yield
 
     await container.close()
 

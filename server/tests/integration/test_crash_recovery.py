@@ -9,7 +9,7 @@ from uuid import uuid4
 import pytest
 
 from osa.domain.index.event.index_record import IndexRecord
-from osa.domain.index.listener.index_batch_listener import IndexRecordBatch
+from osa.domain.index.handler.vector_index_handler import VectorIndexHandler
 from osa.domain.index.model.registry import IndexRegistry
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.srn import Domain, LocalId, RecordSRN, RecordVersion
@@ -86,11 +86,11 @@ class TestCrashRecoveryScenarios:
         # Simulate a backend that fails mid-batch
         backend = TrackingBackend("vector", fail_at=1)  # Fail on first call
         registry = IndexRegistry({"vector": backend})
-        listener = IndexRecordBatch(indexes=registry)
+        handler = VectorIndexHandler(indexes=registry)
 
         # Act - Try to process, expecting failure
         with pytest.raises(Exception, match="Simulated crash"):
-            await listener.handle_batch(events)
+            await handler.handle_batch(events)
 
         # Assert - Events should remain pending (outbox unchanged)
         assert len(outbox.pending) == 10  # All still pending
@@ -107,10 +107,10 @@ class TestCrashRecoveryScenarios:
         # First attempt: backend fails
         failing_backend = TrackingBackend("vector", fail_at=1)
         failing_registry = IndexRegistry({"vector": failing_backend})
-        failing_listener = IndexRecordBatch(indexes=failing_registry)
+        failing_handler = VectorIndexHandler(indexes=failing_registry)
 
         with pytest.raises(Exception):
-            await failing_listener.handle_batch(events)
+            await failing_handler.handle_batch(events)
 
         # Events still pending
         assert len(outbox.pending) == 10
@@ -118,10 +118,10 @@ class TestCrashRecoveryScenarios:
         # Second attempt (recovery): backend works
         working_backend = TrackingBackend("vector")
         working_registry = IndexRegistry({"vector": working_backend})
-        working_listener = IndexRecordBatch(indexes=working_registry)
+        working_handler = VectorIndexHandler(indexes=working_registry)
 
         # Act - Retry processing
-        await working_listener.handle_batch(outbox.pending)
+        await working_handler.handle_batch(outbox.pending)
 
         # Assert - All events processed
         assert len(working_backend.indexed_records) == 10
@@ -147,15 +147,15 @@ class TestCrashRecoveryScenarios:
 
         backend = PartialFailBackend()
         registry = IndexRegistry({"vector": backend})
-        listener = IndexRecordBatch(indexes=registry)
+        handler = VectorIndexHandler(indexes=registry)
 
         # Act
         with pytest.raises(Exception, match="Partial failure"):
-            await listener.handle_batch(events)
+            await handler.handle_batch(events)
 
         # Assert - Some records were processed but batch should be atomic
         # In production, the outbox marks all events as failed together
-        # The listener correctly propagates the error for retry
+        # The handler correctly propagates the error for retry
         assert len(backend.processed) == 2  # Backend saw 2 before crash
 
     @pytest.mark.asyncio
@@ -166,11 +166,11 @@ class TestCrashRecoveryScenarios:
 
         backend = TrackingBackend("vector")
         registry = IndexRegistry({"vector": backend})
-        listener = IndexRecordBatch(indexes=registry)
+        handler = VectorIndexHandler(indexes=registry)
 
         # Act - Process twice
-        await listener.handle_batch(events)
-        await listener.handle_batch(events)  # Reprocess same events
+        await handler.handle_batch(events)
+        await handler.handle_batch(events)  # Reprocess same events
 
         # Assert - Records should be in backend (upsert semantics handle duplicates)
         # The backend receives all records from both batches
@@ -198,10 +198,10 @@ class TestCrashRecoveryScenarios:
 
         backend = StatelessBackend()
         registry = IndexRegistry({"vector": backend})
-        listener = IndexRecordBatch(indexes=registry)
+        handler = VectorIndexHandler(indexes=registry)
 
         # Act
-        await listener.handle_batch(events)
+        await handler.handle_batch(events)
 
         # Assert - All records in single batch call, immediately persisted
         assert len(backend.batch_calls) == 1

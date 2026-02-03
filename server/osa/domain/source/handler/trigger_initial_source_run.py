@@ -1,11 +1,11 @@
-"""InitialSourceListener - triggers source pull on server startup if configured."""
+"""TriggerInitialSourceRun - triggers source pull on server startup if configured."""
 
 import logging
 from uuid import uuid4
 
 from osa.application.event import ServerStarted
 from osa.config import Config
-from osa.domain.shared.event import EventId, EventListener
+from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.outbox import Outbox
 from osa.domain.source.event.source_requested import SourceRequested
 from osa.domain.source.event.source_run_completed import SourceRunCompleted
@@ -14,7 +14,7 @@ from osa.domain.source.model.registry import SourceRegistry
 logger = logging.getLogger(__name__)
 
 
-class TriggerInitialSourceRun(EventListener[ServerStarted]):
+class TriggerInitialSourceRun(EventHandler[ServerStarted]):
     """Emits SourceRequested on server startup for sources with initial_run enabled."""
 
     config: Config
@@ -66,4 +66,3 @@ class TriggerInitialSourceRun(EventListener[ServerStarted]):
                     limit=limit,
                 )
             )
-        # Session commit handled by BackgroundWorker

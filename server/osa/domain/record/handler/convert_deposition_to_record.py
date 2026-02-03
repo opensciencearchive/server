@@ -1,14 +1,14 @@
-"""RecordCreationListener - creates records when depositions are approved."""
+"""ConvertDepositionToRecord - creates records when depositions are approved."""
 
 from osa.domain.curation.event.deposition_approved import DepositionApproved
 from osa.domain.record.service import RecordService
-from osa.domain.shared.event import EventListener
+from osa.domain.shared.event import EventHandler
 
 
-class ConvertDepositionToRecord(EventListener[DepositionApproved]):
+class ConvertDepositionToRecord(EventHandler[DepositionApproved]):
     """Creates and persists records when depositions are approved.
 
-    This listener delegates to RecordService for all business logic.
+    This handler delegates to RecordService for all business logic.
     """
 
     service: RecordService

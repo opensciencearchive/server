@@ -74,6 +74,10 @@ dev-detached:
 dev-down:
     docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml down
 
+# Open the web UI in browser
+open-ui:
+    open http://localhost:8080
+
 # === Individual Service Development ===
 
 # Run server independently (requires database)

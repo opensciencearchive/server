@@ -10,8 +10,8 @@ from uuid import uuid4
 import pytest
 
 from osa.domain.index.event.index_record import IndexRecord
-from osa.domain.index.listener.fanout_listener import FanOutToIndexBackends
-from osa.domain.index.listener.index_batch_listener import IndexRecordBatch
+from osa.domain.index.handler.fanout_to_index_backends import FanOutToIndexBackends
+from osa.domain.index.handler.vector_index_handler import VectorIndexHandler
 from osa.domain.index.model.registry import IndexRegistry
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.shared.event import EventId
@@ -42,7 +42,7 @@ class FakeOutbox:
     def __init__(self):
         self.events: list[Any] = []
 
-    async def append(self, event: Any) -> None:
+    async def append(self, event: Any, routing_key: str | None = None) -> None:
         self.events.append(event)
 
 
@@ -92,21 +92,14 @@ class TestBatchEventProcessingFlow:
         assert backend_names == {"vector", "keyword"}
 
     @pytest.mark.asyncio
-    async def test_batch_listener_groups_by_backend(self):
-        """IndexRecordBatch should group events by backend and batch ingest."""
+    async def test_handler_processes_batch(self):
+        """VectorIndexHandler should process events in batches."""
         # Arrange
         vector_backend = FakeBackend("vector")
-        keyword_backend = FakeBackend("keyword")
-        registry = IndexRegistry(
-            {
-                "vector": vector_backend,
-                "keyword": keyword_backend,
-            }
-        )
+        registry = IndexRegistry({"vector": vector_backend})
+        handler = VectorIndexHandler(indexes=registry)
 
-        batch_listener = IndexRecordBatch(indexes=registry)
-
-        # Create mixed events for both backends
+        # Create events for vector backend
         events = [
             IndexRecord(
                 id=EventId(uuid4()),
@@ -119,32 +112,15 @@ class TestBatchEventProcessingFlow:
                 metadata={"id": i},
             )
             for i in range(5)
-        ] + [
-            IndexRecord(
-                id=EventId(uuid4()),
-                backend_name="keyword",
-                record_srn=RecordSRN(
-                    domain=Domain("test.example.com"),
-                    id=LocalId(str(uuid4())),
-                    version=RecordVersion(1),
-                ),
-                metadata={"id": i},
-            )
-            for i in range(3)
         ]
 
         # Act
-        await batch_listener.handle_batch(events)
+        await handler.handle_batch(events)
 
         # Assert - vector backend received 5 records in single batch call
         assert len(vector_backend.batch_calls) == 1
         assert len(vector_backend.batch_calls[0]) == 5
         assert vector_backend.total_records == 5
-
-        # Assert - keyword backend received 3 records in single batch call
-        assert len(keyword_backend.batch_calls) == 1
-        assert len(keyword_backend.batch_calls[0]) == 3
-        assert keyword_backend.total_records == 3
 
     @pytest.mark.asyncio
     async def test_end_to_end_fanout_to_batch(self):
@@ -155,7 +131,7 @@ class TestBatchEventProcessingFlow:
         outbox = FakeOutbox()
 
         fanout = FanOutToIndexBackends(indexes=registry, outbox=outbox)
-        batch_listener = IndexRecordBatch(indexes=registry)
+        handler = VectorIndexHandler(indexes=registry)
 
         # Create multiple RecordPublished events
         num_records = 10
@@ -171,7 +147,7 @@ class TestBatchEventProcessingFlow:
         assert all(e.backend_name == "vector" for e in outbox.events)
 
         # Act - Step 2: Batch process all IndexRecord events
-        await batch_listener.handle_batch(outbox.events)
+        await handler.handle_batch(outbox.events)
 
         # Assert - All records indexed in single batch call
         assert len(vector_backend.batch_calls) == 1
@@ -183,7 +159,7 @@ class TestBatchEventProcessingFlow:
         # Arrange
         backend = FakeBackend("vector")
         registry = IndexRegistry({"vector": backend})
-        batch_listener = IndexRecordBatch(indexes=registry)
+        handler = VectorIndexHandler(indexes=registry)
 
         # Create 1000+ events
         num_events = 1000
@@ -202,7 +178,7 @@ class TestBatchEventProcessingFlow:
         ]
 
         # Act
-        await batch_listener.handle_batch(events)
+        await handler.handle_batch(events)
 
         # Assert - All records in single batch call (not 1000 individual calls)
         assert len(backend.batch_calls) == 1, "Should use single batch call, not individual calls"
@@ -210,41 +186,20 @@ class TestBatchEventProcessingFlow:
         assert len(backend.batch_calls[0]) == num_events
 
     @pytest.mark.asyncio
-    async def test_failure_isolation_between_backends(self):
-        """Verify failures are isolated per-backend at the event level."""
-        # Arrange
-        working_backend = FakeBackend("working")
-        failing_backend = MagicMock()
-        failing_backend.name = "failing"
-        failing_backend.ingest_batch = AsyncMock(side_effect=Exception("Backend failure"))
+    async def test_failure_propagates_from_handler(self):
+        """Verify failures propagate from handler (Worker handles retry)."""
+        # Arrange - VectorIndexHandler looks up "vector" backend specifically
+        vector_backend = MagicMock()
+        vector_backend.name = "vector"
+        vector_backend.ingest_batch = AsyncMock(side_effect=Exception("Backend failure"))
 
-        registry = IndexRegistry(
-            {
-                "working": working_backend,
-                "failing": failing_backend,
-            }
-        )
-        batch_listener = IndexRecordBatch(indexes=registry)
+        registry = IndexRegistry({"vector": vector_backend})
+        handler = VectorIndexHandler(indexes=registry)
 
-        # Create events for both backends
-        working_events = [
+        events = [
             IndexRecord(
                 id=EventId(uuid4()),
-                backend_name="working",
-                record_srn=RecordSRN(
-                    domain=Domain("test.example.com"),
-                    id=LocalId(str(uuid4())),
-                    version=RecordVersion(1),
-                ),
-                metadata={"id": i},
-            )
-            for i in range(3)
-        ]
-
-        failing_events = [
-            IndexRecord(
-                id=EventId(uuid4()),
-                backend_name="failing",
+                backend_name="vector",
                 record_srn=RecordSRN(
                     domain=Domain("test.example.com"),
                     id=LocalId(str(uuid4())),
@@ -255,14 +210,6 @@ class TestBatchEventProcessingFlow:
             for i in range(2)
         ]
 
-        # Note: In the new design, events for different backends are in separate
-        # outbox entries and processed independently by the worker. This test
-        # verifies that at the listener level, each backend batch is independent.
-
-        # Process working backend events
-        await batch_listener.handle_batch(working_events)
-        assert working_backend.total_records == 3
-
-        # Process failing backend events - should raise
+        # Process events - should raise (Worker handles retry)
         with pytest.raises(Exception, match="Backend failure"):
-            await batch_listener.handle_batch(failing_events)
+            await handler.handle_batch(events)

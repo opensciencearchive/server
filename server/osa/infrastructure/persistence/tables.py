@@ -4,10 +4,12 @@ from sqlalchemy import (
     Column,
     DateTime,
     Index,
+    Integer,
     MetaData,
     String,
     Table,
     Text,
+    text,
 )
 from sqlalchemy.types import JSON
 
@@ -77,9 +79,16 @@ events_table = Table(
     Column("event_type", String(128), nullable=False),
     Column("payload", JSON, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
-    Column("delivery_status", String(32), nullable=False),  # pending, delivered, failed
+    Column(
+        "delivery_status", String(32), nullable=False
+    ),  # pending, claimed, delivered, failed, skipped
     Column("delivered_at", DateTime(timezone=True), nullable=True),
     Column("delivery_error", Text, nullable=True),
+    # Pull-based worker columns
+    Column("routing_key", String(255), nullable=True),
+    Column("retry_count", Integer, nullable=False, default=0),
+    Column("claimed_at", DateTime(timezone=True), nullable=True),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
 Index(
@@ -88,3 +97,28 @@ Index(
     events_table.c.created_at.desc(),
 )
 Index("idx_events_delivery_status", events_table.c.delivery_status)
+
+# Partial index for efficient claiming query
+Index(
+    "idx_events_claim",
+    events_table.c.delivery_status,
+    events_table.c.event_type,
+    events_table.c.routing_key,
+    events_table.c.created_at,
+    postgresql_where=text("delivery_status IN ('pending', 'claimed')"),
+)
+
+# Partial index for stale claim detection
+Index(
+    "idx_events_stale_claims",
+    events_table.c.claimed_at,
+    postgresql_where=text("delivery_status = 'claimed'"),
+)
+
+# Partial index for failed event queries
+Index(
+    "idx_events_failed",
+    events_table.c.event_type,
+    events_table.c.created_at,
+    postgresql_where=text("delivery_status = 'failed'"),
+)

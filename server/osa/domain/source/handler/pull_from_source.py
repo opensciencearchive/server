@@ -1,14 +1,14 @@
-"""SourceListener - handles SourceRequested events."""
+"""PullFromSource - handles SourceRequested events."""
 
-from osa.domain.shared.event import EventListener
+from osa.domain.shared.event import EventHandler
 from osa.domain.source.event.source_requested import SourceRequested
 from osa.domain.source.service import SourceService
 
 
-class PullFromSource(EventListener[SourceRequested]):
+class PullFromSource(EventHandler[SourceRequested]):
     """Pulls from a data source and creates depositions.
 
-    This listener delegates to SourceService for all business logic.
+    This handler delegates to SourceService for all business logic.
     Supports chunked processing with continuation events.
     """
 

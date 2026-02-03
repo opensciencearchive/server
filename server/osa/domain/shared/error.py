@@ -77,11 +77,10 @@ class ConfigurationError(InfrastructureError):
 # =============================================================================
 
 
-class SkippedEventsError(Exception):
-    """Raised when some events should be skipped (not failed, not delivered).
+class SkippedEvents(Exception):
+    """Raised when events should be skipped (not failed, not delivered).
 
-    Used when a backend is intentionally removed and leftover events should
-    be marked as skipped for clean semantic separation from failures.
+    Control flow exception for when a backend is unavailable or removed.
     """
 
     def __init__(self, event_ids: list, reason: str) -> None:
