@@ -171,17 +171,27 @@ class OrcidConfig(BaseModel):
 class JwtConfig(BaseModel):
     """JWT configuration."""
 
-    secret: str = ""  # Must be set in production
+    secret: str  # Required - set via OSA_AUTH__JWT__SECRET
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60  # 1 hour
     refresh_token_expire_days: int = 7
+
+    @model_validator(mode="after")
+    def validate_secret_length(self) -> Self:
+        """Ensure JWT secret has sufficient length."""
+        if len(self.secret) < 32:
+            raise ValueError(
+                "JWT secret must be at least 32 characters for security. "
+                "Generate with: openssl rand -hex 32"
+            )
+        return self
 
 
 class AuthConfig(BaseModel):
     """Authentication configuration."""
 
     orcid: OrcidConfig = OrcidConfig()
-    jwt: JwtConfig = JwtConfig()
+    jwt: JwtConfig  # Required - no default, must be configured via env vars
     callback_url: str = ""  # Full callback URL (e.g., https://myarchive.org/api/v1/auth/callback)
 
 
@@ -192,7 +202,7 @@ class Config(BaseSettings):
     database: DatabaseConfig = DatabaseConfig()
     logging: LoggingConfig = LoggingConfig()
     worker: WorkerConfig = WorkerConfig()  # Background worker settings
-    auth: AuthConfig = AuthConfig()  # Authentication settings
+    auth: AuthConfig  # Required - set via OSA_AUTH__JWT__SECRET env var
     indexes: list[IndexConfig] = []  # list of index configs
     sources: list[SourceConfig] = []  # list of source configs
 

@@ -257,7 +257,7 @@ async def handle_oauth_callback(
         error_params = urlencode(
             {
                 "error": "oauth_error",
-                "error_description": str(e),
+                "error_description": "Authentication failed. Please try again.",
             }
         )
         return RedirectResponse(url=f"{frontend_url}/auth/error?{error_params}")

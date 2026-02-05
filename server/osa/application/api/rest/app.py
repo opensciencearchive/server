@@ -32,7 +32,8 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Create FastAPI application."""
-    config = Config()
+    # Pydantic Settings populates from env vars at runtime
+    config = Config()  # type: ignore[call-arg]
 
     # Configure logging early
     configure_logging(config.logging)

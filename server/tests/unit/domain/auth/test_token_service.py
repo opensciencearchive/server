@@ -127,8 +127,8 @@ class TestTokenServiceAccessToken:
 
     def test_validate_access_token_rejects_wrong_secret(self):
         """validate_access_token should reject tokens signed with wrong secret."""
-        service1 = self.make_service(secret="secret-one-that-is-long-enough")
-        service2 = self.make_service(secret="secret-two-that-is-long-enough")
+        service1 = self.make_service(secret="secret-one-that-is-long-enough!!")
+        service2 = self.make_service(secret="secret-two-that-is-long-enough!!")
 
         token = service1.create_access_token(UserId(uuid4()), "0000-0001-2345-6789")
 
@@ -161,7 +161,7 @@ class TestTokenServiceRefreshToken:
     def make_service(self) -> TokenService:
         """Create a TokenService with test config."""
         config = JwtConfig(
-            secret="test-secret",
+            secret="test-secret-key-256-bits-long-xx",
             algorithm="HS256",
             access_token_expire_minutes=60,
             refresh_token_expire_days=7,
@@ -221,7 +221,7 @@ class TestTokenServiceProperties:
     def test_access_token_expire_seconds(self):
         """access_token_expire_seconds should convert minutes to seconds."""
         config = JwtConfig(
-            secret="test",
+            secret="test-secret-key-256-bits-long-xx",
             algorithm="HS256",
             access_token_expire_minutes=30,
             refresh_token_expire_days=7,
@@ -233,7 +233,7 @@ class TestTokenServiceProperties:
     def test_refresh_token_expire_days(self):
         """refresh_token_expire_days should return configured value."""
         config = JwtConfig(
-            secret="test",
+            secret="test-secret-key-256-bits-long-xx",
             algorithm="HS256",
             access_token_expire_minutes=60,
             refresh_token_expire_days=14,

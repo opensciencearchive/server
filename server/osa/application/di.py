@@ -15,7 +15,8 @@ from osa.util.di.scope import Scope
 
 
 def create_container() -> AsyncContainer:
-    config = Config()
+    # Pydantic Settings populates from env vars at runtime
+    config = Config()  # type: ignore[call-arg]
 
     # OSAPaths reads OSA_DATA_DIR from environment automatically
     paths = OSAPaths()
