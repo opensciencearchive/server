@@ -1,12 +1,6 @@
 """Authentication routes for OAuth login flow."""
 
-import hashlib
-import hmac
-import json
 import logging
-import secrets
-import time
-from base64 import urlsafe_b64decode, urlsafe_b64encode
 from typing import Annotated
 from urllib.parse import urlencode
 
@@ -26,64 +20,6 @@ from osa.domain.shared.error import InvalidStateError
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"], route_class=DishkaRoute)
-
-# OAuth state validity period (5 minutes)
-_STATE_EXPIRY_SECONDS = 300
-
-
-def _create_signed_state(secret: str, redirect_uri: str) -> str:
-    """Create a signed, self-verifying OAuth state token.
-
-    The state contains: nonce, redirect_uri, expiry timestamp.
-    Signed with HMAC-SHA256 using the JWT secret.
-    """
-    payload = {
-        "nonce": secrets.token_urlsafe(16),
-        "redirect_uri": redirect_uri,
-        "exp": int(time.time()) + _STATE_EXPIRY_SECONDS,
-    }
-    payload_bytes = json.dumps(payload, separators=(",", ":")).encode()
-    payload_b64 = urlsafe_b64encode(payload_bytes).rstrip(b"=").decode()
-
-    signature = hmac.new(secret.encode(), payload_bytes, hashlib.sha256).digest()
-    signature_b64 = urlsafe_b64encode(signature).rstrip(b"=").decode()
-
-    return f"{payload_b64}.{signature_b64}"
-
-
-def _verify_signed_state(secret: str, state: str) -> str | None:
-    """Verify a signed state token and return the redirect_uri if valid.
-
-    Returns None if the state is invalid or expired.
-    """
-    try:
-        parts = state.split(".")
-        if len(parts) != 2:
-            return None
-
-        payload_b64, signature_b64 = parts
-
-        # Restore base64 padding
-        payload_bytes = urlsafe_b64decode(payload_b64 + "==")
-        signature = urlsafe_b64decode(signature_b64 + "==")
-
-        # Verify signature
-        expected_sig = hmac.new(secret.encode(), payload_bytes, hashlib.sha256).digest()
-        if not hmac.compare_digest(signature, expected_sig):
-            logger.warning("OAuth state signature verification failed")
-            return None
-
-        # Parse and check expiry
-        payload = json.loads(payload_bytes)
-        if payload.get("exp", 0) < time.time():
-            logger.warning("OAuth state expired")
-            return None
-
-        return payload.get("redirect_uri")
-
-    except Exception as e:
-        logger.warning("OAuth state verification error: %s", e)
-        return None
 
 
 class RefreshTokenRequest(BaseModel):
@@ -126,6 +62,7 @@ async def initiate_login(
     request: Request,
     config: FromDishka[Config],
     identity_provider: FromDishka[IdentityProvider],
+    token_service: FromDishka[TokenService],
     redirect_uri: Annotated[str | None, Query()] = None,
     provider: Annotated[str, Query()] = "orcid",
 ) -> Response:
@@ -150,7 +87,7 @@ async def initiate_login(
 
     # Create signed state token (includes redirect_uri, expiry, and nonce)
     final_redirect = redirect_uri or config.frontend.url
-    state = _create_signed_state(config.auth.jwt.secret, final_redirect)
+    state = token_service.create_oauth_state(final_redirect)
 
     # Generate authorization URL
     authorization_url = identity_provider.get_authorization_url(
@@ -202,7 +139,7 @@ async def handle_oauth_callback(
         )
         return RedirectResponse(url=f"{frontend_url}/auth/error?{error_params}")
 
-    final_redirect = _verify_signed_state(config.auth.jwt.secret, state)
+    final_redirect = token_service.verify_oauth_state(state)
     if final_redirect is None:
         logger.warning("OAuth state invalid or expired")
         error_params = urlencode(

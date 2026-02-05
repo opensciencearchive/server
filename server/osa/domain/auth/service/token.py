@@ -1,7 +1,12 @@
 """Token service for JWT creation and validation."""
 
 import hashlib
+import hmac
+import json
+import logging
 import secrets
+import time
+from base64 import urlsafe_b64decode, urlsafe_b64encode
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -11,12 +16,18 @@ from osa.config import JwtConfig
 from osa.domain.auth.model.value import UserId
 from osa.domain.shared.service import Service
 
+logger = logging.getLogger(__name__)
+
+# OAuth state validity period (5 minutes)
+STATE_EXPIRY_SECONDS = 300
+
 
 class TokenService(Service):
     """Service for JWT access token and refresh token operations.
 
     - Access tokens are JWTs (HS256) with user claims
     - Refresh tokens are opaque random strings, stored as hashes in the database
+    - OAuth state tokens are signed payloads for CSRF protection
     """
 
     _config: JwtConfig
@@ -110,3 +121,68 @@ class TokenService(Service):
     def refresh_token_expire_days(self) -> int:
         """Get refresh token expiry in days."""
         return self._config.refresh_token_expire_days
+
+    def create_oauth_state(self, redirect_uri: str) -> str:
+        """Create a signed, self-verifying OAuth state token.
+
+        The state contains: nonce, redirect_uri, expiry timestamp.
+        Signed with HMAC-SHA256 using the JWT secret.
+
+        Args:
+            redirect_uri: The URI to redirect to after OAuth completes
+
+        Returns:
+            URL-safe signed state token in format: payload.signature
+        """
+        payload = {
+            "nonce": secrets.token_urlsafe(16),
+            "redirect_uri": redirect_uri,
+            "exp": int(time.time()) + STATE_EXPIRY_SECONDS,
+        }
+        payload_bytes = json.dumps(payload, separators=(",", ":")).encode()
+        payload_b64 = urlsafe_b64encode(payload_bytes).rstrip(b"=").decode()
+
+        signature = hmac.new(self._config.secret.encode(), payload_bytes, hashlib.sha256).digest()
+        signature_b64 = urlsafe_b64encode(signature).rstrip(b"=").decode()
+
+        return f"{payload_b64}.{signature_b64}"
+
+    def verify_oauth_state(self, state: str) -> str | None:
+        """Verify a signed state token and return the redirect_uri if valid.
+
+        Args:
+            state: The signed state token to verify
+
+        Returns:
+            The redirect_uri if valid, None if invalid or expired
+        """
+        try:
+            parts = state.split(".")
+            if len(parts) != 2:
+                return None
+
+            payload_b64, signature_b64 = parts
+
+            # Restore base64 padding
+            payload_bytes = urlsafe_b64decode(payload_b64 + "==")
+            signature = urlsafe_b64decode(signature_b64 + "==")
+
+            # Verify signature
+            expected_sig = hmac.new(
+                self._config.secret.encode(), payload_bytes, hashlib.sha256
+            ).digest()
+            if not hmac.compare_digest(signature, expected_sig):
+                logger.warning("OAuth state signature verification failed")
+                return None
+
+            # Parse and check expiry
+            payload = json.loads(payload_bytes)
+            if payload.get("exp", 0) < time.time():
+                logger.warning("OAuth state expired")
+                return None
+
+            return payload.get("redirect_uri")
+
+        except Exception as e:
+            logger.warning("OAuth state verification error: %s", e)
+            return None
