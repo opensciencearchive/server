@@ -3,6 +3,9 @@
 # Stage 1: Builder
 FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS builder
 
+# Install curl for healthchecks in dev mode
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Enable bytecode compilation for faster startup

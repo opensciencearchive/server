@@ -20,29 +20,9 @@ up-attached:
 down:
     docker compose -f deploy/docker-compose.yml down
 
-# View logs from all services
-logs:
-    docker compose -f deploy/docker-compose.yml logs -f
-
-# View logs from a specific service
-logs-service service:
+# View logs for a service (e.g., just logs server, just logs db)
+logs service:
     docker compose -f deploy/docker-compose.yml logs -f {{service}}
-
-# View server logs
-server-logs:
-    docker compose -f deploy/docker-compose.yml logs -f server
-
-# View last N lines of server logs (default: 100)
-server-logs-tail lines="100":
-    docker compose -f deploy/docker-compose.yml logs --tail {{lines}} server
-
-# View server logs with timestamps
-server-logs-time:
-    docker compose -f deploy/docker-compose.yml logs -f -t server
-
-# View server logs since a time (e.g., "10m", "1h", "2024-01-01")
-server-logs-since since:
-    docker compose -f deploy/docker-compose.yml logs -f --since {{since}} server
 
 # Shell into the server container
 server-shell:
@@ -105,10 +85,6 @@ db-up:
 # Stop the database
 db-down:
     docker compose -f deploy/docker-compose.yml stop db
-
-# View database logs
-db-logs:
-    docker compose -f deploy/docker-compose.yml logs -f db
 
 # Connect to PostgreSQL
 db-connect:

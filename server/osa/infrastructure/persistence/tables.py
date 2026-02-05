@@ -3,12 +3,14 @@
 from sqlalchemy import (
     Column,
     DateTime,
+    ForeignKey,
     Index,
     Integer,
     MetaData,
     String,
     Table,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.types import JSON
@@ -122,3 +124,54 @@ Index(
     events_table.c.created_at,
     postgresql_where=text("delivery_status = 'failed'"),
 )
+
+
+# ============================================================================
+# USERS TABLE (Authentication)
+# ============================================================================
+users_table = Table(
+    "users",
+    metadata,
+    Column("id", String, primary_key=True),  # UUID as string
+    Column("display_name", String(255), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=True),
+)
+
+
+# ============================================================================
+# IDENTITIES TABLE (Authentication)
+# ============================================================================
+identities_table = Table(
+    "identities",
+    metadata,
+    Column("id", String, primary_key=True),  # UUID as string
+    Column("user_id", String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("provider", String(50), nullable=False),  # "orcid", "google", etc.
+    Column("external_id", String(255), nullable=False),  # ORCiD ID, Google ID, etc.
+    Column("metadata", JSON, nullable=True),  # Provider-specific data (name, email)
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("provider", "external_id", name="uq_identity_provider_external"),
+)
+
+Index("ix_identities_user_id", identities_table.c.user_id)
+
+
+# ============================================================================
+# REFRESH TOKENS TABLE (Authentication)
+# ============================================================================
+refresh_tokens_table = Table(
+    "refresh_tokens",
+    metadata,
+    Column("id", String, primary_key=True),  # UUID as string
+    Column("user_id", String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("token_hash", String(64), nullable=False),  # SHA256 hash
+    Column("family_id", String, nullable=False),  # UUID - for theft detection
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("revoked_at", DateTime(timezone=True), nullable=True),
+)
+
+Index("ix_refresh_tokens_user_id", refresh_tokens_table.c.user_id)
+Index("ix_refresh_tokens_token_hash", refresh_tokens_table.c.token_hash)
+Index("ix_refresh_tokens_family_id", refresh_tokens_table.c.family_id)
