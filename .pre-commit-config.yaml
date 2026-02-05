@@ -43,3 +43,12 @@ repos:
         files: ^web/
         types_or: [javascript, jsx, ts, tsx, css]
         pass_filenames: false
+
+      - id: web-build
+        name: web build
+        entry: pnpm --dir web build
+        language: system
+        files: ^web/
+        types_or: [javascript, jsx, ts, tsx, css, json]
+        pass_filenames: false
+        stages: [pre-commit]

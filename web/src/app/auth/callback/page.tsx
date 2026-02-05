@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { Suspense, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { OSAClient, parseAuthCallback } from '@/lib/sdk';
 
-export default function AuthCallbackPage() {
+function AuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const processedRef = useRef(false);
@@ -68,5 +68,19 @@ export default function AuthCallbackPage() {
     <main style={{ padding: '2rem', textAlign: 'center' }}>
       <p>Completing sign in...</p>
     </main>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <main style={{ padding: '2rem', textAlign: 'center' }}>
+          <p>Loading...</p>
+        </main>
+      }
+    >
+      <AuthCallbackContent />
+    </Suspense>
   );
 }
