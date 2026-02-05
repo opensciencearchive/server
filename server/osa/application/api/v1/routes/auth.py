@@ -17,6 +17,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from osa.config import Config
+from osa.domain.auth.model.value import CurrentUser
 from osa.domain.auth.port.identity_provider import IdentityProvider
 from osa.domain.auth.service.auth import AuthService
 from osa.domain.auth.service.token import TokenService
@@ -301,62 +302,20 @@ async def logout(
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(
-    request: Request,
-    config: FromDishka[Config],
+    current_user: FromDishka[CurrentUser],
     auth_service: FromDishka[AuthService],
 ) -> UserResponse:
     """Get current authenticated user information."""
-    # Extract token from Authorization header
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
+    user = await auth_service.get_user_by_id(current_user.user_id)
+
+    if user is None:
         raise HTTPException(
             status_code=401,
-            detail={"code": "missing_token", "message": "Authorization header required"},
-            headers={"WWW-Authenticate": "Bearer"},
+            detail={"code": "user_not_found", "message": "User not found"},
         )
 
-    token = auth_header[7:]  # Remove "Bearer " prefix
-
-    try:
-        import jwt
-
-        payload = jwt.decode(
-            token,
-            config.auth.jwt.secret,
-            algorithms=[config.auth.jwt.algorithm],
-            audience="authenticated",
-        )
-        user_id = payload["sub"]
-        orcid_id = payload["orcid_id"]
-
-        # Get full user info from auth service
-        from osa.domain.auth.model.value import UserId
-        from uuid import UUID
-
-        user = await auth_service.get_user_by_id(UserId(UUID(user_id)))
-
-        if user is None:
-            raise HTTPException(
-                status_code=401,
-                detail={"code": "user_not_found", "message": "User not found"},
-            )
-
-        return UserResponse(
-            id=str(user.id),
-            display_name=user.display_name,
-            orcid_id=orcid_id,
-        )
-
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(
-            status_code=401,
-            detail={"code": "token_expired", "message": "Token has expired"},
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    except jwt.InvalidTokenError:
-        raise HTTPException(
-            status_code=401,
-            detail={"code": "invalid_token", "message": "Invalid token"},
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    return UserResponse(
+        id=str(user.id),
+        display_name=user.display_name,
+        orcid_id=current_user.orcid_id,
+    )

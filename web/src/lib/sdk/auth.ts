@@ -154,7 +154,6 @@ export class AuthClient {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${stored.tokens.accessToken}`,
           },
           body: JSON.stringify({
             refresh_token: stored.tokens.refreshToken,

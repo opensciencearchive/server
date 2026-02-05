@@ -1,6 +1,7 @@
 """Value objects for the auth domain."""
 
 import re
+from dataclasses import dataclass
 from uuid import UUID, uuid4
 
 from pydantic import RootModel, field_validator
@@ -68,6 +69,14 @@ class TokenFamilyId(RootModel[UUID]):
 
 
 ORCID_PATTERN = re.compile(r"^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$")
+
+
+@dataclass(frozen=True)
+class CurrentUser:
+    """Authenticated user context extracted from JWT token."""
+
+    user_id: "UserId"
+    orcid_id: str
 
 
 class OrcidId(RootModel[str]):
