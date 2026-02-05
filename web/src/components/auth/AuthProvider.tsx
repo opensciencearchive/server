@@ -1,5 +1,6 @@
 'use client';
 
+/* eslint-disable react-hooks/set-state-in-effect */
 import { createContext, useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { OSAClient, type AuthState, type TokenPair, type User } from '@/lib/sdk';
@@ -24,30 +25,26 @@ export function AuthProvider({ children, baseUrl = '/api/v1' }: AuthProviderProp
 
   const client = useMemo(() => new OSAClient({ baseUrl }), [baseUrl]);
 
-  // Initialize auth state from storage
+  // Initialize auth state from storage (client-side only)
   useEffect(() => {
-    const stored = client.getStoredAuth();
-    if (stored) {
-      setUser(stored.user);
-      setTokens(stored.tokens);
-    }
-    setIsLoading(false);
-  }, [client]);
-
-  // Handle OAuth callback if present in URL hash
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
+    // Check for OAuth callback in URL hash first
     const hash = window.location.hash;
     if (hash && hash.includes('auth=')) {
       const auth = client.handleAuthCallback(hash);
       if (auth) {
         setUser(auth.user);
         setTokens(auth.tokens);
-        // Clear hash from URL
         window.history.replaceState(null, '', window.location.pathname + window.location.search);
       }
+    } else {
+      // Load from storage
+      const stored = client.getStoredAuth();
+      if (stored) {
+        setUser(stored.user);
+        setTokens(stored.tokens);
+      }
     }
+    setIsLoading(false);
   }, [client]);
 
   const login = useCallback(() => {
@@ -66,13 +63,12 @@ export function AuthProvider({ children, baseUrl = '/api/v1' }: AuthProviderProp
       const newTokens = await client.refreshToken();
       setTokens(newTokens);
     } catch {
-      // Refresh failed, clear auth state
       setUser(null);
       setTokens(null);
     }
   }, [client]);
 
-  const isAuthenticated = user !== null && tokens !== null && tokens.expiresAt > Date.now();
+  const isAuthenticated = user !== null && tokens !== null;
 
   const value: AuthContextValue = {
     user,

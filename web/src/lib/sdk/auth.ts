@@ -2,7 +2,7 @@
  * Authentication client for OSA SDK.
  */
 
-import type { LocalTokenStorage, TokenStorage } from './storage';
+import type { TokenStorage } from './storage';
 import type {
   AuthCallbackParams,
   SDKConfig,
