@@ -33,7 +33,7 @@ export function parseAuthCallback(hash: string): AuthCallbackParams | null {
     const expiresIn = params.get('expires_in');
     const userId = params.get('user_id');
     const displayName = params.get('display_name');
-    const orcidId = params.get('orcid_id');
+    const externalId = params.get('external_id');
 
     if (!accessToken || !refreshToken || !expiresIn || !userId || !orcidId) {
       return null;
