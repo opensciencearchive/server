@@ -65,17 +65,18 @@ export class AuthClient {
   }
 
   /** Get the login URL to redirect users to */
-  getLoginUrl(redirectUri?: string): string {
+  getLoginUrl(redirectUri?: string, provider: string = 'orcid'): string {
     // Handle both relative and absolute baseUrl
     const base = this.config.baseUrl.startsWith('http')
       ? this.config.baseUrl
       : `${window.location.origin}${this.config.baseUrl}`;
-    console.log('Base URL for auth:', base);
     const url = new URL(`${base}/auth/login`);
+    url.searchParams.set('provider', provider);
     if (redirectUri) {
       url.searchParams.set('redirect_uri', redirectUri);
     }
     return url.toString();
+  }
   }
 
   /** Handle OAuth callback and store tokens */
