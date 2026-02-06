@@ -107,7 +107,8 @@ class AuthService(Service):
         from osa.domain.shared.error import InvalidStateError
 
         token_hash = self._token_service.hash_token(refresh_token_raw)
-        stored_token = await self._refresh_token_repo.get_by_token_hash(token_hash)
+        # Lock the row to prevent concurrent refresh attempts (race condition)
+        stored_token = await self._refresh_token_repo.get_by_token_hash(token_hash, for_update=True)
 
         if stored_token is None:
             raise InvalidStateError("Invalid refresh token", code="invalid_refresh_token")

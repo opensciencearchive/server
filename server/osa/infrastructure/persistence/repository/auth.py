@@ -180,8 +180,12 @@ class PostgresRefreshTokenRepository(RefreshTokenRepository):
         row = result.mappings().first()
         return _row_to_refresh_token(dict(row)) if row else None
 
-    async def get_by_token_hash(self, token_hash: str) -> RefreshToken | None:
+    async def get_by_token_hash(
+        self, token_hash: str, *, for_update: bool = False
+    ) -> RefreshToken | None:
         stmt = select(refresh_tokens_table).where(refresh_tokens_table.c.token_hash == token_hash)
+        if for_update:
+            stmt = stmt.with_for_update()
         result = await self.session.execute(stmt)
         row = result.mappings().first()
         return _row_to_refresh_token(dict(row)) if row else None

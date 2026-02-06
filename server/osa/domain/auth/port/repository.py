@@ -64,8 +64,17 @@ class RefreshTokenRepository(Port, Protocol):
         ...
 
     @abstractmethod
-    async def get_by_token_hash(self, token_hash: str) -> RefreshToken | None:
-        """Get a refresh token by its hash."""
+    async def get_by_token_hash(
+        self, token_hash: str, *, for_update: bool = False
+    ) -> RefreshToken | None:
+        """Get a refresh token by its hash.
+
+        Args:
+            token_hash: The hash of the token to find.
+            for_update: If True, acquire a row-level lock (SELECT FOR UPDATE)
+                to prevent concurrent modifications. Use this when the token
+                will be modified after retrieval (e.g., during refresh).
+        """
         ...
 
     @abstractmethod
