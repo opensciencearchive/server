@@ -6,7 +6,7 @@
 export interface User {
   id: string;
   displayName: string | null;
-  orcidId: string;
+  externalId: string;
 }
 
 /** Token pair from authentication */
