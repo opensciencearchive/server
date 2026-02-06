@@ -88,8 +88,9 @@ export class AuthClient {
 
     const user: User = {
       id: params.userId,
+      id: params.userId,
       displayName: params.displayName || null,
-      orcidId: params.orcidId,
+      externalId: params.externalId,
     };
 
     // Store auth data
