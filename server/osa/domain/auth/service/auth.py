@@ -195,6 +195,19 @@ class AuthService(Service):
         identities = await self._identity_repo.get_by_user_id(user_id)
         return next((i for i in identities if i.provider == "orcid"), None)
 
+    async def get_user_id_from_refresh_token(self, raw_token: str) -> UserId | None:
+        """Get the user ID associated with a refresh token.
+
+        Args:
+            raw_token: The raw refresh token string
+
+        Returns:
+            The user ID if token exists, None otherwise
+        """
+        token_hash = self._token_service.hash_token(raw_token)
+        stored = await self._refresh_token_repo.get_by_token_hash(token_hash)
+        return stored.user_id if stored else None
+
     async def _find_or_create_user(self, identity_info: IdentityInfo) -> tuple[User, Identity]:
         """Find existing user by identity or create new one."""
         # Check if identity already exists

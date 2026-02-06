@@ -11,8 +11,19 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from osa.config import Config
+from osa.domain.auth.command.login import (
+    CompleteOAuth,
+    CompleteOAuthHandler,
+    InitiateLogin,
+    InitiateLoginHandler,
+)
+from osa.domain.auth.command.token import (
+    Logout,
+    LogoutHandler,
+    RefreshTokens,
+    RefreshTokensHandler,
+)
 from osa.domain.auth.model.value import CurrentUser
-from osa.domain.auth.port.identity_provider import IdentityProvider
 from osa.domain.auth.service.auth import AuthService
 from osa.domain.auth.service.token import TokenService
 from osa.domain.shared.error import InvalidStateError
@@ -61,8 +72,7 @@ class UserResponse(BaseModel):
 async def initiate_login(
     request: Request,
     config: FromDishka[Config],
-    identity_provider: FromDishka[IdentityProvider],
-    token_service: FromDishka[TokenService],
+    handler: FromDishka[InitiateLoginHandler],
     redirect_uri: Annotated[str | None, Query()] = None,
     provider: Annotated[str, Query()] = "orcid",
 ) -> Response:
@@ -82,29 +92,28 @@ async def initiate_login(
     # Determine callback URL
     callback_url = config.auth.callback_url
     if not callback_url:
-        # Derive from request URL
         callback_url = str(request.url_for("handle_oauth_callback"))
 
-    # Create signed state token (includes redirect_uri, expiry, and nonce)
+    # Determine final redirect URI
     final_redirect = redirect_uri or config.frontend.url
-    state = token_service.create_oauth_state(final_redirect)
 
-    # Generate authorization URL
-    authorization_url = identity_provider.get_authorization_url(
-        state=state,
-        redirect_uri=callback_url,
+    result = await handler.run(
+        InitiateLogin(
+            callback_url=callback_url,
+            final_redirect_uri=final_redirect,
+            provider=provider,
+        )
     )
 
     logger.info("OAuth login initiated, redirecting to IdP")
-    return RedirectResponse(url=authorization_url, status_code=302)
+    return RedirectResponse(url=result.authorization_url, status_code=302)
 
 
 @router.get("/callback")
 async def handle_oauth_callback(
     request: Request,
     config: FromDishka[Config],
-    auth_service: FromDishka[AuthService],
-    identity_provider: FromDishka[IdentityProvider],
+    handler: FromDishka[CompleteOAuthHandler],
     token_service: FromDishka[TokenService],
     code: Annotated[str | None, Query()] = None,
     state: Annotated[str | None, Query()] = None,
@@ -166,28 +175,29 @@ async def handle_oauth_callback(
         if not callback_url:
             callback_url = str(request.url_for("handle_oauth_callback"))
 
-        # Complete OAuth flow
-        user, identity, access_token, refresh_token = await auth_service.complete_oauth(
-            provider=identity_provider,
-            code=code,
-            redirect_uri=callback_url,
+        # Complete OAuth flow via handler
+        result = await handler.run(
+            CompleteOAuth(
+                code=code,
+                callback_url=callback_url,
+            )
         )
 
         # Build redirect URL with tokens in fragment
         token_params = urlencode(
             {
-                "access_token": access_token,
-                "refresh_token": refresh_token,
+                "access_token": result.access_token,
+                "refresh_token": result.refresh_token,
                 "token_type": "Bearer",
-                "expires_in": token_service.access_token_expire_seconds,
-                "user_id": str(user.id),
-                "display_name": user.display_name or "",
-                "orcid_id": identity.external_id,
+                "expires_in": result.expires_in,
+                "user_id": result.user_id,
+                "display_name": result.display_name or "",
+                "orcid_id": result.orcid_id,
             }
         )
 
         redirect_url = f"{final_redirect}#auth={token_params}"
-        logger.info("OAuth complete, user authenticated: user_id=%s", user.id)
+        logger.info("OAuth complete, user authenticated: user_id=%s", result.user_id)
         return RedirectResponse(url=redirect_url, status_code=302)
 
     except Exception as e:
@@ -204,18 +214,15 @@ async def handle_oauth_callback(
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
     body: RefreshTokenRequest,
-    auth_service: FromDishka[AuthService],
-    token_service: FromDishka[TokenService],
+    handler: FromDishka[RefreshTokensHandler],
 ) -> TokenResponse:
     """Refresh access token using refresh token."""
     try:
-        _user, access_token, new_refresh_token = await auth_service.refresh_tokens(
-            body.refresh_token
-        )
+        result = await handler.run(RefreshTokens(refresh_token=body.refresh_token))
         return TokenResponse(
-            access_token=access_token,
-            refresh_token=new_refresh_token,
-            expires_in=token_service.access_token_expire_seconds,
+            access_token=result.access_token,
+            refresh_token=result.refresh_token,
+            expires_in=result.expires_in,
         )
     except InvalidStateError as e:
         raise HTTPException(
@@ -230,11 +237,11 @@ async def refresh_token(
 @router.post("/logout", response_model=LogoutResponse)
 async def logout(
     body: LogoutRequest,
-    auth_service: FromDishka[AuthService],
+    handler: FromDishka[LogoutHandler],
 ) -> LogoutResponse:
     """Logout and revoke refresh token."""
-    success = await auth_service.logout(body.refresh_token)
-    return LogoutResponse(success=success)
+    result = await handler.run(Logout(refresh_token=body.refresh_token))
+    return LogoutResponse(success=result.success)
 
 
 @router.get("/me", response_model=UserResponse)

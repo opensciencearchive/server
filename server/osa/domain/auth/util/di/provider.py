@@ -8,6 +8,11 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from osa.config import Config
+from osa.domain.auth.command.login import (
+    CompleteOAuthHandler,
+    InitiateLoginHandler,
+)
+from osa.domain.auth.command.token import LogoutHandler, RefreshTokensHandler
 from osa.domain.auth.model.value import CurrentUser, UserId
 from osa.domain.auth.port.repository import (
     IdentityRepository,
@@ -25,6 +30,12 @@ class AuthProvider(Provider):
     """DI provider for auth domain services and handlers."""
 
     request = from_context(provides=Request, scope=Scope.UOW)
+
+    # Command Handlers
+    initiate_login_handler = provide(InitiateLoginHandler, scope=Scope.UOW)
+    complete_oauth_handler = provide(CompleteOAuthHandler, scope=Scope.UOW)
+    refresh_tokens_handler = provide(RefreshTokensHandler, scope=Scope.UOW)
+    logout_handler = provide(LogoutHandler, scope=Scope.UOW)
 
     @provide(scope=Scope.UOW)
     def get_token_service(self, config: Config) -> TokenService:
