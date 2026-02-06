@@ -9,7 +9,7 @@ class UserAuthenticated(Event):
     id: EventId
     user_id: str
     provider: str
-    orcid_id: str
+    external_id: str
 
 
 class UserLoggedOut(Event):

@@ -13,7 +13,7 @@ from osa.domain.auth.command.login import (
     InitiateLoginHandler,
 )
 from osa.domain.auth.command.token import LogoutHandler, RefreshTokensHandler
-from osa.domain.auth.model.value import CurrentUser, UserId
+from osa.domain.auth.model.value import CurrentUser, ProviderIdentity, UserId
 from osa.domain.auth.port.repository import (
     IdentityRepository,
     RefreshTokenRepository,
@@ -85,7 +85,10 @@ class AuthProvider(Provider):
             payload = token_service.validate_access_token(token)
             return CurrentUser(
                 user_id=UserId(UUID(payload["sub"])),
-                orcid_id=payload["orcid_id"],
+                identity=ProviderIdentity(
+                    provider=payload["provider"],
+                    external_id=payload["external_id"],
+                ),
             )
         except jwt.ExpiredSignatureError as e:
             raise HTTPException(

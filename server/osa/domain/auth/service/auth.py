@@ -5,7 +5,7 @@ import logging
 from osa.domain.auth.model.identity import Identity
 from osa.domain.auth.model.token import RefreshToken
 from osa.domain.auth.model.user import User
-from osa.domain.auth.model.value import TokenFamilyId, UserId
+from osa.domain.auth.model.value import ProviderIdentity, TokenFamilyId, UserId
 from osa.domain.auth.port.identity_provider import IdentityInfo, IdentityProvider
 from osa.domain.auth.port.repository import (
     IdentityRepository,
@@ -131,16 +131,15 @@ class AuthService(Service):
         stored_token.revoke()
         await self._refresh_token_repo.save(stored_token)
 
-        # Get user and their ORCiD identity
+        # Get user and their primary identity
         user = await self._user_repo.get(stored_token.user_id)
         if user is None:
             raise InvalidStateError("User not found", code="user_not_found")
 
-        identities = await self._identity_repo.get_by_user_id(user.id)
-        orcid_identity = next((i for i in identities if i.provider == "orcid"), None)
+        primary_identity = await self.get_primary_identity(user.id)
 
-        if orcid_identity is None:
-            raise InvalidStateError("User has no ORCiD identity", code="no_orcid_identity")
+        if primary_identity is None:
+            raise InvalidStateError("User has no identity", code="no_identity")
 
         # Issue new tokens in same family
         raw_token, token_hash = self._token_service.create_refresh_token()
@@ -154,7 +153,7 @@ class AuthService(Service):
 
         access_token = self._token_service.create_access_token(
             user_id=user.id,
-            orcid_id=orcid_identity.external_id,
+            identity=primary_identity,
         )
 
         logger.info("Tokens refreshed: user_id=%s", user.id)
@@ -190,10 +189,18 @@ class AuthService(Service):
         """Get a user by their ID."""
         return await self._user_repo.get(user_id)
 
-    async def get_orcid_identity(self, user_id: UserId) -> Identity | None:
-        """Get the ORCiD identity for a user."""
+    async def get_primary_identity(self, user_id: UserId) -> ProviderIdentity | None:
+        """Get the primary identity for a user.
+
+        Returns the first identity found for the user. In the future,
+        this could be extended to support multiple identities with a
+        designated primary.
+        """
         identities = await self._identity_repo.get_by_user_id(user_id)
-        return next((i for i in identities if i.provider == "orcid"), None)
+        if not identities:
+            return None
+        first = identities[0]
+        return ProviderIdentity(provider=first.provider, external_id=first.external_id)
 
     async def get_user_id_from_refresh_token(self, raw_token: str) -> UserId | None:
         """Get the user ID associated with a refresh token.
@@ -256,9 +263,13 @@ class AuthService(Service):
         await self._refresh_token_repo.save(refresh_token)
 
         # Create access token
+        provider_identity = ProviderIdentity(
+            provider=identity.provider,
+            external_id=identity.external_id,
+        )
         access_token = self._token_service.create_access_token(
             user_id=user.id,
-            orcid_id=identity.external_id,
+            identity=provider_identity,
         )
 
         return access_token, raw_token

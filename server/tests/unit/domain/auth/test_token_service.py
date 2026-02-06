@@ -7,7 +7,7 @@ import jwt
 import pytest
 
 from osa.config import JwtConfig
-from osa.domain.auth.model.value import UserId
+from osa.domain.auth.model.value import ProviderIdentity, UserId
 from osa.domain.auth.service.token import TokenService
 
 
@@ -28,9 +28,9 @@ class TestTokenServiceAccessToken:
         """create_access_token should return a decodable JWT."""
         service = self.make_service()
         user_id = UserId(uuid4())
-        orcid_id = "0000-0001-2345-6789"
+        identity = ProviderIdentity(provider="orcid", external_id="0000-0001-2345-6789")
 
-        token = service.create_access_token(user_id, orcid_id)
+        token = service.create_access_token(user_id, identity)
 
         # Should be decodable
         payload = jwt.decode(
@@ -40,15 +40,17 @@ class TestTokenServiceAccessToken:
             audience="authenticated",
         )
         assert payload["sub"] == str(user_id)
-        assert payload["orcid_id"] == orcid_id
+        assert payload["provider"] == "orcid"
+        assert payload["external_id"] == "0000-0001-2345-6789"
         assert payload["aud"] == "authenticated"
 
     def test_create_access_token_includes_expiry(self):
         """create_access_token should set exp claim."""
         service = self.make_service()
         user_id = UserId(uuid4())
+        identity = ProviderIdentity(provider="orcid", external_id="0000-0001-2345-6789")
 
-        token = service.create_access_token(user_id, "0000-0001-2345-6789")
+        token = service.create_access_token(user_id, identity)
 
         payload = jwt.decode(
             token,
@@ -66,9 +68,10 @@ class TestTokenServiceAccessToken:
         """create_access_token should include unique jti claim."""
         service = self.make_service()
         user_id = UserId(uuid4())
+        identity = ProviderIdentity(provider="orcid", external_id="0000-0001-2345-6789")
 
-        token1 = service.create_access_token(user_id, "0000-0001-2345-6789")
-        token2 = service.create_access_token(user_id, "0000-0001-2345-6789")
+        token1 = service.create_access_token(user_id, identity)
+        token2 = service.create_access_token(user_id, identity)
 
         payload1 = jwt.decode(
             token1,
@@ -91,10 +94,11 @@ class TestTokenServiceAccessToken:
         """create_access_token should include additional claims if provided."""
         service = self.make_service()
         user_id = UserId(uuid4())
+        identity = ProviderIdentity(provider="orcid", external_id="0000-0001-2345-6789")
 
         token = service.create_access_token(
             user_id,
-            "0000-0001-2345-6789",
+            identity,
             additional_claims={"custom": "value"},
         )
 
@@ -110,13 +114,14 @@ class TestTokenServiceAccessToken:
         """validate_access_token should return decoded payload."""
         service = self.make_service()
         user_id = UserId(uuid4())
-        orcid_id = "0000-0001-2345-6789"
+        identity = ProviderIdentity(provider="orcid", external_id="0000-0001-2345-6789")
 
-        token = service.create_access_token(user_id, orcid_id)
+        token = service.create_access_token(user_id, identity)
         payload = service.validate_access_token(token)
 
         assert payload["sub"] == str(user_id)
-        assert payload["orcid_id"] == orcid_id
+        assert payload["provider"] == "orcid"
+        assert payload["external_id"] == "0000-0001-2345-6789"
 
     def test_validate_access_token_rejects_invalid_token(self):
         """validate_access_token should raise for invalid tokens."""
@@ -129,8 +134,9 @@ class TestTokenServiceAccessToken:
         """validate_access_token should reject tokens signed with wrong secret."""
         service1 = self.make_service(secret="secret-one-that-is-long-enough!!")
         service2 = self.make_service(secret="secret-two-that-is-long-enough!!")
+        identity = ProviderIdentity(provider="orcid", external_id="0000-0001-2345-6789")
 
-        token = service1.create_access_token(UserId(uuid4()), "0000-0001-2345-6789")
+        token = service1.create_access_token(UserId(uuid4()), identity)
 
         with pytest.raises(jwt.InvalidTokenError):
             service2.validate_access_token(token)
@@ -144,9 +150,10 @@ class TestTokenServiceAccessToken:
             refresh_token_expire_days=7,
         )
         service = TokenService(_config=config)
+        identity = ProviderIdentity(provider="orcid", external_id="0000-0001-2345-6789")
 
         # Create token that's already expired
-        token = service.create_access_token(UserId(uuid4()), "0000-0001-2345-6789")
+        token = service.create_access_token(UserId(uuid4()), identity)
 
         # Small delay to ensure expiry
         time.sleep(0.1)

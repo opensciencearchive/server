@@ -13,7 +13,7 @@ from typing import Any
 import jwt
 
 from osa.config import JwtConfig
-from osa.domain.auth.model.value import UserId
+from osa.domain.auth.model.value import ProviderIdentity, UserId
 from osa.domain.shared.service import Service
 
 logger = logging.getLogger(__name__)
@@ -35,14 +35,14 @@ class TokenService(Service):
     def create_access_token(
         self,
         user_id: UserId,
-        orcid_id: str,
+        identity: ProviderIdentity,
         additional_claims: dict[str, Any] | None = None,
     ) -> str:
         """Create a JWT access token.
 
         Args:
             user_id: The user's internal ID
-            orcid_id: The user's ORCiD ID
+            identity: The user's external identity (provider + external_id)
             additional_claims: Optional extra claims to include
 
         Returns:
@@ -53,7 +53,8 @@ class TokenService(Service):
 
         payload = {
             "sub": str(user_id),
-            "orcid_id": orcid_id,
+            "provider": identity.provider,
+            "external_id": identity.external_id,
             "aud": "authenticated",
             "iat": int(now.timestamp()),
             "exp": int(expires_at.timestamp()),
@@ -122,14 +123,15 @@ class TokenService(Service):
         """Get refresh token expiry in days."""
         return self._config.refresh_token_expire_days
 
-    def create_oauth_state(self, redirect_uri: str) -> str:
+    def create_oauth_state(self, redirect_uri: str, provider: str) -> str:
         """Create a signed, self-verifying OAuth state token.
 
-        The state contains: nonce, redirect_uri, expiry timestamp.
+        The state contains: nonce, redirect_uri, provider, expiry timestamp.
         Signed with HMAC-SHA256 using the JWT secret.
 
         Args:
             redirect_uri: The URI to redirect to after OAuth completes
+            provider: The identity provider name (e.g., "orcid")
 
         Returns:
             URL-safe signed state token in format: payload.signature
@@ -137,6 +139,7 @@ class TokenService(Service):
         payload = {
             "nonce": secrets.token_urlsafe(16),
             "redirect_uri": redirect_uri,
+            "provider": provider,
             "exp": int(time.time()) + STATE_EXPIRY_SECONDS,
         }
         payload_bytes = json.dumps(payload, separators=(",", ":")).encode()
@@ -147,14 +150,14 @@ class TokenService(Service):
 
         return f"{payload_b64}.{signature_b64}"
 
-    def verify_oauth_state(self, state: str) -> str | None:
-        """Verify a signed state token and return the redirect_uri if valid.
+    def verify_oauth_state(self, state: str) -> tuple[str, str] | None:
+        """Verify a signed state token and return the redirect_uri and provider if valid.
 
         Args:
             state: The signed state token to verify
 
         Returns:
-            The redirect_uri if valid, None if invalid or expired
+            Tuple of (redirect_uri, provider) if valid, None if invalid or expired
         """
         try:
             parts = state.split(".")
@@ -181,7 +184,13 @@ class TokenService(Service):
                 logger.warning("OAuth state expired")
                 return None
 
-            return payload.get("redirect_uri")
+            redirect_uri = payload.get("redirect_uri")
+            provider = payload.get("provider")
+            if not redirect_uri or not provider:
+                logger.warning("OAuth state missing redirect_uri or provider")
+                return None
+
+            return redirect_uri, provider
 
         except Exception as e:
             logger.warning("OAuth state verification error: %s", e)

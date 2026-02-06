@@ -36,10 +36,11 @@ class TestSignedStateCreation:
     """Tests for TokenService.create_oauth_state."""
 
     def test_creates_state_with_redirect_uri(self, token_service: TokenService):
-        """Should create a signed state containing the redirect URI."""
+        """Should create a signed state containing the redirect URI and provider."""
         redirect_uri = "https://example.com/callback"
+        provider = "orcid"
 
-        state = token_service.create_oauth_state(redirect_uri)
+        state = token_service.create_oauth_state(redirect_uri, provider)
 
         # State should be format: payload.signature
         assert "." in state
@@ -50,8 +51,8 @@ class TestSignedStateCreation:
         """Each state should have a unique nonce."""
         redirect_uri = "https://example.com"
 
-        state1 = token_service.create_oauth_state(redirect_uri)
-        state2 = token_service.create_oauth_state(redirect_uri)
+        state1 = token_service.create_oauth_state(redirect_uri, "orcid")
+        state2 = token_service.create_oauth_state(redirect_uri, "orcid")
 
         assert state1 != state2
 
@@ -59,7 +60,7 @@ class TestSignedStateCreation:
         """State should only contain URL-safe characters."""
         redirect_uri = "https://example.com/path?query=value"
 
-        state = token_service.create_oauth_state(redirect_uri)
+        state = token_service.create_oauth_state(redirect_uri, "orcid")
 
         # URL-safe base64 uses only these characters
         allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.")
@@ -70,17 +71,19 @@ class TestSignedStateVerification:
     """Tests for TokenService.verify_oauth_state."""
 
     def test_verifies_valid_state(self, token_service: TokenService):
-        """Should return redirect_uri for valid state."""
+        """Should return (redirect_uri, provider) for valid state."""
         redirect_uri = "https://example.com/after-login"
+        provider = "orcid"
 
-        state = token_service.create_oauth_state(redirect_uri)
+        state = token_service.create_oauth_state(redirect_uri, provider)
         result = token_service.verify_oauth_state(state)
 
-        assert result == redirect_uri
+        assert result is not None
+        assert result == (redirect_uri, provider)
 
     def test_rejects_tampered_payload(self, token_service: TokenService):
         """Should reject state with tampered payload."""
-        state = token_service.create_oauth_state("https://example.com")
+        state = token_service.create_oauth_state("https://example.com", "orcid")
 
         # Tamper with the payload (change a character)
         parts = state.split(".")
@@ -92,7 +95,7 @@ class TestSignedStateVerification:
 
     def test_rejects_tampered_signature(self, token_service: TokenService):
         """Should reject state with tampered signature."""
-        state = token_service.create_oauth_state("https://example.com")
+        state = token_service.create_oauth_state("https://example.com", "orcid")
 
         # Tamper with the signature
         parts = state.split(".")
@@ -106,14 +109,14 @@ class TestSignedStateVerification:
         self, token_service: TokenService, token_service_alt_secret: TokenService
     ):
         """Should reject state signed with different secret."""
-        state = token_service.create_oauth_state("https://example.com")
+        state = token_service.create_oauth_state("https://example.com", "orcid")
 
         result = token_service_alt_secret.verify_oauth_state(state)
         assert result is None
 
     def test_rejects_expired_state(self, token_service: TokenService, monkeypatch):
         """Should reject expired state."""
-        state = token_service.create_oauth_state("https://example.com")
+        state = token_service.create_oauth_state("https://example.com", "orcid")
 
         # Fast-forward time past expiry
         future_time = time.time() + STATE_EXPIRY_SECONDS + 1
@@ -145,8 +148,10 @@ class TestSignedStateVerification:
     def test_handles_special_characters_in_redirect_uri(self, token_service: TokenService):
         """Should handle redirect URIs with special characters."""
         redirect_uri = "https://example.com/path?foo=bar&baz=qux#fragment"
+        provider = "orcid"
 
-        state = token_service.create_oauth_state(redirect_uri)
+        state = token_service.create_oauth_state(redirect_uri, provider)
         result = token_service.verify_oauth_state(state)
 
-        assert result == redirect_uri
+        assert result is not None
+        assert result == (redirect_uri, provider)

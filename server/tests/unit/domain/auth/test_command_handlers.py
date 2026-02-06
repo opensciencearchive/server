@@ -47,6 +47,17 @@ def make_identity_provider() -> MagicMock:
     return provider
 
 
+def make_provider_registry(identity_provider: MagicMock | None = None) -> MagicMock:
+    """Create a mock provider registry."""
+    if identity_provider is None:
+        identity_provider = make_identity_provider()
+    registry = MagicMock()
+    registry.get.return_value = identity_provider
+    registry.is_available.return_value = True
+    registry.available_providers.return_value = ["orcid"]
+    return registry
+
+
 class TestInitiateLoginHandler:
     """Tests for InitiateLoginHandler."""
 
@@ -54,10 +65,11 @@ class TestInitiateLoginHandler:
     async def test_run_returns_authorization_url(self):
         """Handler should return authorization URL from identity provider."""
         identity_provider = make_identity_provider()
+        provider_registry = make_provider_registry(identity_provider)
         token_service = make_token_service()
 
         handler = InitiateLoginHandler(
-            identity_provider=identity_provider,
+            provider_registry=provider_registry,
             token_service=token_service,
         )
 
@@ -74,12 +86,13 @@ class TestInitiateLoginHandler:
 
     @pytest.mark.asyncio
     async def test_run_creates_signed_state(self):
-        """Handler should create signed state token with final redirect URI."""
+        """Handler should create signed state token with final redirect URI and provider."""
         identity_provider = make_identity_provider()
+        provider_registry = make_provider_registry(identity_provider)
         token_service = make_token_service()
 
         handler = InitiateLoginHandler(
-            identity_provider=identity_provider,
+            provider_registry=provider_registry,
             token_service=token_service,
         )
 
@@ -95,9 +108,12 @@ class TestInitiateLoginHandler:
         call_args = identity_provider.get_authorization_url.call_args
         state = call_args[1]["state"] if "state" in call_args[1] else call_args[0][0]
 
-        # Verify state can be decoded to get back the redirect URI
-        redirect_uri = token_service.verify_oauth_state(state)
+        # Verify state can be decoded to get back the redirect URI and provider
+        result = token_service.verify_oauth_state(state)
+        assert result is not None
+        redirect_uri, provider = result
         assert redirect_uri == "http://localhost/dashboard"
+        assert provider == "orcid"
 
 
 class TestCompleteOAuthHandler:
@@ -129,13 +145,13 @@ class TestCompleteOAuthHandler:
             "refresh-token",
         )
 
-        identity_provider = make_identity_provider()
+        provider_registry = make_provider_registry()
         token_service = make_token_service()
         outbox = AsyncMock()
 
         handler = CompleteOAuthHandler(
             auth_service=auth_service,
-            identity_provider=identity_provider,
+            provider_registry=provider_registry,
             token_service=token_service,
             outbox=outbox,
         )
@@ -144,6 +160,7 @@ class TestCompleteOAuthHandler:
             CompleteOAuth(
                 code="auth-code",
                 callback_url="http://localhost/callback",
+                provider="orcid",
             )
         )
 
@@ -153,7 +170,7 @@ class TestCompleteOAuthHandler:
         assert isinstance(event, UserAuthenticated)
         assert event.user_id == str(user.id)
         assert event.provider == "orcid"
-        assert event.orcid_id == "0000-0001-2345-6789"
+        assert event.external_id == "0000-0001-2345-6789"
 
     @pytest.mark.asyncio
     async def test_run_returns_user_info_and_tokens(self):
@@ -181,13 +198,13 @@ class TestCompleteOAuthHandler:
             "refresh-token",
         )
 
-        identity_provider = make_identity_provider()
+        provider_registry = make_provider_registry()
         token_service = make_token_service()
         outbox = AsyncMock()
 
         handler = CompleteOAuthHandler(
             auth_service=auth_service,
-            identity_provider=identity_provider,
+            provider_registry=provider_registry,
             token_service=token_service,
             outbox=outbox,
         )
@@ -196,12 +213,14 @@ class TestCompleteOAuthHandler:
             CompleteOAuth(
                 code="auth-code",
                 callback_url="http://localhost/callback",
+                provider="orcid",
             )
         )
 
         assert result.user_id == str(user.id)
         assert result.display_name == "Jane Doe"
-        assert result.orcid_id == "0000-0001-2345-6789"
+        assert result.provider == "orcid"
+        assert result.external_id == "0000-0001-2345-6789"
         assert result.access_token == "access-token"
         assert result.refresh_token == "refresh-token"
         assert result.expires_in == 60 * 60  # 60 minutes in seconds

@@ -24,6 +24,7 @@ from osa.domain.auth.command.token import (
     RefreshTokensHandler,
 )
 from osa.domain.auth.model.value import CurrentUser
+from osa.domain.auth.port.provider_registry import ProviderRegistry
 from osa.domain.auth.service.auth import AuthService
 from osa.domain.auth.service.token import TokenService
 from osa.domain.shared.error import InvalidStateError
@@ -65,7 +66,8 @@ class UserResponse(BaseModel):
 
     id: str
     display_name: str | None
-    orcid_id: str
+    provider: str
+    external_id: str
 
 
 @router.get("/login")
@@ -73,19 +75,22 @@ async def initiate_login(
     request: Request,
     config: FromDishka[Config],
     handler: FromDishka[InitiateLoginHandler],
+    registry: FromDishka[ProviderRegistry],
+    provider: Annotated[str, Query()],
     redirect_uri: Annotated[str | None, Query()] = None,
-    provider: Annotated[str, Query()] = "orcid",
 ) -> Response:
     """Initiate OAuth login flow.
 
     Redirects to identity provider's authorization page.
     """
-    if provider != "orcid":
+    # Validate provider is configured
+    if not registry.is_available(provider):
+        available = registry.available_providers()
         raise HTTPException(
             status_code=400,
             detail={
-                "code": "invalid_provider",
-                "message": f"Unsupported provider: {provider}",
+                "code": "unknown_provider",
+                "message": f"Unknown provider: {provider}. Available: {', '.join(available) or 'none'}",
             },
         )
 
@@ -105,7 +110,7 @@ async def initiate_login(
         )
     )
 
-    logger.info("OAuth login initiated, redirecting to IdP")
+    logger.info("OAuth login initiated for provider=%s, redirecting to IdP", provider)
     return RedirectResponse(url=result.authorization_url, status_code=302)
 
 
@@ -148,8 +153,8 @@ async def handle_oauth_callback(
         )
         return RedirectResponse(url=f"{frontend_url}/auth/error?{error_params}")
 
-    final_redirect = token_service.verify_oauth_state(state)
-    if final_redirect is None:
+    state_data = token_service.verify_oauth_state(state)
+    if state_data is None:
         logger.warning("OAuth state invalid or expired")
         error_params = urlencode(
             {
@@ -158,6 +163,8 @@ async def handle_oauth_callback(
             }
         )
         return RedirectResponse(url=f"{frontend_url}/auth/error?{error_params}")
+
+    final_redirect, provider = state_data
 
     if not code:
         logger.warning("OAuth callback missing code")
@@ -180,6 +187,7 @@ async def handle_oauth_callback(
             CompleteOAuth(
                 code=code,
                 callback_url=callback_url,
+                provider=provider,
             )
         )
 
@@ -192,12 +200,15 @@ async def handle_oauth_callback(
                 "expires_in": result.expires_in,
                 "user_id": result.user_id,
                 "display_name": result.display_name or "",
-                "orcid_id": result.orcid_id,
+                "provider": result.provider,
+                "external_id": result.external_id,
             }
         )
 
         redirect_url = f"{final_redirect}#auth={token_params}"
-        logger.info("OAuth complete, user authenticated: user_id=%s", result.user_id)
+        logger.info(
+            "OAuth complete, user authenticated: user_id=%s, provider=%s", result.user_id, provider
+        )
         return RedirectResponse(url=redirect_url, status_code=302)
 
     except Exception as e:
@@ -261,5 +272,6 @@ async def get_me(
     return UserResponse(
         id=str(user.id),
         display_name=user.display_name,
-        orcid_id=current_user.orcid_id,
+        provider=current_user.identity.provider,
+        external_id=current_user.identity.external_id,
     )

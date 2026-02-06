@@ -72,11 +72,22 @@ ORCID_PATTERN = re.compile(r"^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$")
 
 
 @dataclass(frozen=True)
+class ProviderIdentity:
+    """An external identity from an identity provider.
+
+    Encapsulates provider + external_id together since they're always used as a pair.
+    """
+
+    provider: str  # e.g., "orcid", "google"
+    external_id: str  # Provider-specific user ID
+
+
+@dataclass(frozen=True)
 class CurrentUser:
     """Authenticated user context extracted from JWT token."""
 
     user_id: "UserId"
-    orcid_id: str
+    identity: ProviderIdentity
 
 
 class OrcidId(RootModel[str]):
