@@ -46,7 +46,7 @@ export function parseAuthCallback(hash: string): AuthCallbackParams | null {
       expiresIn: parseInt(expiresIn, 10),
       userId,
       displayName: displayName || '',
-      orcidId,
+      externalId,
     };
   } catch {
     return null;
