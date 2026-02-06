@@ -48,7 +48,7 @@ export function UserMenu({ className }: UserMenuProps) {
             <span className={styles.displayName}>{user.displayName}</span>
             <span className={styles.orcidId}>
               <OrcidIcon />
-              {user.orcidId}
+              {user.externalId}
             </span>
           </div>
           <hr className={styles.divider} />

@@ -36,7 +36,7 @@ export interface TokenResponse {
 export interface UserResponse {
   id: string;
   display_name: string | null;
-  orcid_id: string;
+  external_id: string;
 }
 
 /** Error response from server */

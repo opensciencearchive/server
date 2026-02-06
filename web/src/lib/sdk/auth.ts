@@ -77,7 +77,6 @@ export class AuthClient {
     }
     return url.toString();
   }
-  }
 
   /** Handle OAuth callback and store tokens */
   handleCallback(params: AuthCallbackParams): { user: User; tokens: TokenPair } {
@@ -88,7 +87,6 @@ export class AuthClient {
     };
 
     const user: User = {
-      id: params.userId,
       id: params.userId,
       displayName: params.displayName || null,
       externalId: params.externalId,

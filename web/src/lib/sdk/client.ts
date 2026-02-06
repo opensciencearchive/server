@@ -110,7 +110,7 @@ export class OSAClient {
     return {
       id: data.id,
       displayName: data.display_name,
-      orcidId: data.orcid_id,
+      externalId: data.external_id,
     };
   }
 }
