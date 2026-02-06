@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from osa.application.api.v1.errors import map_osa_error
-from osa.application.api.v1.routes import events, health, records, search, stats, validation
+from osa.application.api.v1.routes import auth, events, health, records, search, stats, validation
 from osa.application.di import create_container
 from osa.config import Config, configure_logging
 from osa.domain.shared.error import OSAError
@@ -32,7 +32,8 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Create FastAPI application."""
-    config = Config()
+    # Pydantic Settings populates from env vars at runtime
+    config = Config()  # type: ignore[call-arg]
 
     # Configure logging early
     configure_logging(config.logging)
@@ -58,6 +59,7 @@ def create_app() -> FastAPI:
 
     # Register v1 routes with /api/v1 prefix
     app_instance.include_router(health.router, prefix="/api/v1")
+    app_instance.include_router(auth.router, prefix="/api/v1")
     app_instance.include_router(events.router, prefix="/api/v1")
     app_instance.include_router(records.router, prefix="/api/v1")
     app_instance.include_router(search.router, prefix="/api/v1")

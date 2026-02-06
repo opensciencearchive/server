@@ -7,15 +7,19 @@ services:
       context: ../server
       dockerfile: Dockerfile
       target: builder
+    ports:
+      - "8000:8000"
     volumes:
       - ../server:/app
       - /app/.venv
     environment:
       OSA_DATABASE__URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-osa}@db:5432/${POSTGRES_DB:-osa}
       OSA_DATA_DIR: /data
+      OSA_CONFIG_FILE: /app/osa.yaml
       OSA_LOGGING__LEVEL: ${LOG_LEVEL:-DEBUG}
       WATCHFILES_FORCE_POLLING: "true"
-    command: uvicorn osa.application.api.rest.app:app --host 0.0.0.0 --port 8000 --reload
+    entrypoint: []
+    command: ["sh", "-c", "/app/.venv/bin/alembic upgrade head && /app/.venv/bin/uvicorn osa.application.api.rest.app:app --host 0.0.0.0 --port 8000 --reload"]
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8000/api/v1/health"]
       interval: 10s
@@ -36,4 +40,5 @@ services:
       API_URL: http://server:8000
     ports:
       - "3000:3000"
-    command: pnpm dev
+    entrypoint: []
+    command: ["pnpm", "dev"]

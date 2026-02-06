@@ -1,6 +1,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import styles from './Header.module.css';
+import { AuthButtons } from './AuthButtons';
 
 export function Header() {
   return (
@@ -16,6 +17,7 @@ export function Header() {
           />
           <span className={styles.logoText}>Lingual Bio</span>
         </Link>
+        <AuthButtons />
       </div>
     </header>
   );

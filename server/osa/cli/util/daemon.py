@@ -123,7 +123,8 @@ class DaemonManager:
             os.environ["OSA_CONFIG_FILE"] = config_file
 
         try:
-            app_config = Config()
+            # Pydantic Settings populates from env vars at runtime
+            app_config = Config()  # type: ignore[call-arg]
         except ValidationError as e:
             details = []
             for err in e.errors():
