@@ -53,7 +53,7 @@ export interface AuthCallbackParams {
   expiresIn: number;
   userId: string;
   displayName: string;
-  orcidId: string;
+  externalId: string;
 }
 
 /** SDK configuration options */
