@@ -147,3 +147,82 @@ class TestAuthGateOnCommandHandler:
 
         with pytest.raises(ConfigurationError, match="UnprotectedQueryHandler"):
             await handler.run(UnprotectedQuery(value="test"))
+
+
+# --- Test query DTOs ---
+
+
+class AdminOnlyQuery(Query):
+    value: str = "test"
+
+
+class AdminOnlyQueryResult(QueryResult):
+    value: str
+
+
+class PublicQuery(Query):
+    value: str = "test"
+
+
+class PublicQueryResult(QueryResult):
+    value: str
+
+
+# --- Test query handlers ---
+
+
+class AdminOnlyQueryHandler(QueryHandler[AdminOnlyQuery, AdminOnlyQueryResult]):
+    __auth__ = at_least(Role.ADMIN)
+    principal: Principal
+
+    async def run(self, cmd: AdminOnlyQuery) -> AdminOnlyQueryResult:
+        return AdminOnlyQueryResult(value=cmd.value)
+
+
+class PublicQueryHandler(QueryHandler[PublicQuery, PublicQueryResult]):
+    __auth__ = public()
+
+    async def run(self, cmd: PublicQuery) -> PublicQueryResult:
+        return PublicQueryResult(value=cmd.value)
+
+
+class TestAuthGateOnQueryHandler:
+    @pytest.mark.asyncio
+    async def test_query_handler_rejects_insufficient_role(self) -> None:
+        depositor = _make_principal(frozenset({Role.DEPOSITOR}))
+        handler = AdminOnlyQueryHandler(principal=depositor)
+
+        with pytest.raises(AuthorizationError) as exc_info:
+            await handler.run(AdminOnlyQuery(value="test"))
+        assert exc_info.value.code == "access_denied"
+
+    @pytest.mark.asyncio
+    async def test_query_handler_allows_matching_role(self) -> None:
+        admin = _make_principal(frozenset({Role.ADMIN}))
+        handler = AdminOnlyQueryHandler(principal=admin)
+
+        result = await handler.run(AdminOnlyQuery(value="hello"))
+        assert result.value == "hello"
+
+    @pytest.mark.asyncio
+    async def test_query_handler_allows_higher_role(self) -> None:
+        superadmin = _make_principal(frozenset({Role.SUPERADMIN}))
+        handler = AdminOnlyQueryHandler(principal=superadmin)
+
+        result = await handler.run(AdminOnlyQuery(value="hello"))
+        assert result.value == "hello"
+
+    @pytest.mark.asyncio
+    async def test_query_handler_rejects_missing_principal(self) -> None:
+        handler = AdminOnlyQueryHandler.__new__(AdminOnlyQueryHandler)
+
+        with pytest.raises(AuthorizationError) as exc_info:
+            await handler.run(AdminOnlyQuery(value="test"))
+        assert exc_info.value.code == "missing_token"
+
+    @pytest.mark.asyncio
+    async def test_public_query_handler_skips_check(self) -> None:
+        handler = PublicQueryHandler()
+
+        result = await handler.run(PublicQuery(value="public"))
+        assert result.value == "public"

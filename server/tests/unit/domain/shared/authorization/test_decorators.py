@@ -96,6 +96,24 @@ class TestReadsDecorator:
         with pytest.raises(AuthorizationError, match="Authentication required"):
             await repo.get("key")
 
+    @pytest.mark.asyncio
+    async def test_reads_denies_anonymous_with_missing_token_code(self) -> None:
+        resource = _FakeResource(owner_id=UserId.generate())
+        repo = _FakeRepo(identity=Anonymous(), resource=resource)
+
+        with pytest.raises(AuthorizationError) as exc_info:
+            await repo.get("key")
+        assert exc_info.value.code == "missing_token"
+
+    @pytest.mark.asyncio
+    async def test_reads_allows_admin_via_role_hierarchy(self) -> None:
+        admin = _make_principal(frozenset({Role.ADMIN}))
+        resource = _FakeResource(owner_id=UserId.generate())
+        repo = _FakeRepo(identity=admin, resource=resource)
+
+        result = await repo.get("key")
+        assert result is resource
+
 
 class TestWritesDecorator:
     @pytest.mark.asyncio
@@ -145,3 +163,22 @@ class TestWritesDecorator:
 
         with pytest.raises(AuthorizationError, match="Authentication required"):
             await repo.save(resource)
+
+    @pytest.mark.asyncio
+    async def test_writes_denies_anonymous_with_missing_token_code(self) -> None:
+        resource = _FakeResource(owner_id=UserId.generate())
+        repo = _FakeRepo(identity=Anonymous())
+
+        with pytest.raises(AuthorizationError) as exc_info:
+            await repo.save(resource)
+        assert exc_info.value.code == "missing_token"
+
+    @pytest.mark.asyncio
+    async def test_writes_denies_non_owner_with_access_denied_code(self) -> None:
+        principal = _make_principal(frozenset({Role.DEPOSITOR}))
+        resource = _FakeResource(owner_id=UserId.generate())
+        repo = _FakeRepo(identity=principal)
+
+        with pytest.raises(AuthorizationError) as exc_info:
+            await repo.save(resource)
+        assert exc_info.value.code == "access_denied"
