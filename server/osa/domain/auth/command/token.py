@@ -6,6 +6,7 @@ from uuid import uuid4
 from osa.domain.auth.event import UserLoggedOut
 from osa.domain.auth.service.auth import AuthService
 from osa.domain.auth.service.token import TokenService
+from osa.domain.shared.authorization.gate import public
 from osa.domain.shared.command import Command, CommandHandler, Result
 from osa.domain.shared.event import EventId
 from osa.domain.shared.outbox import Outbox
@@ -28,6 +29,8 @@ class RefreshTokensResult(Result):
 @dataclass
 class RefreshTokensHandler(CommandHandler[RefreshTokens, RefreshTokensResult]):
     """Handler for RefreshTokens command."""
+
+    __auth__ = public()
 
     auth_service: AuthService
     token_service: TokenService
@@ -60,6 +63,8 @@ class LogoutResult(Result):
 @dataclass
 class LogoutHandler(CommandHandler[Logout, LogoutResult]):
     """Handler for Logout command."""
+
+    __auth__ = public()
 
     auth_service: AuthService
     outbox: Outbox

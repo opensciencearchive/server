@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 from osa.config import JwtConfig
-from osa.domain.auth.model.identity import Identity
+from osa.domain.auth.model.linked_account import LinkedAccount
 from osa.domain.auth.model.token import RefreshToken
 from osa.domain.auth.model.user import User
 from osa.domain.auth.model.value import IdentityId, RefreshTokenId, TokenFamilyId, UserId
@@ -19,7 +19,7 @@ from osa.domain.shared.error import InvalidStateError
 
 def make_auth_service(
     user_repo: AsyncMock | None = None,
-    identity_repo: AsyncMock | None = None,
+    linked_account_repo: AsyncMock | None = None,
     refresh_token_repo: AsyncMock | None = None,
     token_service: TokenService | None = None,
     outbox: AsyncMock | None = None,
@@ -27,8 +27,8 @@ def make_auth_service(
     """Create an AuthService with mocked dependencies."""
     if user_repo is None:
         user_repo = AsyncMock()
-    if identity_repo is None:
-        identity_repo = AsyncMock()
+    if linked_account_repo is None:
+        linked_account_repo = AsyncMock()
     if refresh_token_repo is None:
         refresh_token_repo = AsyncMock()
     if token_service is None:
@@ -44,7 +44,7 @@ def make_auth_service(
 
     return AuthService(
         _user_repo=user_repo,
-        _identity_repo=identity_repo,
+        _linked_account_repo=linked_account_repo,
         _refresh_token_repo=refresh_token_repo,
         _token_service=token_service,
         _outbox=outbox,
@@ -101,14 +101,16 @@ class TestAuthServiceCompleteOAuth:
         user_repo = AsyncMock()
         user_repo.get.return_value = None  # No existing user
 
-        identity_repo = AsyncMock()
-        identity_repo.get_by_provider_and_external_id.return_value = None  # No existing identity
+        linked_account_repo = AsyncMock()
+        linked_account_repo.get_by_provider_and_external_id.return_value = (
+            None  # No existing identity
+        )
 
         refresh_token_repo = AsyncMock()
 
         service = make_auth_service(
             user_repo=user_repo,
-            identity_repo=identity_repo,
+            linked_account_repo=linked_account_repo,
             refresh_token_repo=refresh_token_repo,
         )
         provider = make_identity_provider()
@@ -119,9 +121,9 @@ class TestAuthServiceCompleteOAuth:
             redirect_uri="http://localhost/callback",
         )
 
-        # Should create user and identity
+        # Should create user and linked account
         user_repo.save.assert_called_once()
-        identity_repo.save.assert_called_once()
+        linked_account_repo.save.assert_called_once()
         refresh_token_repo.save.assert_called_once()
 
         # Should return valid data
@@ -140,7 +142,7 @@ class TestAuthServiceCompleteOAuth:
             created_at=datetime.now(UTC),
             updated_at=None,
         )
-        existing_identity = Identity(
+        existing_linked_account = LinkedAccount(
             id=IdentityId(uuid4()),
             user_id=existing_user.id,
             provider="orcid",
@@ -152,14 +154,14 @@ class TestAuthServiceCompleteOAuth:
         user_repo = AsyncMock()
         user_repo.get.return_value = existing_user
 
-        identity_repo = AsyncMock()
-        identity_repo.get_by_provider_and_external_id.return_value = existing_identity
+        linked_account_repo = AsyncMock()
+        linked_account_repo.get_by_provider_and_external_id.return_value = existing_linked_account
 
         refresh_token_repo = AsyncMock()
 
         service = make_auth_service(
             user_repo=user_repo,
-            identity_repo=identity_repo,
+            linked_account_repo=linked_account_repo,
             refresh_token_repo=refresh_token_repo,
         )
         provider = make_identity_provider()
@@ -170,13 +172,13 @@ class TestAuthServiceCompleteOAuth:
             redirect_uri="http://localhost/callback",
         )
 
-        # Should NOT create new user/identity
+        # Should NOT create new user/linked account
         user_repo.save.assert_not_called()
-        identity_repo.save.assert_not_called()
+        linked_account_repo.save.assert_not_called()
 
         # Should return existing user
         assert user.id == existing_user.id
-        assert identity.id == existing_identity.id
+        assert identity.id == existing_linked_account.id
 
 
 class TestAuthServiceRefreshTokens:
@@ -191,7 +193,7 @@ class TestAuthServiceRefreshTokens:
             created_at=datetime.now(UTC),
             updated_at=None,
         )
-        identity = Identity(
+        linked_account = LinkedAccount(
             id=IdentityId(uuid4()),
             user_id=user.id,
             provider="orcid",
@@ -212,15 +214,15 @@ class TestAuthServiceRefreshTokens:
         user_repo = AsyncMock()
         user_repo.get.return_value = user
 
-        identity_repo = AsyncMock()
-        identity_repo.get_by_user_id.return_value = [identity]
+        linked_account_repo = AsyncMock()
+        linked_account_repo.get_by_user_id.return_value = [linked_account]
 
         refresh_token_repo = AsyncMock()
         refresh_token_repo.get_by_token_hash.return_value = old_token
 
         service = make_auth_service(
             user_repo=user_repo,
-            identity_repo=identity_repo,
+            linked_account_repo=linked_account_repo,
             refresh_token_repo=refresh_token_repo,
         )
 
@@ -245,7 +247,7 @@ class TestAuthServiceRefreshTokens:
             created_at=datetime.now(UTC),
             updated_at=None,
         )
-        identity = Identity(
+        linked_account = LinkedAccount(
             id=IdentityId(uuid4()),
             user_id=user.id,
             provider="orcid",
@@ -266,15 +268,15 @@ class TestAuthServiceRefreshTokens:
         user_repo = AsyncMock()
         user_repo.get.return_value = user
 
-        identity_repo = AsyncMock()
-        identity_repo.get_by_user_id.return_value = [identity]
+        linked_account_repo = AsyncMock()
+        linked_account_repo.get_by_user_id.return_value = [linked_account]
 
         refresh_token_repo = AsyncMock()
         refresh_token_repo.get_by_token_hash.return_value = old_token
 
         service = make_auth_service(
             user_repo=user_repo,
-            identity_repo=identity_repo,
+            linked_account_repo=linked_account_repo,
             refresh_token_repo=refresh_token_repo,
         )
 

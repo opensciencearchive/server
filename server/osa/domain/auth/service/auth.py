@@ -2,13 +2,13 @@
 
 import logging
 
-from osa.domain.auth.model.identity import Identity
+from osa.domain.auth.model.linked_account import LinkedAccount
 from osa.domain.auth.model.token import RefreshToken
 from osa.domain.auth.model.user import User
 from osa.domain.auth.model.value import ProviderIdentity, TokenFamilyId, UserId
 from osa.domain.auth.port.identity_provider import IdentityInfo, IdentityProvider
 from osa.domain.auth.port.repository import (
-    IdentityRepository,
+    LinkedAccountRepository,
     RefreshTokenRepository,
     UserRepository,
 )
@@ -29,7 +29,7 @@ class AuthService(Service):
     """
 
     _user_repo: UserRepository
-    _identity_repo: IdentityRepository
+    _linked_account_repo: LinkedAccountRepository
     _refresh_token_repo: RefreshTokenRepository
     _token_service: TokenService
     _outbox: Outbox
@@ -57,7 +57,7 @@ class AuthService(Service):
         provider: IdentityProvider,
         code: str,
         redirect_uri: str,
-    ) -> tuple[User, Identity, str, str]:
+    ) -> tuple[User, LinkedAccount, str, str]:
         """Complete OAuth flow and issue tokens.
 
         Args:
@@ -66,25 +66,25 @@ class AuthService(Service):
             redirect_uri: Must match the one used in authorization
 
         Returns:
-            Tuple of (user, identity, access_token, refresh_token)
+            Tuple of (user, linked_account, access_token, refresh_token)
         """
         # Exchange code for identity info
         identity_info = await provider.exchange_code(code, redirect_uri)
 
-        # Find or create user and identity
-        user, identity = await self._find_or_create_user(identity_info)
+        # Find or create user and linked account
+        user, linked_account = await self._find_or_create_user(identity_info)
 
         # Create tokens
-        access_token, refresh_token = await self._create_tokens(user, identity)
+        access_token, refresh_token = await self._create_tokens(user, linked_account)
 
         logger.info(
             "User authenticated: user_id=%s, provider=%s, external_id=%s",
             user.id,
-            identity.provider,
-            identity.external_id,
+            linked_account.provider,
+            linked_account.external_id,
         )
 
-        return user, identity, access_token, refresh_token
+        return user, linked_account, access_token, refresh_token
 
     async def refresh_tokens(
         self,
@@ -197,10 +197,10 @@ class AuthService(Service):
         this could be extended to support multiple identities with a
         designated primary.
         """
-        identities = await self._identity_repo.get_by_user_id(user_id)
-        if not identities:
+        accounts = await self._linked_account_repo.get_by_user_id(user_id)
+        if not accounts:
             return None
-        first = identities[0]
+        first = accounts[0]
         return ProviderIdentity(provider=first.provider, external_id=first.external_id)
 
     async def get_user_id_from_refresh_token(self, raw_token: str) -> UserId | None:
@@ -216,32 +216,32 @@ class AuthService(Service):
         stored = await self._refresh_token_repo.get_by_token_hash(token_hash)
         return stored.user_id if stored else None
 
-    async def _find_or_create_user(self, identity_info: IdentityInfo) -> tuple[User, Identity]:
+    async def _find_or_create_user(self, identity_info: IdentityInfo) -> tuple[User, LinkedAccount]:
         """Find existing user by identity or create new one."""
-        # Check if identity already exists
-        existing_identity = await self._identity_repo.get_by_provider_and_external_id(
+        # Check if linked account already exists
+        existing = await self._linked_account_repo.get_by_provider_and_external_id(
             identity_info.provider, identity_info.external_id
         )
 
-        if existing_identity:
+        if existing:
             # User exists, return them
-            user = await self._user_repo.get(existing_identity.user_id)
+            user = await self._user_repo.get(existing.user_id)
             if user is None:
-                # Orphaned identity - shouldn't happen with CASCADE
-                raise RuntimeError(f"Identity exists without user: {existing_identity.id}")
-            return user, existing_identity
+                # Orphaned linked account - shouldn't happen with CASCADE
+                raise RuntimeError(f"LinkedAccount exists without user: {existing.id}")
+            return user, existing
 
-        # Create new user and identity
+        # Create new user and linked account
         user = User.create(display_name=identity_info.display_name)
         await self._user_repo.save(user)
 
-        identity = Identity.create(
+        linked_account = LinkedAccount.create(
             user_id=user.id,
             provider=identity_info.provider,
             external_id=identity_info.external_id,
             metadata=identity_info.raw_data,
         )
-        await self._identity_repo.save(identity)
+        await self._linked_account_repo.save(linked_account)
 
         logger.info(
             "New user created: user_id=%s, provider=%s",
@@ -249,9 +249,9 @@ class AuthService(Service):
             identity_info.provider,
         )
 
-        return user, identity
+        return user, linked_account
 
-    async def _create_tokens(self, user: User, identity: Identity) -> tuple[str, str]:
+    async def _create_tokens(self, user: User, linked_account: LinkedAccount) -> tuple[str, str]:
         """Create access and refresh tokens for a user."""
         # Create refresh token
         raw_token, token_hash = self._token_service.create_refresh_token()
@@ -265,8 +265,8 @@ class AuthService(Service):
 
         # Create access token
         provider_identity = ProviderIdentity(
-            provider=identity.provider,
-            external_id=identity.external_id,
+            provider=linked_account.provider,
+            external_id=linked_account.external_id,
         )
         access_token = self._token_service.create_access_token(
             user_id=user.id,

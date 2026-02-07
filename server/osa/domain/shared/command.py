@@ -1,8 +1,17 @@
+"""Command and CommandHandler base classes with authorization gate."""
+
+from __future__ import annotations
+
 from abc import ABCMeta, abstractmethod
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
-from typing import Generic, TypeVar, dataclass_transform
+from functools import wraps
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar, dataclass_transform
 
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from osa.domain.shared.authorization.gate import Gate
 
 
 class Command(BaseModel): ...
@@ -14,20 +23,79 @@ class Result(BaseModel): ...
 C = TypeVar("C", bound=Command)
 R = TypeVar("R", bound=Result)
 
+# Unbound async handler method: (self, cmd) -> Coroutine -> Result
+_HandlerMethod = Callable[..., Coroutine[Any, Any, Any]]
+
+
+def _wrap_run_with_auth(cls: type, original_run: _HandlerMethod) -> _HandlerMethod:
+    """Wrap the run() method with __auth__ gate evaluation."""
+
+    @wraps(original_run)
+    async def auth_wrapped_run(self: Any, cmd: Any) -> Any:
+        from osa.domain.shared.authorization.gate import AtLeast, Gate, Public
+        from osa.domain.shared.error import AuthorizationError, ConfigurationError
+
+        auth_gate = getattr(type(self), "__auth__", None)
+
+        if not isinstance(auth_gate, Gate):
+            raise ConfigurationError(f"Handler {type(self).__name__} has no __auth__ declaration")
+
+        if isinstance(auth_gate, Public):
+            return await original_run(self, cmd)
+
+        if isinstance(auth_gate, AtLeast):
+            from osa.domain.auth.model.principal import Principal
+
+            principal = getattr(self, "principal", None)
+            if not isinstance(principal, Principal):
+                raise AuthorizationError(
+                    "Authentication required",
+                    code="missing_token",
+                )
+
+            if not principal.has_role(auth_gate.role):
+                raise AuthorizationError(
+                    f"Access denied: insufficient role for {type(self).__name__}",
+                    code="access_denied",
+                )
+
+            return await original_run(self, cmd)
+
+        raise ConfigurationError(  # pragma: no cover — future gate types handled here
+            f"Handler {type(self).__name__} has unhandled __auth__ type: {type(auth_gate).__name__}"
+        )
+
+    return auth_wrapped_run
+
 
 @dataclass_transform()
 class _CommandHandlerMeta(ABCMeta):
-    """Metaclass that combines ABC with auto-dataclass for subclasses."""
+    """Metaclass that combines ABC with auto-dataclass and __auth__ gate for subclasses."""
 
-    def __new__(mcs, name: str, bases: tuple, namespace: dict):
+    def __new__(mcs, name: str, bases: tuple[type, ...], namespace: dict[str, Any]):
         cls = super().__new__(mcs, name, bases, namespace)
         if any(isinstance(b, mcs) for b in bases):
-            return dataclass(cls)
+            cls = dataclass(cls)
+
+            # Wrap run() with auth gate
+            original_run = cls.__dict__.get("run")
+            if original_run is not None:
+                wrapped = _wrap_run_with_auth(cls, original_run)
+                cls.run = wrapped
+
         return cls
 
 
 class CommandHandler(Generic[C, R], metaclass=_CommandHandlerMeta):
-    """Base class for command handlers. Subclasses are automatically dataclasses."""
+    """Base class for command handlers. Subclasses are automatically dataclasses.
+
+    Declare __auth__ to enforce role-based access:
+        class MyHandler(CommandHandler[MyCmd, MyResult]):
+            __auth__ = at_least(Role.ADMIN)
+            principal: Principal
+    """
+
+    __auth__: ClassVar[Gate]
 
     @abstractmethod
     async def run(self, cmd: C) -> R: ...

@@ -49,6 +49,13 @@ def map_osa_error(error: OSAError) -> HTTPException:
         status_code = DOMAIN_ERROR_STATUS_MAP.get(type(error), 400)
         if isinstance(error, ValidationError) and error.field is not None:
             detail["field"] = error.field
+        # Distinguish 401 (unauthenticated) from 403 (unauthorized)
+        if isinstance(error, AuthorizationError) and error.code == "missing_token":
+            return HTTPException(
+                status_code=401,
+                detail=detail,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         return HTTPException(status_code=status_code, detail=detail)
 
     # Fallback for unknown OSAError subclasses

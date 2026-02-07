@@ -30,11 +30,13 @@ depositions_table = Table(
     Column("provenance", JSON, nullable=False),
     Column("files", JSON, nullable=False),
     Column("record_id", String, nullable=True),
+    Column("owner_id", String, ForeignKey("users.id"), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
 Index("idx_depositions_record_id", depositions_table.c.record_id)
+Index("idx_depositions_owner_id", depositions_table.c.owner_id)
 
 
 # ============================================================================
@@ -175,3 +177,20 @@ refresh_tokens_table = Table(
 Index("ix_refresh_tokens_user_id", refresh_tokens_table.c.user_id)
 Index("ix_refresh_tokens_token_hash", refresh_tokens_table.c.token_hash)
 Index("ix_refresh_tokens_family_id", refresh_tokens_table.c.family_id)
+
+
+# ============================================================================
+# ROLE ASSIGNMENTS TABLE (Authorization)
+# ============================================================================
+role_assignments_table = Table(
+    "role_assignments",
+    metadata,
+    Column("id", String, primary_key=True),  # UUID as string
+    Column("user_id", String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("role", String(32), nullable=False),
+    Column("assigned_by", String, ForeignKey("users.id"), nullable=False),
+    Column("assigned_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("user_id", "role", name="uq_role_assignments_user_role"),
+)
+
+Index("ix_role_assignments_user_id", role_assignments_table.c.user_id)

@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from osa.domain.auth.model.identity import Identity
+from osa.domain.auth.model.linked_account import LinkedAccount
 from osa.domain.auth.model.token import RefreshToken
 from osa.domain.auth.model.user import User
 from osa.domain.auth.model.value import (
@@ -16,7 +16,7 @@ from osa.domain.auth.model.value import (
     UserId,
 )
 from osa.domain.auth.port.repository import (
-    IdentityRepository,
+    LinkedAccountRepository,
     RefreshTokenRepository,
     UserRepository,
 )
@@ -47,9 +47,9 @@ def _user_to_dict(user: User) -> dict:
     }
 
 
-def _row_to_identity(row: dict) -> Identity:
-    """Convert a database row to an Identity model."""
-    return Identity(
+def _row_to_linked_account(row: dict) -> LinkedAccount:
+    """Convert a database row to a LinkedAccount model."""
+    return LinkedAccount(
         id=IdentityId(UUID(row["id"])),
         user_id=UserId(UUID(row["user_id"])),
         provider=row["provider"],
@@ -59,15 +59,15 @@ def _row_to_identity(row: dict) -> Identity:
     )
 
 
-def _identity_to_dict(identity: Identity) -> dict:
-    """Convert an Identity model to a database row dict."""
+def _linked_account_to_dict(account: LinkedAccount) -> dict:
+    """Convert a LinkedAccount model to a database row dict."""
     return {
-        "id": str(identity.id),
-        "user_id": str(identity.user_id),
-        "provider": identity.provider,
-        "external_id": identity.external_id,
-        "metadata": identity.metadata,
-        "created_at": identity.created_at,
+        "id": str(account.id),
+        "user_id": str(account.user_id),
+        "provider": account.provider,
+        "external_id": account.external_id,
+        "metadata": account.metadata,
+        "created_at": account.created_at,
     }
 
 
@@ -122,47 +122,47 @@ class PostgresUserRepository(UserRepository):
         await self.session.flush()
 
 
-class PostgresIdentityRepository(IdentityRepository):
-    """PostgreSQL implementation of IdentityRepository."""
+class PostgresLinkedAccountRepository(LinkedAccountRepository):
+    """PostgreSQL implementation of LinkedAccountRepository."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def get(self, identity_id: IdentityId) -> Identity | None:
+    async def get(self, identity_id: IdentityId) -> LinkedAccount | None:
         stmt = select(identities_table).where(identities_table.c.id == str(identity_id))
         result = await self.session.execute(stmt)
         row = result.mappings().first()
-        return _row_to_identity(dict(row)) if row else None
+        return _row_to_linked_account(dict(row)) if row else None
 
     async def get_by_provider_and_external_id(
         self, provider: str, external_id: str
-    ) -> Identity | None:
+    ) -> LinkedAccount | None:
         stmt = select(identities_table).where(
             identities_table.c.provider == provider,
             identities_table.c.external_id == external_id,
         )
         result = await self.session.execute(stmt)
         row = result.mappings().first()
-        return _row_to_identity(dict(row)) if row else None
+        return _row_to_linked_account(dict(row)) if row else None
 
-    async def get_by_user_id(self, user_id: UserId) -> list[Identity]:
+    async def get_by_user_id(self, user_id: UserId) -> list[LinkedAccount]:
         stmt = select(identities_table).where(identities_table.c.user_id == str(user_id))
         result = await self.session.execute(stmt)
         rows = result.mappings().all()
-        return [_row_to_identity(dict(row)) for row in rows]
+        return [_row_to_linked_account(dict(row)) for row in rows]
 
-    async def save(self, identity: Identity) -> None:
-        identity_dict = _identity_to_dict(identity)
-        existing = await self.get(identity.id)
+    async def save(self, linked_account: LinkedAccount) -> None:
+        account_dict = _linked_account_to_dict(linked_account)
+        existing = await self.get(linked_account.id)
 
         if existing:
             stmt = (
                 update(identities_table)
-                .where(identities_table.c.id == str(identity.id))
-                .values(**identity_dict)
+                .where(identities_table.c.id == str(linked_account.id))
+                .values(**account_dict)
             )
         else:
-            stmt = insert(identities_table).values(**identity_dict)
+            stmt = insert(identities_table).values(**account_dict)
 
         await self.session.execute(stmt)
         await self.session.flush()

@@ -13,6 +13,7 @@ from dishka import AsyncContainer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.application.event import ServerStarted
+from osa.domain.auth.model.identity import Identity, System
 from osa.domain.shared.error import SkippedEvents
 from osa.domain.shared.event import (
     EventHandler,
@@ -183,8 +184,8 @@ class Worker:
 
         self._state.status = WorkerStatus.CLAIMING
 
-        # Claim and process within a UOW scope
-        async with self._container(scope=Scope.UOW) as scope:
+        # Claim and process within a UOW scope (System identity for workers)
+        async with self._container(scope=Scope.UOW, context={Identity: System()}) as scope:
             outbox = await scope.get(Outbox)
             session = await scope.get(AsyncSession)
 
@@ -393,7 +394,7 @@ class WorkerPool:
         if self._container is None:
             return
 
-        async with self._container(scope=Scope.UOW) as scope:
+        async with self._container(scope=Scope.UOW, context={Identity: System()}) as scope:
             outbox = await scope.get(Outbox)
             await outbox.append(ServerStarted(id=EventId(uuid4())))
             session = await scope.get(AsyncSession)
@@ -440,7 +441,7 @@ class WorkerPool:
             return
 
         try:
-            async with self._container(scope=Scope.UOW) as scope:
+            async with self._container(scope=Scope.UOW, context={Identity: System()}) as scope:
                 schedule = await scope.get(config.schedule_type)
                 await schedule.run(**config.params)
                 session = await scope.get(AsyncSession)
@@ -484,7 +485,9 @@ class WorkerPool:
                     max_timeout = max(w.config.claim_timeout for w in self._workers)
 
                     # Use a scoped outbox for cleanup
-                    async with self._container(scope=Scope.UOW) as scope:
+                    async with self._container(
+                        scope=Scope.UOW, context={Identity: System()}
+                    ) as scope:
                         outbox = await scope.get(Outbox)
                         session = await scope.get(AsyncSession)
                         count = await outbox.reset_stale_claims(max_timeout)

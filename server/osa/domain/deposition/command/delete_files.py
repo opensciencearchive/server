@@ -1,6 +1,9 @@
 import logfire
 
+from osa.domain.auth.model.principal import Principal
+from osa.domain.auth.model.role import Role
 from osa.domain.deposition.port import DepositionRepository, StoragePort
+from osa.domain.shared.authorization.gate import at_least
 from osa.domain.shared.command import Command, CommandHandler, Result
 from osa.domain.shared.model.srn import DepositionSRN
 
@@ -14,6 +17,8 @@ class DepositionFilesDeleted(Result):
 
 
 class DeleteDepositionFilesHandler(CommandHandler[DeleteDepositionFiles, DepositionFilesDeleted]):
+    __auth__ = at_least(Role.DEPOSITOR)
+    principal: Principal
     repository: DepositionRepository
     storage: StoragePort
 
