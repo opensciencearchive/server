@@ -7,7 +7,7 @@ from osa.domain.auth.model.principal import Principal
 from osa.domain.auth.model.role import Role
 from osa.domain.auth.model.value import UserId
 from osa.domain.auth.service.authorization import AuthorizationService
-from osa.domain.shared.authorization.policy import requires_role
+from osa.domain.shared.authorization.gate import at_least
 from osa.domain.shared.command import Command, CommandHandler, Result
 
 
@@ -29,17 +29,15 @@ class AssignRoleResult(Result):
 
 
 class AssignRoleHandler(CommandHandler[AssignRole, AssignRoleResult]):
-    __auth__ = requires_role(Role.SUPERADMIN)
-    _principal: Principal | None = None
+    __auth__ = at_least(Role.SUPERADMIN)
+    principal: Principal
     authorization_service: AuthorizationService
 
     async def run(self, cmd: AssignRole) -> AssignRoleResult:
-        assert self._principal is not None  # Guaranteed by __auth__ gate
-
         assignment = await self.authorization_service.assign_role(
             user_id=UserId(UUID(cmd.user_id)),
             role=Role[cmd.role.upper()],
-            assigned_by=self._principal.user_id,
+            assigned_by=self.principal.user_id,
         )
 
         return AssignRoleResult(

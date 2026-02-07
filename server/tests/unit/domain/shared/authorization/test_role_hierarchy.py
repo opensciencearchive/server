@@ -29,7 +29,7 @@ class TestPrincipalHasRole:
     def test_has_role_uses_hierarchy(self) -> None:
         principal = Principal(
             user_id=UserId.generate(),
-            identity=ProviderIdentity(provider="test", external_id="ext"),
+            provider_identity=ProviderIdentity(provider="test", external_id="ext"),
             roles=frozenset({Role.ADMIN}),
         )
 
@@ -41,7 +41,7 @@ class TestPrincipalHasRole:
     def test_has_role_depositor(self) -> None:
         principal = Principal(
             user_id=UserId.generate(),
-            identity=ProviderIdentity(provider="test", external_id="ext"),
+            provider_identity=ProviderIdentity(provider="test", external_id="ext"),
             roles=frozenset({Role.DEPOSITOR}),
         )
 
@@ -52,7 +52,7 @@ class TestPrincipalHasRole:
     def test_has_any_role(self) -> None:
         principal = Principal(
             user_id=UserId.generate(),
-            identity=ProviderIdentity(provider="test", external_id="ext"),
+            provider_identity=ProviderIdentity(provider="test", external_id="ext"),
             roles=frozenset({Role.CURATOR}),
         )
 

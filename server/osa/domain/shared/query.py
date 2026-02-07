@@ -1,16 +1,20 @@
 """Query and QueryHandler base classes with authorization gate."""
 
+from __future__ import annotations
+
 from abc import ABCMeta, abstractmethod
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any, ClassVar, Generic, TypeVar, dataclass_transform
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar, dataclass_transform
 
 from pydantic import BaseModel
 
+if TYPE_CHECKING:
+    from osa.domain.shared.authorization.gate import Gate
 
-class Query(BaseModel):
-    __public__: ClassVar[bool] = False
+
+class Query(BaseModel): ...
 
 
 class Result(BaseModel): ...
@@ -24,41 +28,42 @@ _HandlerMethod = Callable[..., Coroutine[Any, Any, Any]]
 
 
 def _wrap_query_run_with_auth(cls: type, original_run: _HandlerMethod) -> _HandlerMethod:
-    """Wrap the run() method with __auth__ policy evaluation."""
+    """Wrap the run() method with __auth__ gate evaluation."""
 
     @wraps(original_run)
     async def auth_wrapped_run(self: Any, cmd: Any) -> Any:
-        from osa.domain.shared.error import AuthorizationError
+        from osa.domain.shared.authorization.gate import AtLeast, Gate, Public
+        from osa.domain.shared.error import AuthorizationError, ConfigurationError
 
-        # Check if the query type is public
-        cmd_type = type(cmd)
-        if getattr(cmd_type, "__public__", False):
+        auth_gate = getattr(type(self), "__auth__", None)
+
+        if not isinstance(auth_gate, Gate):
+            raise ConfigurationError(f"Handler {type(self).__name__} has no __auth__ declaration")
+
+        if isinstance(auth_gate, Public):
             return await original_run(self, cmd)
 
-        # Non-public: check auth
-        auth_policy = getattr(type(self), "__auth__", None)
-        if auth_policy is None:
-            from osa.domain.shared.error import ConfigurationError
+        if isinstance(auth_gate, AtLeast):
+            from osa.domain.auth.model.principal import Principal
 
-            raise ConfigurationError(
-                f"Handler {type(self).__name__} has no __auth__ declaration "
-                f"and its query is not __public__"
-            )
+            principal = getattr(self, "principal", None)
+            if not isinstance(principal, Principal):
+                raise AuthorizationError(
+                    "Authentication required",
+                    code="missing_token",
+                )
 
-        principal = getattr(self, "_principal", None)
-        if principal is None:
-            raise AuthorizationError(
-                "Authentication required",
-                code="missing_token",
-            )
+            if not principal.has_role(auth_gate.role):
+                raise AuthorizationError(
+                    f"Access denied: insufficient role for {type(self).__name__}",
+                    code="access_denied",
+                )
 
-        if not auth_policy.evaluate(principal):
-            raise AuthorizationError(
-                f"Access denied: insufficient role for {type(self).__name__}",
-                code="access_denied",
-            )
+            return await original_run(self, cmd)
 
-        return await original_run(self, cmd)
+        raise ConfigurationError(  # pragma: no cover — future gate types handled here
+            f"Handler {type(self).__name__} has unhandled __auth__ type: {type(auth_gate).__name__}"
+        )
 
     return auth_wrapped_run
 
@@ -86,9 +91,11 @@ class QueryHandler(Generic[C, R], metaclass=_QueryHandlerMeta):
 
     Declare __auth__ to enforce role-based access:
         class MyHandler(QueryHandler[MyQuery, MyResult]):
-            __auth__ = requires_role(Role.ADMIN)
-            _principal: Principal | None = None
+            __auth__ = at_least(Role.ADMIN)
+            principal: Principal
     """
+
+    __auth__: ClassVar[Gate]
 
     @abstractmethod
     async def run(self, cmd: C) -> R: ...

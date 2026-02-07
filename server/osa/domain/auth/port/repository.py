@@ -3,7 +3,7 @@
 from abc import abstractmethod
 from typing import Protocol
 
-from osa.domain.auth.model.identity import Identity
+from osa.domain.auth.model.linked_account import LinkedAccount
 from osa.domain.auth.model.token import RefreshToken
 from osa.domain.auth.model.user import User
 from osa.domain.auth.model.value import (
@@ -29,29 +29,29 @@ class UserRepository(Port, Protocol):
         ...
 
 
-class IdentityRepository(Port, Protocol):
-    """Repository for Identity entity persistence."""
+class LinkedAccountRepository(Port, Protocol):
+    """Repository for LinkedAccount entity persistence."""
 
     @abstractmethod
-    async def get(self, identity_id: IdentityId) -> Identity | None:
-        """Get an identity by ID."""
+    async def get(self, identity_id: IdentityId) -> LinkedAccount | None:
+        """Get a linked account by ID."""
         ...
 
     @abstractmethod
     async def get_by_provider_and_external_id(
         self, provider: str, external_id: str
-    ) -> Identity | None:
-        """Get an identity by provider and external ID."""
+    ) -> LinkedAccount | None:
+        """Get a linked account by provider and external ID."""
         ...
 
     @abstractmethod
-    async def get_by_user_id(self, user_id: UserId) -> list[Identity]:
-        """Get all identities for a user."""
+    async def get_by_user_id(self, user_id: UserId) -> list[LinkedAccount]:
+        """Get all linked accounts for a user."""
         ...
 
     @abstractmethod
-    async def save(self, identity: Identity) -> None:
-        """Save an identity."""
+    async def save(self, linked_account: LinkedAccount) -> None:
+        """Save a linked account."""
         ...
 
 

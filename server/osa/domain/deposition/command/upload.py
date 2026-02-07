@@ -4,7 +4,7 @@ import logfire
 
 from osa.domain.auth.model.principal import Principal
 from osa.domain.auth.model.role import Role
-from osa.domain.shared.authorization.policy import requires_role
+from osa.domain.shared.authorization.gate import at_least
 from osa.domain.shared.command import Command, CommandHandler, Result
 from osa.domain.shared.model.srn import DepositionSRN
 
@@ -20,8 +20,8 @@ class FileUploaded(Result):
 
 
 class UploadFileHandler(CommandHandler[UploadFile, FileUploaded]):
-    __auth__ = requires_role(Role.DEPOSITOR)
-    _principal: Principal | None = None
+    __auth__ = at_least(Role.DEPOSITOR)
+    principal: Principal
 
     async def run(self, cmd: UploadFile) -> FileUploaded:
         with logfire.span("UploadFile"):

@@ -6,7 +6,7 @@ from osa.domain.auth.model.principal import Principal
 from osa.domain.auth.model.role import Role
 from osa.domain.auth.model.value import UserId
 from osa.domain.auth.service.authorization import AuthorizationService
-from osa.domain.shared.authorization.policy import requires_role
+from osa.domain.shared.authorization.gate import at_least
 from osa.domain.shared.command import Command, CommandHandler, Result
 
 
@@ -24,8 +24,8 @@ class RevokeRoleResult(Result):
 
 
 class RevokeRoleHandler(CommandHandler[RevokeRole, RevokeRoleResult]):
-    __auth__ = requires_role(Role.SUPERADMIN)
-    _principal: Principal | None = None
+    __auth__ = at_least(Role.SUPERADMIN)
+    principal: Principal
     authorization_service: AuthorizationService
 
     async def run(self, cmd: RevokeRole) -> RevokeRoleResult:

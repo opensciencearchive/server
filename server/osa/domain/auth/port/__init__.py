@@ -1,12 +1,12 @@
 """Auth domain ports."""
 
 from .identity_provider import IdentityInfo, IdentityProvider
-from .repository import IdentityRepository, RefreshTokenRepository, UserRepository
+from .repository import LinkedAccountRepository, RefreshTokenRepository, UserRepository
 
 __all__ = [
     "IdentityInfo",
     "IdentityProvider",
-    "IdentityRepository",
+    "LinkedAccountRepository",
     "RefreshTokenRepository",
     "UserRepository",
 ]

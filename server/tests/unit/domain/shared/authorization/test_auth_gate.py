@@ -1,11 +1,11 @@
-"""Tests for handler __auth__ gate: T013 — metaclass wraps run() with auth check."""
+"""Tests for handler __auth__ gate: metaclass wraps run() with auth check."""
 
 import pytest
 
 from osa.domain.auth.model.principal import Principal
 from osa.domain.auth.model.role import Role
 from osa.domain.auth.model.value import ProviderIdentity, UserId
-from osa.domain.shared.authorization.policy import requires_role
+from osa.domain.shared.authorization.gate import at_least, public
 from osa.domain.shared.command import Command, CommandHandler, Result
 from osa.domain.shared.error import AuthorizationError, ConfigurationError
 from osa.domain.shared.query import Query, QueryHandler
@@ -15,7 +15,7 @@ from osa.domain.shared.query import Result as QueryResult
 def _make_principal(roles: frozenset[Role]) -> Principal:
     return Principal(
         user_id=UserId.generate(),
-        identity=ProviderIdentity(provider="test", external_id="test-ext"),
+        provider_identity=ProviderIdentity(provider="test", external_id="test-ext"),
         roles=roles,
     )
 
@@ -32,7 +32,6 @@ class AdminOnlyResult(Result):
 
 
 class PublicCommand(Command):
-    __public__: bool = True  # ClassVar-like, signals public access
     value: str = "test"
 
 
@@ -44,15 +43,15 @@ class PublicResult(Result):
 
 
 class AdminOnlyHandler(CommandHandler[AdminOnlyCommand, AdminOnlyResult]):
-    __auth__ = requires_role(Role.ADMIN)
-    _principal: Principal | None = None
+    __auth__ = at_least(Role.ADMIN)
+    principal: Principal
 
     async def run(self, cmd: AdminOnlyCommand) -> AdminOnlyResult:
         return AdminOnlyResult(value=cmd.value)
 
 
 class PublicHandler(CommandHandler[PublicCommand, PublicResult]):
-    _principal: Principal | None = None
+    __auth__ = public()
 
     async def run(self, cmd: PublicCommand) -> PublicResult:
         return PublicResult(value=cmd.value)
@@ -91,7 +90,7 @@ class TestAuthGateOnCommandHandler:
     @pytest.mark.asyncio
     async def test_admin_handler_rejects_depositor(self) -> None:
         depositor = _make_principal(frozenset({Role.DEPOSITOR}))
-        handler = AdminOnlyHandler(_principal=depositor)
+        handler = AdminOnlyHandler(principal=depositor)
 
         with pytest.raises(AuthorizationError):
             await handler.run(AdminOnlyCommand(value="test"))
@@ -99,29 +98,38 @@ class TestAuthGateOnCommandHandler:
     @pytest.mark.asyncio
     async def test_admin_handler_allows_admin(self) -> None:
         admin = _make_principal(frozenset({Role.ADMIN}))
-        handler = AdminOnlyHandler(_principal=admin)
+        handler = AdminOnlyHandler(principal=admin)
 
         result = await handler.run(AdminOnlyCommand(value="hello"))
         assert result.value == "hello"
 
     @pytest.mark.asyncio
-    async def test_admin_handler_rejects_none_principal(self) -> None:
-        handler = AdminOnlyHandler(_principal=None)
+    async def test_admin_handler_allows_superadmin(self) -> None:
+        superadmin = _make_principal(frozenset({Role.SUPERADMIN}))
+        handler = AdminOnlyHandler(principal=superadmin)
+
+        result = await handler.run(AdminOnlyCommand(value="hello"))
+        assert result.value == "hello"
+
+    @pytest.mark.asyncio
+    async def test_admin_handler_rejects_missing_principal(self) -> None:
+        # Principal field not provided — should raise AuthorizationError
+        handler = AdminOnlyHandler.__new__(AdminOnlyHandler)
 
         with pytest.raises(AuthorizationError):
             await handler.run(AdminOnlyCommand(value="test"))
 
     @pytest.mark.asyncio
     async def test_public_handler_skips_check(self) -> None:
-        handler = PublicHandler(_principal=None)
+        handler = PublicHandler()
 
         result = await handler.run(PublicCommand(value="public"))
         assert result.value == "public"
 
     @pytest.mark.asyncio
     async def test_public_handler_works_with_principal(self) -> None:
-        depositor = _make_principal(frozenset({Role.DEPOSITOR}))
-        handler = PublicHandler(_principal=depositor)
+        # Public handlers work regardless of principal presence
+        handler = PublicHandler()
 
         result = await handler.run(PublicCommand(value="public"))
         assert result.value == "public"

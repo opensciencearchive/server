@@ -20,7 +20,7 @@ from osa.domain.auth.command.token import (
     RefreshTokensHandler,
 )
 from osa.domain.auth.event import UserAuthenticated, UserLoggedOut
-from osa.domain.auth.model.identity import Identity
+from osa.domain.auth.model.linked_account import LinkedAccount
 from osa.domain.auth.model.user import User
 from osa.domain.auth.model.value import IdentityId, UserId
 from osa.domain.auth.service.token import TokenService
@@ -128,7 +128,7 @@ class TestCompleteOAuthHandler:
             created_at=datetime.now(UTC),
             updated_at=None,
         )
-        identity = Identity(
+        linked_account = LinkedAccount(
             id=IdentityId(uuid4()),
             user_id=user.id,
             provider="orcid",
@@ -140,7 +140,7 @@ class TestCompleteOAuthHandler:
         auth_service = AsyncMock()
         auth_service.complete_oauth.return_value = (
             user,
-            identity,
+            linked_account,
             "access-token",
             "refresh-token",
         )
@@ -181,7 +181,7 @@ class TestCompleteOAuthHandler:
             created_at=datetime.now(UTC),
             updated_at=None,
         )
-        identity = Identity(
+        linked_account = LinkedAccount(
             id=IdentityId(uuid4()),
             user_id=user.id,
             provider="orcid",
@@ -193,7 +193,7 @@ class TestCompleteOAuthHandler:
         auth_service = AsyncMock()
         auth_service.complete_oauth.return_value = (
             user,
-            identity,
+            linked_account,
             "access-token",
             "refresh-token",
         )

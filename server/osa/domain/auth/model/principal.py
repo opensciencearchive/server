@@ -2,19 +2,21 @@
 
 from dataclasses import dataclass
 
+from osa.domain.auth.model.identity import Identity
 from osa.domain.auth.model.role import Role
 from osa.domain.auth.model.value import ProviderIdentity, UserId
 
 
 @dataclass(frozen=True)
-class Principal:
+class Principal(Identity):
     """The authenticated identity of the current requester.
 
     Resolved per-request from JWT + role lookup. Immutable after creation.
+    Subclasses Identity so it can be used wherever Identity is expected.
     """
 
     user_id: UserId
-    identity: ProviderIdentity
+    provider_identity: ProviderIdentity
     roles: frozenset[Role]
 
     def has_role(self, role: Role) -> bool:

@@ -7,8 +7,7 @@ from osa.domain.auth.event import UserAuthenticated
 from osa.domain.auth.port.provider_registry import ProviderRegistry
 from osa.domain.auth.service.auth import AuthService
 from osa.domain.auth.service.token import TokenService
-from typing import ClassVar
-
+from osa.domain.shared.authorization.gate import public
 from osa.domain.shared.command import Command, CommandHandler, Result
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventId
@@ -17,8 +16,6 @@ from osa.domain.shared.outbox import Outbox
 
 class InitiateLogin(Command):
     """Command to start OAuth login flow."""
-
-    __public__: ClassVar[bool] = True
 
     callback_url: str  # OAuth callback URL (where IdP redirects after auth)
     final_redirect_uri: str  # Where to redirect user after OAuth completes
@@ -34,6 +31,8 @@ class InitiateLoginResult(Result):
 @dataclass
 class InitiateLoginHandler(CommandHandler[InitiateLogin, InitiateLoginResult]):
     """Handler for InitiateLogin command."""
+
+    __auth__ = public()
 
     provider_registry: ProviderRegistry
     token_service: TokenService
@@ -63,8 +62,6 @@ class InitiateLoginHandler(CommandHandler[InitiateLogin, InitiateLoginResult]):
 class CompleteOAuth(Command):
     """Command to complete OAuth flow with authorization code."""
 
-    __public__: ClassVar[bool] = True
-
     code: str
     callback_url: str  # Must match the one used in authorization
     provider: str  # The identity provider name (from verified state)
@@ -86,6 +83,8 @@ class CompleteOAuthResult(Result):
 class CompleteOAuthHandler(CommandHandler[CompleteOAuth, CompleteOAuthResult]):
     """Handler for CompleteOAuth command."""
 
+    __auth__ = public()
+
     auth_service: AuthService
     provider_registry: ProviderRegistry
     token_service: TokenService
@@ -101,7 +100,7 @@ class CompleteOAuthHandler(CommandHandler[CompleteOAuth, CompleteOAuthResult]):
                 code="unknown_provider",
             )
 
-        user, identity, access_token, refresh_token = await self.auth_service.complete_oauth(
+        user, linked_account, access_token, refresh_token = await self.auth_service.complete_oauth(
             provider=identity_provider,
             code=cmd.code,
             redirect_uri=cmd.callback_url,
@@ -112,16 +111,16 @@ class CompleteOAuthHandler(CommandHandler[CompleteOAuth, CompleteOAuthResult]):
             UserAuthenticated(
                 id=EventId(uuid4()),
                 user_id=str(user.id),
-                provider=identity.provider,
-                external_id=identity.external_id,
+                provider=linked_account.provider,
+                external_id=linked_account.external_id,
             )
         )
 
         return CompleteOAuthResult(
             user_id=str(user.id),
             display_name=user.display_name,
-            provider=identity.provider,
-            external_id=identity.external_id,
+            provider=linked_account.provider,
+            external_id=linked_account.external_id,
             access_token=access_token,
             refresh_token=refresh_token,
             expires_in=self.token_service.access_token_expire_seconds,

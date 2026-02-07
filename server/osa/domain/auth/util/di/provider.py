@@ -16,19 +16,19 @@ from osa.domain.auth.command.login import (
 )
 from osa.domain.auth.command.revoke_role import RevokeRoleHandler
 from osa.domain.auth.command.token import LogoutHandler, RefreshTokensHandler
-from osa.domain.auth.query.get_user_roles import GetUserRolesHandler
+from osa.domain.auth.model.identity import Anonymous, Identity
 from osa.domain.auth.model.principal import Principal
 from osa.domain.auth.model.value import CurrentUser, ProviderIdentity, UserId
 from osa.domain.auth.port.repository import (
-    IdentityRepository,
+    LinkedAccountRepository,
     RefreshTokenRepository,
     UserRepository,
 )
 from osa.domain.auth.port.role_repository import RoleAssignmentRepository
+from osa.domain.auth.query.get_user_roles import GetUserRolesHandler
 from osa.domain.auth.service.auth import AuthService
 from osa.domain.auth.service.authorization import AuthorizationService
 from osa.domain.auth.service.token import TokenService
-from osa.domain.shared.authorization.policy_set import POLICY_SET, PolicySet
 from osa.domain.shared.outbox import Outbox
 from osa.util.di.base import Provider
 from osa.util.di.scope import Scope
@@ -64,7 +64,7 @@ class AuthProvider(Provider):
     def get_auth_service(
         self,
         user_repo: UserRepository,
-        identity_repo: IdentityRepository,
+        linked_account_repo: LinkedAccountRepository,
         refresh_token_repo: RefreshTokenRepository,
         token_service: TokenService,
         outbox: Outbox,
@@ -72,7 +72,7 @@ class AuthProvider(Provider):
         """Provide AuthService."""
         return AuthService(
             _user_repo=user_repo,
-            _identity_repo=identity_repo,
+            _linked_account_repo=linked_account_repo,
             _refresh_token_repo=refresh_token_repo,
             _token_service=token_service,
             _outbox=outbox,
@@ -122,27 +122,26 @@ class AuthProvider(Provider):
             ) from e
 
     @provide(scope=Scope.UOW)
-    async def get_principal(
+    async def get_identity(
         self,
         request: Request,
         token_service: TokenService,
         role_repo: RoleAssignmentRepository,
-    ) -> Principal | None:
-        """Resolve Principal from JWT + role lookup.
+    ) -> Identity:
+        """Resolve Identity from JWT + role lookup.
 
-        Returns None for anonymous requests (no JWT / invalid JWT).
-        This allows public endpoints to work without authentication.
+        Returns Anonymous for unauthenticated requests, Principal for authenticated.
         """
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            return None
+            return Anonymous()
 
         token = auth_header[7:]  # Remove "Bearer " prefix
 
         try:
             payload = token_service.validate_access_token(token)
         except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-            return None
+            return Anonymous()
 
         user_id = UserId(UUID(payload["sub"]))
 
@@ -152,15 +151,18 @@ class AuthProvider(Provider):
 
         return Principal(
             user_id=user_id,
-            identity=ProviderIdentity(
+            provider_identity=ProviderIdentity(
                 provider=payload["provider"],
                 external_id=payload["external_id"],
             ),
             roles=roles,
         )
 
-    @provide(scope=Scope.APP)
-    def get_policy_set(self) -> PolicySet:
-        """Provide the global PolicySet singleton. Validates coverage at startup."""
-        POLICY_SET.validate_coverage()
-        return POLICY_SET
+    @provide(scope=Scope.UOW)
+    def get_principal(self, identity: Identity) -> Principal:
+        """Extract Principal from Identity. Raises if not authenticated."""
+        from osa.domain.shared.error import AuthorizationError
+
+        if isinstance(identity, Principal):
+            return identity
+        raise AuthorizationError("Authentication required", code="missing_token")

@@ -7,7 +7,7 @@ from osa.config import Config
 from osa.domain.auth.port.identity_provider import IdentityProvider
 from osa.domain.auth.port.provider_registry import ProviderRegistry
 from osa.domain.auth.port.repository import (
-    IdentityRepository,
+    LinkedAccountRepository,
     RefreshTokenRepository,
     UserRepository,
 )
@@ -16,7 +16,7 @@ from osa.infrastructure.auth.orcid import OrcidIdentityProvider
 from osa.infrastructure.auth.provider_registry import InMemoryProviderRegistry
 from osa.infrastructure.auth.role_repository import PostgresRoleAssignmentRepository
 from osa.infrastructure.persistence.repository.auth import (
-    PostgresIdentityRepository,
+    PostgresLinkedAccountRepository,
     PostgresRefreshTokenRepository,
     PostgresUserRepository,
 )
@@ -41,10 +41,10 @@ class AuthInfraProvider(Provider):
         scope=Scope.UOW,
         provides=UserRepository,
     )
-    identity_repo = provide(
-        PostgresIdentityRepository,
+    linked_account_repo = provide(
+        PostgresLinkedAccountRepository,
         scope=Scope.UOW,
-        provides=IdentityRepository,
+        provides=LinkedAccountRepository,
     )
     refresh_token_repo = provide(
         PostgresRefreshTokenRepository,
