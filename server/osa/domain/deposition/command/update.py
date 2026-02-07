@@ -1,6 +1,9 @@
 import logfire
 
+from osa.domain.auth.model.principal import Principal
+from osa.domain.auth.model.role import Role
 from osa.domain.deposition.service.deposition import DepositionService
+from osa.domain.shared.authorization.policy import requires_role
 from osa.domain.shared.command import Command, CommandHandler, Result
 
 
@@ -11,6 +14,8 @@ class DepositionUpdated(Result): ...
 
 
 class UpdateDepositionHandler(CommandHandler[UpdateDeposition, DepositionUpdated]):
+    __auth__ = requires_role(Role.DEPOSITOR)
+    _principal: Principal | None = None
     deposition_service: DepositionService
 
     async def run(self, cmd: UpdateDeposition) -> DepositionUpdated:

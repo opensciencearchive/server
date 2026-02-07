@@ -1,6 +1,7 @@
 """Token commands for refresh and logout operations."""
 
 from dataclasses import dataclass
+from typing import ClassVar
 from uuid import uuid4
 
 from osa.domain.auth.event import UserLoggedOut
@@ -13,6 +14,8 @@ from osa.domain.shared.outbox import Outbox
 
 class RefreshTokens(Command):
     """Command to refresh access token using refresh token."""
+
+    __public__: ClassVar[bool] = True
 
     refresh_token: str
 
@@ -47,6 +50,8 @@ class RefreshTokensHandler(CommandHandler[RefreshTokens, RefreshTokensResult]):
 
 class Logout(Command):
     """Command to logout and revoke refresh token family."""
+
+    __public__: ClassVar[bool] = True
 
     refresh_token: str
 

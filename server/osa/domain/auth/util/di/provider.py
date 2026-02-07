@@ -1,5 +1,6 @@
 """DI provider for auth domain."""
 
+import logging
 from uuid import UUID
 
 import jwt
@@ -8,22 +9,31 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from osa.config import Config
+from osa.domain.auth.command.assign_role import AssignRoleHandler
 from osa.domain.auth.command.login import (
     CompleteOAuthHandler,
     InitiateLoginHandler,
 )
+from osa.domain.auth.command.revoke_role import RevokeRoleHandler
 from osa.domain.auth.command.token import LogoutHandler, RefreshTokensHandler
+from osa.domain.auth.query.get_user_roles import GetUserRolesHandler
+from osa.domain.auth.model.principal import Principal
 from osa.domain.auth.model.value import CurrentUser, ProviderIdentity, UserId
 from osa.domain.auth.port.repository import (
     IdentityRepository,
     RefreshTokenRepository,
     UserRepository,
 )
+from osa.domain.auth.port.role_repository import RoleAssignmentRepository
 from osa.domain.auth.service.auth import AuthService
+from osa.domain.auth.service.authorization import AuthorizationService
 from osa.domain.auth.service.token import TokenService
+from osa.domain.shared.authorization.policy_set import POLICY_SET, PolicySet
 from osa.domain.shared.outbox import Outbox
 from osa.util.di.base import Provider
 from osa.util.di.scope import Scope
+
+logger = logging.getLogger(__name__)
 
 
 class AuthProvider(Provider):
@@ -36,6 +46,14 @@ class AuthProvider(Provider):
     complete_oauth_handler = provide(CompleteOAuthHandler, scope=Scope.UOW)
     refresh_tokens_handler = provide(RefreshTokensHandler, scope=Scope.UOW)
     logout_handler = provide(LogoutHandler, scope=Scope.UOW)
+    assign_role_handler = provide(AssignRoleHandler, scope=Scope.UOW)
+    revoke_role_handler = provide(RevokeRoleHandler, scope=Scope.UOW)
+
+    # Query Handlers
+    get_user_roles_handler = provide(GetUserRolesHandler, scope=Scope.UOW)
+
+    # Services
+    authorization_service = provide(AuthorizationService, scope=Scope.UOW)
 
     @provide(scope=Scope.UOW)
     def get_token_service(self, config: Config) -> TokenService:
@@ -102,3 +120,47 @@ class AuthProvider(Provider):
                 detail={"code": "invalid_token", "message": "Invalid token"},
                 headers={"WWW-Authenticate": "Bearer"},
             ) from e
+
+    @provide(scope=Scope.UOW)
+    async def get_principal(
+        self,
+        request: Request,
+        token_service: TokenService,
+        role_repo: RoleAssignmentRepository,
+    ) -> Principal | None:
+        """Resolve Principal from JWT + role lookup.
+
+        Returns None for anonymous requests (no JWT / invalid JWT).
+        This allows public endpoints to work without authentication.
+        """
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return None
+
+        token = auth_header[7:]  # Remove "Bearer " prefix
+
+        try:
+            payload = token_service.validate_access_token(token)
+        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+            return None
+
+        user_id = UserId(UUID(payload["sub"]))
+
+        # Lookup roles from DB
+        assignments = await role_repo.get_by_user_id(user_id)
+        roles = frozenset(a.role for a in assignments)
+
+        return Principal(
+            user_id=user_id,
+            identity=ProviderIdentity(
+                provider=payload["provider"],
+                external_id=payload["external_id"],
+            ),
+            roles=roles,
+        )
+
+    @provide(scope=Scope.APP)
+    def get_policy_set(self) -> PolicySet:
+        """Provide the global PolicySet singleton. Validates coverage at startup."""
+        POLICY_SET.validate_coverage()
+        return POLICY_SET

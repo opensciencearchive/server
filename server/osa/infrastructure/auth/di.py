@@ -11,8 +11,10 @@ from osa.domain.auth.port.repository import (
     RefreshTokenRepository,
     UserRepository,
 )
+from osa.domain.auth.port.role_repository import RoleAssignmentRepository
 from osa.infrastructure.auth.orcid import OrcidIdentityProvider
 from osa.infrastructure.auth.provider_registry import InMemoryProviderRegistry
+from osa.infrastructure.auth.role_repository import PostgresRoleAssignmentRepository
 from osa.infrastructure.persistence.repository.auth import (
     PostgresIdentityRepository,
     PostgresRefreshTokenRepository,
@@ -48,6 +50,11 @@ class AuthInfraProvider(Provider):
         PostgresRefreshTokenRepository,
         scope=Scope.UOW,
         provides=RefreshTokenRepository,
+    )
+    role_assignment_repo = provide(
+        PostgresRoleAssignmentRepository,
+        scope=Scope.UOW,
+        provides=RoleAssignmentRepository,
     )
 
     @provide(scope=Scope.APP)

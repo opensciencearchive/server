@@ -6,9 +6,19 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from osa.application.api.v1.errors import map_osa_error
-from osa.application.api.v1.routes import auth, events, health, records, search, stats, validation
+from osa.application.api.v1.routes import (
+    admin,
+    auth,
+    events,
+    health,
+    records,
+    search,
+    stats,
+    validation,
+)
 from osa.application.di import create_container
 from osa.config import Config, configure_logging
+from osa.domain.shared.authorization.startup import validate_all_handlers
 from osa.domain.shared.error import OSAError
 from osa.infrastructure.event.worker import WorkerPool
 from osa.infrastructure.source.discovery import validate_sources_at_startup
@@ -42,6 +52,9 @@ def create_app() -> FastAPI:
     # Validate source configs at startup (fail fast with clear errors)
     validate_sources_at_startup(config.sources)
 
+    # Validate all handlers have authorization declarations (fail fast)
+    validate_all_handlers()
+
     app_instance = FastAPI(
         title=config.server.name,
         description=config.server.description,
@@ -59,6 +72,7 @@ def create_app() -> FastAPI:
 
     # Register v1 routes with /api/v1 prefix
     app_instance.include_router(health.router, prefix="/api/v1")
+    app_instance.include_router(admin.router, prefix="/api/v1")
     app_instance.include_router(auth.router, prefix="/api/v1")
     app_instance.include_router(events.router, prefix="/api/v1")
     app_instance.include_router(records.router, prefix="/api/v1")

@@ -7,6 +7,8 @@ from osa.domain.auth.event import UserAuthenticated
 from osa.domain.auth.port.provider_registry import ProviderRegistry
 from osa.domain.auth.service.auth import AuthService
 from osa.domain.auth.service.token import TokenService
+from typing import ClassVar
+
 from osa.domain.shared.command import Command, CommandHandler, Result
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventId
@@ -15,6 +17,8 @@ from osa.domain.shared.outbox import Outbox
 
 class InitiateLogin(Command):
     """Command to start OAuth login flow."""
+
+    __public__: ClassVar[bool] = True
 
     callback_url: str  # OAuth callback URL (where IdP redirects after auth)
     final_redirect_uri: str  # Where to redirect user after OAuth completes
@@ -58,6 +62,8 @@ class InitiateLoginHandler(CommandHandler[InitiateLogin, InitiateLoginResult]):
 
 class CompleteOAuth(Command):
     """Command to complete OAuth flow with authorization code."""
+
+    __public__: ClassVar[bool] = True
 
     code: str
     callback_url: str  # Must match the one used in authorization

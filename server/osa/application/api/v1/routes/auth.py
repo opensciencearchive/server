@@ -25,6 +25,7 @@ from osa.domain.auth.command.token import (
 )
 from osa.domain.auth.model.value import CurrentUser
 from osa.domain.auth.port.provider_registry import ProviderRegistry
+from osa.domain.auth.port.role_repository import RoleAssignmentRepository
 from osa.domain.auth.service.auth import AuthService
 from osa.domain.auth.service.token import TokenService
 from osa.domain.shared.error import InvalidStateError
@@ -62,12 +63,13 @@ class LogoutResponse(BaseModel):
 
 
 class UserResponse(BaseModel):
-    """Response containing user info."""
+    """Response containing user info with roles."""
 
     id: str
     display_name: str | None
     provider: str
     external_id: str
+    roles: list[str]
 
 
 @router.get("/login")
@@ -259,8 +261,9 @@ async def logout(
 async def get_me(
     current_user: FromDishka[CurrentUser],
     auth_service: FromDishka[AuthService],
+    role_repo: FromDishka[RoleAssignmentRepository],
 ) -> UserResponse:
-    """Get current authenticated user information."""
+    """Get current authenticated user information with roles."""
     user = await auth_service.get_user_by_id(current_user.user_id)
 
     if user is None:
@@ -269,9 +272,13 @@ async def get_me(
             detail={"code": "user_not_found", "message": "User not found"},
         )
 
+    assignments = await role_repo.get_by_user_id(current_user.user_id)
+    roles = [a.role.name.lower() for a in assignments]
+
     return UserResponse(
         id=str(user.id),
         display_name=user.display_name,
         provider=current_user.identity.provider,
         external_id=current_user.identity.external_id,
+        roles=roles,
     )
