@@ -41,22 +41,31 @@ def _make_principal(
 class TestCreateDepositionHandlerAuth:
     @pytest.mark.asyncio
     async def test_create_deposition_allows_depositor(self) -> None:
+        from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+
         depositor = _make_principal(frozenset({Role.DEPOSITOR}))
         service = AsyncMock()
+        mock_dep = MagicMock()
+        mock_dep.srn = DepositionSRN.parse("urn:osa:localhost:dep:test-dep")
+        service.create.return_value = mock_dep
         handler = CreateDepositionHandler(
             principal=depositor,
             deposition_service=service,
         )
 
-        result = await handler.run(CreateDeposition())
+        conv_srn = ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
+        result = await handler.run(CreateDeposition(convention_srn=conv_srn))
         assert result.srn is not None
 
     @pytest.mark.asyncio
     async def test_create_deposition_rejects_unauthenticated(self) -> None:
+        from osa.domain.shared.model.srn import ConventionSRN
+
         handler = CreateDepositionHandler.__new__(CreateDepositionHandler)
 
         with pytest.raises(AuthorizationError) as exc_info:
-            await handler.run(CreateDeposition())
+            conv_srn = ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
+            await handler.run(CreateDeposition(convention_srn=conv_srn))
         assert exc_info.value.code == "missing_token"
 
 
@@ -99,6 +108,114 @@ class TestAssignRoleHandlerAuth:
         with pytest.raises(AuthorizationError) as exc_info:
             await handler.run(AssignRole(user_id=str(UserId.generate()), role="curator"))
         assert exc_info.value.code == "access_denied"
+
+
+class TestListDepositionsHandlerAuth:
+    @pytest.mark.asyncio
+    async def test_list_depositions_allows_depositor(self) -> None:
+        from osa.domain.deposition.query.list_depositions import (
+            DepositionList,
+            ListDepositions,
+            ListDepositionsHandler,
+        )
+
+        depositor = _make_principal(frozenset({Role.DEPOSITOR}))
+        service = AsyncMock()
+        service.list_depositions.return_value = ([], 0)
+        handler = ListDepositionsHandler(
+            principal=depositor,
+            deposition_service=service,
+        )
+
+        result = await handler.run(ListDepositions())
+        assert isinstance(result, DepositionList)
+        assert result.items == []
+        assert result.total == 0
+        # Depositor sees own depositions only
+        service.list_depositions.assert_called_once_with(depositor.user_id)
+
+    @pytest.mark.asyncio
+    async def test_list_depositions_curator_sees_all(self) -> None:
+        from osa.domain.deposition.query.list_depositions import (
+            DepositionList,
+            ListDepositions,
+            ListDepositionsHandler,
+        )
+
+        curator = _make_principal(frozenset({Role.CURATOR}))
+        service = AsyncMock()
+        service.list_depositions.return_value = ([], 0)
+        handler = ListDepositionsHandler(
+            principal=curator,
+            deposition_service=service,
+        )
+
+        result = await handler.run(ListDepositions())
+        assert isinstance(result, DepositionList)
+        # Curator sees all depositions (owner_id=None)
+        service.list_depositions.assert_called_once_with(None)
+
+    @pytest.mark.asyncio
+    async def test_list_depositions_rejects_unauthenticated(self) -> None:
+        from osa.domain.deposition.query.list_depositions import (
+            ListDepositions,
+            ListDepositionsHandler,
+        )
+
+        handler = ListDepositionsHandler.__new__(ListDepositionsHandler)
+
+        with pytest.raises(AuthorizationError) as exc_info:
+            await handler.run(ListDepositions())
+        assert exc_info.value.code == "missing_token"
+
+
+class TestDownloadFileHandlerAuth:
+    @pytest.mark.asyncio
+    async def test_download_file_allows_depositor(self) -> None:
+        from datetime import UTC, datetime
+
+        from osa.domain.deposition.model.value import DepositionFile
+        from osa.domain.deposition.query.download_file import (
+            DownloadFile,
+            DownloadFileHandler,
+        )
+        from osa.domain.shared.model.srn import DepositionSRN
+
+        depositor = _make_principal(frozenset({Role.DEPOSITOR}))
+        service = AsyncMock()
+        file_meta = DepositionFile(
+            name="data.csv", size=100, checksum="abc", uploaded_at=datetime.now(UTC)
+        )
+
+        async def _fake_stream():
+            yield b"data"
+
+        service.get_file_download.return_value = (_fake_stream(), file_meta)
+
+        handler = DownloadFileHandler(
+            principal=depositor,
+            deposition_service=service,
+        )
+
+        srn = DepositionSRN.parse("urn:osa:localhost:dep:test-dep")
+        result = await handler.run(DownloadFile(srn=srn, filename="data.csv"))
+        assert result.filename == "data.csv"
+        assert result.size == 100
+
+    @pytest.mark.asyncio
+    async def test_download_file_rejects_unauthenticated(self) -> None:
+        from osa.domain.deposition.query.download_file import (
+            DownloadFile,
+            DownloadFileHandler,
+        )
+        from osa.domain.shared.model.srn import DepositionSRN
+
+        handler = DownloadFileHandler.__new__(DownloadFileHandler)
+
+        with pytest.raises(AuthorizationError) as exc_info:
+            srn = DepositionSRN.parse("urn:osa:localhost:dep:test-dep")
+            await handler.run(DownloadFile(srn=srn, filename="data.csv"))
+        assert exc_info.value.code == "missing_token"
 
 
 class TestInitiateLoginHandlerAuth:

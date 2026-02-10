@@ -103,7 +103,8 @@ class ResourceType(str, Enum):
     rec = "rec"
     dep = "dep"
     schema = "schema"
-    vocab = "vocab"
+    onto = "onto"
+    conv = "conv"
     snap = "snap"
     evt = "evt"
     val = "val"
@@ -231,8 +232,13 @@ class SchemaSRN(SRN):
     version: Semver
 
 
-class VocabSRN(SRN):
-    type: ResourceType = Field(default=ResourceType.vocab, frozen=True)
+class OntologySRN(SRN):
+    type: ResourceType = Field(default=ResourceType.onto, frozen=True)
+    version: Semver
+
+
+class ConventionSRN(SRN):
+    type: ResourceType = Field(default=ResourceType.conv, frozen=True)
     version: Semver
 
 

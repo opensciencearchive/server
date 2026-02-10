@@ -4,29 +4,26 @@ from uuid import UUID
 from osa.domain.auth.model.value import UserId
 from osa.domain.deposition.model.aggregate import Deposition
 from osa.domain.deposition.model.value import DepositionFile, DepositionStatus
-from osa.domain.shared.model.srn import DepositionSRN, RecordSRN
+from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, RecordSRN
 
 
-def row_to_deposition(row: dict[str, Any]) -> Deposition[dict[str, Any]]:
-    """Convert database row to Deposition aggregate.
-
-    Note: We assume the metadata is a dict. Since Deposition is generic,
-    at the persistence boundary we treat it as a dict.
-    """
+def row_to_deposition(row: dict[str, Any]) -> Deposition:
+    """Convert database row to Deposition aggregate."""
     files_data = row.get("files", []) or []
     files = [DepositionFile(**f) for f in files_data]
 
     record_id = row.get("record_id")
-    owner_id_raw = row.get("owner_id")
 
     return Deposition(
         srn=DepositionSRN.parse(row["srn"]),
+        convention_srn=ConventionSRN.parse(row["convention_srn"]),
         status=DepositionStatus(row["status"]),
         metadata=row.get("metadata", {}),
         files=files,
-        provenance=row.get("provenance", {}),
         record_srn=RecordSRN.parse(record_id) if record_id else None,
-        owner_id=UserId(UUID(owner_id_raw)) if owner_id_raw else None,
+        owner_id=UserId(UUID(row["owner_id"])),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )
 
 
@@ -34,10 +31,12 @@ def deposition_to_dict(dep: Deposition) -> dict[str, Any]:
     """Convert Deposition aggregate to database dict."""
     return {
         "srn": str(dep.srn),
+        "convention_srn": str(dep.convention_srn),
         "status": dep.status,
-        "metadata": dep.metadata if isinstance(dep.metadata, dict) else dep.metadata.model_dump(),
+        "metadata": dep.metadata,
         "files": [f.model_dump(mode="json") for f in dep.files],
-        "provenance": dep.provenance,
         "record_id": str(dep.record_srn) if dep.record_srn else None,
-        "owner_id": str(dep.owner_id) if dep.owner_id else None,
+        "owner_id": str(dep.owner_id),
+        "created_at": dep.created_at,
+        "updated_at": dep.updated_at,
     }

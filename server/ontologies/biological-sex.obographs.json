@@ -1,0 +1,82 @@
+{
+  "graphs": [
+    {
+      "id": "http://purl.obolibrary.org/obo/osa/biological-sex.owl",
+      "lbl": "Biological Sex",
+      "meta": {
+        "version": "1.0.0",
+        "definition": {
+          "val": "An ontology of biological sex categories for scientific data annotation."
+        }
+      },
+      "nodes": [
+        {
+          "id": "OSAO:0000001",
+          "lbl": "biological sex",
+          "type": "CLASS",
+          "meta": {
+            "definition": {
+              "val": "The biological sex of an organism, determined by chromosomal, gonadal, and anatomical characteristics."
+            }
+          }
+        },
+        {
+          "id": "OSAO:0000002",
+          "lbl": "female",
+          "type": "CLASS",
+          "meta": {
+            "definition": {
+              "val": "An organism that produces ova or has XX sex chromosomes."
+            },
+            "synonyms": [
+              { "val": "F" }
+            ]
+          }
+        },
+        {
+          "id": "OSAO:0000003",
+          "lbl": "male",
+          "type": "CLASS",
+          "meta": {
+            "definition": {
+              "val": "An organism that produces spermatozoa or has XY sex chromosomes."
+            },
+            "synonyms": [
+              { "val": "M" }
+            ]
+          }
+        },
+        {
+          "id": "OSAO:0000004",
+          "lbl": "intersex",
+          "type": "CLASS",
+          "meta": {
+            "definition": {
+              "val": "An organism with sex characteristics that do not fit typical definitions of male or female."
+            }
+          }
+        },
+        {
+          "id": "OSAO:0000005",
+          "lbl": "unknown sex",
+          "type": "CLASS",
+          "meta": {
+            "definition": {
+              "val": "The biological sex of the organism has not been determined."
+            },
+            "synonyms": [
+              { "val": "undetermined" },
+              { "val": "not recorded" }
+            ]
+          }
+        }
+      ],
+      "edges": [
+        { "sub": "OSAO:0000002", "pred": "is_a", "obj": "OSAO:0000001" },
+        { "sub": "OSAO:0000003", "pred": "is_a", "obj": "OSAO:0000001" },
+        { "sub": "OSAO:0000004", "pred": "is_a", "obj": "OSAO:0000001" },
+        { "sub": "OSAO:0000005", "pred": "is_a", "obj": "OSAO:0000001" }
+      ]
+    }
+  ]
+}

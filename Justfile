@@ -58,6 +58,13 @@ dev-down:
 open-ui:
     open http://localhost:8080
 
+# === Code Quality ===
+
+# Lint all code (server + web)
+lint:
+    cd server && just lint
+    cd web && pnpm lint
+
 # === Individual Service Development ===
 
 # Run server independently (requires database)

@@ -1,4 +1,4 @@
 from .repository import DepositionRepository
-from .storage import StoragePort
+from .storage import FileStoragePort
 
-__all__ = ["DepositionRepository", "StoragePort"]
+__all__ = ["DepositionRepository", "FileStoragePort"]

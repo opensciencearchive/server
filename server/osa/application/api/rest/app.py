@@ -9,9 +9,13 @@ from osa.application.api.v1.errors import map_osa_error
 from osa.application.api.v1.routes import (
     admin,
     auth,
+    conventions,
+    depositions,
     events,
     health,
+    ontologies,
     records,
+    schemas,
     search,
     stats,
     validation,
@@ -78,6 +82,10 @@ def create_app() -> FastAPI:
     app_instance.include_router(records.router, prefix="/api/v1")
     app_instance.include_router(search.router, prefix="/api/v1")
     app_instance.include_router(stats.router, prefix="/api/v1")
+    app_instance.include_router(ontologies.router, prefix="/api/v1")
+    app_instance.include_router(schemas.router, prefix="/api/v1")
+    app_instance.include_router(conventions.router, prefix="/api/v1")
+    app_instance.include_router(depositions.router, prefix="/api/v1")
     app_instance.include_router(validation.router, prefix="/api/v1")
 
     # Global OSA error handler - maps domain and infrastructure errors to HTTP responses
