@@ -1,5 +1,7 @@
 """Convention REST routes."""
 
+import re
+
 from dishka.integrations.fastapi import DishkaRoute, FromDishka
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -45,7 +47,9 @@ async def download_convention_template(
     return StreamingResponse(
         iter([result.content]),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{re.sub(r"[\r\n\"]", "_", result.filename)}"'
+        },
     )
 
 

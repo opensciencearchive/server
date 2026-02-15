@@ -1,5 +1,6 @@
 """Deposition REST routes."""
 
+import re
 from typing import Any
 
 from dishka.integrations.fastapi import DishkaRoute, FromDishka
@@ -123,10 +124,11 @@ async def download_file(
     handler: FromDishka[DownloadFileHandler],
 ) -> StreamingResponse:
     result = await handler.run(DownloadFile(srn=DepositionSRN.parse(srn), filename=filename))
+    safe_name = _sanitize_header_filename(result.filename)
     return StreamingResponse(
         result.stream,
         media_type=result.content_type or "application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
     )
 
 
@@ -162,3 +164,8 @@ async def get_deposition(
     handler: FromDishka[GetDepositionHandler],
 ) -> DepositionDetail:
     return await handler.run(GetDeposition(srn=DepositionSRN.parse(srn)))
+
+
+def _sanitize_header_filename(filename: str) -> str:
+    """Strip characters that could break Content-Disposition headers."""
+    return re.sub(r'[\r\n"]', "_", filename)

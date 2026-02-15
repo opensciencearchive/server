@@ -21,6 +21,16 @@ class LocalFileStorageAdapter(FileStoragePort):
         safe_id = f"{deposition_id.domain.root}_{deposition_id.id.root}"
         return self.base_path / "depositions" / safe_id
 
+    def _safe_path(self, dep_dir: Path, filename: str) -> Path:
+        """Resolve filename within dep_dir, rejecting path traversal attempts."""
+        safe_name = Path(filename).name
+        if not safe_name or safe_name != filename:
+            raise ValueError(f"Invalid filename: {filename}")
+        target = dep_dir / safe_name
+        if not target.resolve().is_relative_to(dep_dir.resolve()):
+            raise ValueError(f"Invalid filename: {filename}")
+        return target
+
     async def save_file(
         self,
         deposition_id: DepositionSRN,
@@ -30,7 +40,7 @@ class LocalFileStorageAdapter(FileStoragePort):
     ) -> DepositionFile:
         dep_dir = self._dep_dir(deposition_id)
         dep_dir.mkdir(parents=True, exist_ok=True)
-        target = dep_dir / filename
+        target = self._safe_path(dep_dir, filename)
 
         # Atomic write: write to temp file then rename
         fd, tmp_path = tempfile.mkstemp(dir=dep_dir)
@@ -56,7 +66,8 @@ class LocalFileStorageAdapter(FileStoragePort):
         deposition_id: DepositionSRN,
         filename: str,
     ) -> AsyncIterator[bytes]:
-        target = self._dep_dir(deposition_id) / filename
+        dep_dir = self._dep_dir(deposition_id)
+        target = self._safe_path(dep_dir, filename)
         if not target.exists():
             from osa.domain.shared.error import NotFoundError
 
@@ -74,7 +85,8 @@ class LocalFileStorageAdapter(FileStoragePort):
         deposition_id: DepositionSRN,
         filename: str,
     ) -> None:
-        target = self._dep_dir(deposition_id) / filename
+        dep_dir = self._dep_dir(deposition_id)
+        target = self._safe_path(dep_dir, filename)
         target.unlink(missing_ok=True)
 
     async def delete_files_for_deposition(

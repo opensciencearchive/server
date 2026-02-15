@@ -80,7 +80,7 @@ def upgrade() -> None:
     # ALTER DEPOSITIONS: add convention_srn, drop provenance
     op.add_column(
         "depositions",
-        sa.Column("convention_srn", sa.String(), nullable=True),
+        sa.Column("convention_srn", sa.String(), nullable=False),
     )
     op.drop_column("depositions", "provenance")
 
