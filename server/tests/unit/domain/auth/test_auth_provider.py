@@ -78,8 +78,8 @@ class TestGetIdentity:
 
     @pytest.mark.asyncio
     async def test_expired_jwt_returns_anonymous(self) -> None:
-        config = _make_jwt_config()
-        token_service = _make_token_service(config)
+        jwt_config = _make_jwt_config()
+        token_service = _make_token_service(jwt_config)
         user_id = UserId.generate()
 
         # Create an expired token manually
@@ -89,7 +89,7 @@ class TestGetIdentity:
             "external_id": "0000-0001-2345-6789",
             "exp": datetime(2020, 1, 1, tzinfo=UTC),
         }
-        token = pyjwt.encode(payload, config.secret, algorithm=config.algorithm)
+        token = pyjwt.encode(payload, jwt_config.secret, algorithm=jwt_config.algorithm)
         request = _make_request(f"Bearer {token}")
         role_repo = _make_role_repo()
 

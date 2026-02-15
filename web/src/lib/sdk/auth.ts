@@ -1,7 +1,8 @@
 /**
- * Authentication client for OSA SDK.
+ * Authentication namespace for the OSA SDK.
  */
 
+import type { HttpClient } from './http';
 import type { TokenStorage } from './storage';
 import type {
   AuthCallbackParams,
@@ -9,19 +10,48 @@ import type {
   TokenPair,
   TokenResponse,
   User,
+  UserResponse,
 } from './types';
 
-/** Parse auth parameters from URL hash */
+// ---------------------------------------------------------------------------
+// Public interface
+// ---------------------------------------------------------------------------
+
+export interface AuthInterface {
+  /** Get the login URL to redirect users to. */
+  getLoginUrl(redirectUri?: string): string;
+
+  /** Parse an OAuth callback hash and store the resulting tokens. */
+  handleCallback(hash: string): { user: User; tokens: TokenPair } | null;
+
+  /** Refresh the access token using the stored refresh token. */
+  refreshToken(): Promise<TokenPair>;
+
+  /** Logout the user (server + local). */
+  logout(): Promise<void>;
+
+  /** Retrieve stored user + tokens (null if expired or missing). */
+  getStoredAuth(): { user: User; tokens: TokenPair } | null;
+
+  /** Check whether the user has a valid, non-expired session. */
+  isAuthenticated(): boolean;
+
+  /** Fetch the current user from the server. */
+  getUser(): Promise<User | null>;
+}
+
+// ---------------------------------------------------------------------------
+// Standalone utility
+// ---------------------------------------------------------------------------
+
+/** Parse auth parameters from a URL hash fragment. */
 export function parseAuthCallback(hash: string): AuthCallbackParams | null {
-  // Remove leading # if present
   const hashContent = hash.startsWith('#') ? hash.slice(1) : hash;
 
-  // Check if it starts with "auth="
   if (!hashContent.startsWith('auth=')) {
     return null;
   }
 
-  // Remove "auth=" prefix
   const paramsStr = hashContent.slice(5);
 
   try {
@@ -53,8 +83,11 @@ export function parseAuthCallback(hash: string): AuthCallbackParams | null {
   }
 }
 
-/** Authentication client class */
-export class AuthClient {
+// ---------------------------------------------------------------------------
+// Internal auth client (encapsulated inside AuthNamespace)
+// ---------------------------------------------------------------------------
+
+class AuthClient {
   private config: SDKConfig;
   private storage: TokenStorage;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -64,9 +97,7 @@ export class AuthClient {
     this.storage = storage;
   }
 
-  /** Get the login URL to redirect users to */
   getLoginUrl(redirectUri?: string, provider: string = 'orcid'): string {
-    // Handle both relative and absolute baseUrl
     const base = this.config.baseUrl.startsWith('http')
       ? this.config.baseUrl
       : `${window.location.origin}${this.config.baseUrl}`;
@@ -78,7 +109,6 @@ export class AuthClient {
     return url.toString();
   }
 
-  /** Handle OAuth callback and store tokens */
   handleCallback(params: AuthCallbackParams): { user: User; tokens: TokenPair } {
     const tokens: TokenPair = {
       accessToken: params.accessToken,
@@ -92,10 +122,8 @@ export class AuthClient {
       externalId: params.externalId,
     };
 
-    // Store auth data
     this.storage.set({ tokens, user });
 
-    // Setup auto-refresh if enabled
     if (this.config.autoRefresh !== false) {
       this.setupAutoRefresh(tokens);
     }
@@ -103,7 +131,6 @@ export class AuthClient {
     return { user, tokens };
   }
 
-  /** Refresh the access token */
   async refresh(): Promise<TokenPair> {
     const stored = this.storage.get();
     if (!stored?.tokens?.refreshToken) {
@@ -112,16 +139,11 @@ export class AuthClient {
 
     const response = await fetch(`${this.config.baseUrl}/auth/refresh`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        refresh_token: stored.tokens.refreshToken,
-      }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: stored.tokens.refreshToken }),
     });
 
     if (!response.ok) {
-      // Clear storage on auth error
       this.storage.clear();
       throw new Error('Token refresh failed');
     }
@@ -134,10 +156,8 @@ export class AuthClient {
       expiresAt: Date.now() + data.expires_in * 1000,
     };
 
-    // Update storage with new tokens
     this.storage.set({ tokens, user: stored.user });
 
-    // Setup next auto-refresh
     if (this.config.autoRefresh !== false) {
       this.setupAutoRefresh(tokens);
     }
@@ -145,50 +165,39 @@ export class AuthClient {
     return tokens;
   }
 
-  /** Logout the user */
   async logout(): Promise<void> {
     const stored = this.storage.get();
     if (stored?.tokens?.refreshToken) {
       try {
         await fetch(`${this.config.baseUrl}/auth/logout`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            refresh_token: stored.tokens.refreshToken,
-          }),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: stored.tokens.refreshToken }),
         });
       } catch {
-        // Ignore logout errors - we're clearing local state anyway
+        // Ignore — we clear local state regardless
       }
     }
 
-    // Clear local state
     this.storage.clear();
     this.cancelAutoRefresh();
   }
 
-  /** Get stored auth data */
   getStoredAuth(): { user: User; tokens: TokenPair } | null {
     const stored = this.storage.get();
     if (!stored) return null;
 
-    // Check if tokens are still valid
     if (stored.tokens.expiresAt <= Date.now()) {
-      // Token expired, but we might be able to refresh
-      // For now, return null and let the caller handle refresh
       return null;
     }
 
     return stored;
   }
 
-  /** Setup auto-refresh timer */
   private setupAutoRefresh(tokens: TokenPair): void {
     this.cancelAutoRefresh();
 
-    const threshold = (this.config.refreshThreshold || 300) * 1000; // Default 5 minutes
+    const threshold = (this.config.refreshThreshold || 300) * 1000;
     const timeUntilRefresh = tokens.expiresAt - Date.now() - threshold;
 
     if (timeUntilRefresh > 0) {
@@ -196,17 +205,82 @@ export class AuthClient {
         try {
           await this.refresh();
         } catch {
-          // Refresh failed, user will need to re-authenticate
+          // Refresh failed — user must re-authenticate
         }
       }, timeUntilRefresh);
     }
   }
 
-  /** Cancel auto-refresh timer */
   private cancelAutoRefresh(): void {
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = null;
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// AuthNamespace — public facade
+// ---------------------------------------------------------------------------
+
+export class AuthNamespace implements AuthInterface {
+  private client: AuthClient;
+  private http: HttpClient;
+
+  constructor(http: HttpClient, storage: TokenStorage, clientBaseUrl: string) {
+    this.http = http;
+    // Auth endpoints (login redirect, refresh, logout) are always browser-facing.
+    // Use the client-facing URL — never the internal Docker URL that
+    // HttpClient.baseUrl may resolve to during SSR.
+    this.client = new AuthClient(
+      { baseUrl: clientBaseUrl, autoRefresh: true, refreshThreshold: 300 },
+      storage,
+    );
+  }
+
+  /** Get the login URL to redirect users to. */
+  getLoginUrl(redirectUri?: string): string {
+    return this.client.getLoginUrl(redirectUri);
+  }
+
+  /** Parse an OAuth callback hash and store the resulting tokens. */
+  handleCallback(hash: string): { user: User; tokens: TokenPair } | null {
+    const params = parseAuthCallback(hash);
+    if (!params) return null;
+    return this.client.handleCallback(params);
+  }
+
+  /** Refresh the access token using the stored refresh token. */
+  async refreshToken(): Promise<TokenPair> {
+    return this.client.refresh();
+  }
+
+  /** Logout the user (server + local). */
+  async logout(): Promise<void> {
+    return this.client.logout();
+  }
+
+  /** Retrieve stored user + tokens (null if expired or missing). */
+  getStoredAuth(): { user: User; tokens: TokenPair } | null {
+    return this.client.getStoredAuth();
+  }
+
+  /** Check whether the user has a valid, non-expired session. */
+  isAuthenticated(): boolean {
+    const auth = this.getStoredAuth();
+    return auth !== null && auth.tokens.expiresAt > Date.now();
+  }
+
+  /** Fetch the current user from the server. */
+  async getUser(): Promise<User | null> {
+    const response = await this.http.fetch('/auth/me');
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as UserResponse;
+    return {
+      id: data.id,
+      displayName: data.display_name,
+      externalId: data.external_id,
+    };
   }
 }

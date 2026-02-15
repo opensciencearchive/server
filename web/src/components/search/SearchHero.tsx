@@ -6,12 +6,12 @@ export function SearchHero() {
     <section className={styles.hero}>
       <div className={styles.content}>
         <h1 className={styles.title}>
-          Search GEO with <span className={styles.titleAccent}>meaning</span>
+          Search biology data with <span className={styles.titleAccent}>meaning</span>
         </h1>
 
         <p className={styles.subtitle}>
-          Find genomics and transcriptomics datasets using natural language.
-          No more keyword guessing—describe what you&apos;re looking for.
+          Semantic search over GEO and other biological databases.
+          No more keyword guessing, just describe what you&apos;re looking for.
         </p>
 
         <div className={styles.searchWrapper}>

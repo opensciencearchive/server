@@ -10,8 +10,6 @@ from uuid import uuid4
 from apscheduler import AsyncScheduler
 from apscheduler.triggers.cron import CronTrigger
 from dishka import AsyncContainer
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from osa.application.event import ServerStarted
 from osa.domain.auth.model.identity import Identity, System
 from osa.domain.shared.error import SkippedEvents
@@ -187,7 +185,6 @@ class Worker:
         # Claim and process within a UOW scope (System identity for workers)
         async with self._container(scope=Scope.UOW, context={Identity: System()}) as scope:
             outbox = await scope.get(Outbox)
-            session = await scope.get(AsyncSession)
 
             # Claim events
             result = await outbox.claim(
@@ -197,8 +194,6 @@ class Worker:
             )
 
             if not result.events:
-                # No events available - commit and return
-                await session.commit()
                 self._state.status = WorkerStatus.IDLE
                 return False
 
@@ -221,7 +216,6 @@ class Worker:
                 for event in result.events:
                     await outbox.mark_delivered(event.id)
 
-                await session.commit()
                 self._state.processed_count += len(result.events)
 
             except SkippedEvents as e:
@@ -236,7 +230,6 @@ class Worker:
                 for event in result.events:
                     if event.id not in skipped_set:
                         await outbox.mark_delivered(event.id)
-                await session.commit()
                 self._state.processed_count += len(result.events) - len(e.event_ids)
 
             except Exception as e:
@@ -250,7 +243,6 @@ class Worker:
                         str(e),
                         max_retries=self._max_retries,
                     )
-                await session.commit()
 
             finally:
                 self._state.current_batch = []
@@ -397,8 +389,6 @@ class WorkerPool:
         async with self._container(scope=Scope.UOW, context={Identity: System()}) as scope:
             outbox = await scope.get(Outbox)
             await outbox.append(ServerStarted(id=EventId(uuid4())))
-            session = await scope.get(AsyncSession)
-            await session.commit()
         logger.info("ServerStarted event emitted")
 
     async def stop(self, timeout: float = 30.0) -> None:
@@ -444,8 +434,6 @@ class WorkerPool:
             async with self._container(scope=Scope.UOW, context={Identity: System()}) as scope:
                 schedule = await scope.get(config.schedule_type)
                 await schedule.run(**config.params)
-                session = await scope.get(AsyncSession)
-                await session.commit()
 
             # Reset failure counter on success
             self._schedule_failures.pop(config.id, None)
@@ -489,9 +477,7 @@ class WorkerPool:
                         scope=Scope.UOW, context={Identity: System()}
                     ) as scope:
                         outbox = await scope.get(Outbox)
-                        session = await scope.get(AsyncSession)
                         count = await outbox.reset_stale_claims(max_timeout)
-                        await session.commit()
                         if count > 0:
                             logger.info(f"Reset {count} stale claims")
 

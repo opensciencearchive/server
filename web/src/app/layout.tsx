@@ -23,9 +23,6 @@ export const metadata: Metadata = {
   keywords: ['biology', 'genomics', 'GEO', 'research', 'scientific data', 'semantic search'],
 };
 
-// API URL: use env var for dev (different port), relative path for prod (reverse proxy)
-const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
-
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -34,7 +31,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${geist.variable} ${geistMono.variable}`}>
       <body className={geist.className}>
-        <AuthProvider baseUrl={apiBaseUrl}>
+        <AuthProvider>
           <Header />
           {children}
           <Footer />

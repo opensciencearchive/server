@@ -2,11 +2,16 @@
 
 from dishka.integrations.fastapi import DishkaRoute, FromDishka
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 
 from osa.domain.deposition.command.create_convention import (
     CreateConvention,
     CreateConventionHandler,
     ConventionCreated,
+)
+from osa.domain.deposition.query.download_template import (
+    DownloadTemplate,
+    DownloadTemplateHandler,
 )
 from osa.domain.deposition.query.get_convention import (
     GetConvention,
@@ -29,6 +34,19 @@ async def create_convention(
     handler: FromDishka[CreateConventionHandler],
 ) -> ConventionCreated:
     return await handler.run(body)
+
+
+@router.get("/{srn:path}/template")
+async def download_convention_template(
+    srn: str,
+    handler: FromDishka[DownloadTemplateHandler],
+) -> StreamingResponse:
+    result = await handler.run(DownloadTemplate(convention_srn=ConventionSRN.parse(srn)))
+    return StreamingResponse(
+        iter([result.content]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
+    )
 
 
 @router.get("/{srn:path}", response_model=ConventionDetail)

@@ -70,17 +70,28 @@ class VectorStorageBackend:
         if not records:
             return
 
-        # Prepare batch data
+        # Prepare batch data, skipping records that have no indexable content
         ids = []
         texts = []
         metadatas = []
+        skipped = 0
 
         for srn, record in records:
-            ids.append(srn)
-            texts.append(self._to_text(record))
-            # Filter metadata to ChromaDB-compatible types
+            text = self._to_text(record)
             safe_meta = {k: v for k, v in record.items() if isinstance(v, (str, int, float, bool))}
-            metadatas.append(safe_meta)
+
+            if not text.strip() and not safe_meta:
+                logger.warning(f"Skipping record {srn}: no indexable content for vector backend")
+                skipped += 1
+                continue
+
+            ids.append(srn)
+            texts.append(text)
+            metadatas.append(safe_meta if safe_meta else {"srn": srn})
+
+        if not ids:
+            logger.warning(f"All {skipped} records skipped: no indexable content")
+            return
 
         # Generate embeddings in batch (much more efficient than one-by-one)
         logger.debug(f"Generating embeddings for {len(texts)} records")
@@ -95,7 +106,11 @@ class VectorStorageBackend:
             documents=texts,
         )
 
-        logger.info(f"Indexed {len(records)} records (embedded + upserted)")
+        indexed = len(ids)
+        msg = f"Indexed {indexed} records"
+        if skipped:
+            msg += f" ({skipped} skipped — metadata fields don't match index config)"
+        logger.info(msg)
 
     async def flush(self) -> None:
         """No-op: batching is now handled at the event level.

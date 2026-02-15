@@ -193,6 +193,7 @@ class AuthConfig(BaseModel):
     orcid: OrcidConfig = OrcidConfig()
     jwt: JwtConfig  # Required - no default, must be configured via env vars
     callback_url: str = ""  # Full callback URL (e.g., https://myarchive.org/api/v1/auth/callback)
+    base_role: str | None = None  # Implicit role for all authenticated users (e.g., "DEPOSITOR")
 
 
 class Config(BaseSettings):

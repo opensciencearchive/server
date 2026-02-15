@@ -18,6 +18,7 @@ from osa.domain.auth.command.revoke_role import RevokeRoleHandler
 from osa.domain.auth.command.token import LogoutHandler, RefreshTokensHandler
 from osa.domain.auth.model.identity import Anonymous, Identity
 from osa.domain.auth.model.principal import Principal
+from osa.domain.auth.model.role import Role
 from osa.domain.auth.model.value import CurrentUser, ProviderIdentity, UserId
 from osa.domain.auth.port.repository import (
     LinkedAccountRepository,
@@ -63,19 +64,25 @@ class AuthProvider(Provider):
     @provide(scope=Scope.UOW)
     def get_auth_service(
         self,
+        config: Config,
         user_repo: UserRepository,
         linked_account_repo: LinkedAccountRepository,
         refresh_token_repo: RefreshTokenRepository,
+        role_repo: RoleAssignmentRepository,
         token_service: TokenService,
         outbox: Outbox,
     ) -> AuthService:
         """Provide AuthService."""
+        base_role = Role[config.auth.base_role] if config.auth.base_role else None
+        logger.info("AuthService base_role config: %s -> %s", config.auth.base_role, base_role)
         return AuthService(
             _user_repo=user_repo,
             _linked_account_repo=linked_account_repo,
             _refresh_token_repo=refresh_token_repo,
+            _role_repo=role_repo,
             _token_service=token_service,
             _outbox=outbox,
+            _base_role=base_role,
         )
 
     @provide(scope=Scope.UOW)
@@ -145,9 +152,15 @@ class AuthProvider(Provider):
 
         user_id = UserId(UUID(payload["sub"]))
 
-        # Lookup roles from DB
+        # Lookup roles from DB (includes base_role if assigned at user creation)
         assignments = await role_repo.get_by_user_id(user_id)
         roles = frozenset(a.role for a in assignments)
+        logger.debug(
+            "Identity resolved: user_id=%s, roles=%s, assignments=%d",
+            user_id,
+            roles,
+            len(assignments),
+        )
 
         return Principal(
             user_id=user_id,

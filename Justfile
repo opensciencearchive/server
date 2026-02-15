@@ -83,6 +83,12 @@ web-build:
 web-lint:
     cd web && pnpm lint
 
+# === Seed ===
+
+# Seed the database with sample data (run while dev is up)
+seed:
+    docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml exec server /app/.venv/bin/python /app/scripts/seed.py
+
 # === Database ===
 
 # Start only the database

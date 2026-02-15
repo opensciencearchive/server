@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { api } from '@/lib/api';
+import { osa } from '@/lib/sdk';
 import { RecordDetail } from '@/components/record/RecordDetail';
 import { BackButton } from '@/components/ui/BackButton';
 import { isApiError } from '@/types';
@@ -16,7 +16,7 @@ export default async function RecordPage({ params }: RecordPageProps) {
 
   let record;
   try {
-    const result = await api.getRecord(decodedSrn);
+    const result = await osa.search.getRecord(decodedSrn);
     record = result.record;
   } catch (error) {
     if (isApiError(error) && error.detail.includes('not found')) {

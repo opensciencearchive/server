@@ -3,6 +3,8 @@
 import logging
 
 from osa.domain.auth.model.linked_account import LinkedAccount
+from osa.domain.auth.model.role import Role
+from osa.domain.auth.model.role_assignment import RoleAssignment
 from osa.domain.auth.model.token import RefreshToken
 from osa.domain.auth.model.user import User
 from osa.domain.auth.model.value import ProviderIdentity, TokenFamilyId, UserId
@@ -12,6 +14,7 @@ from osa.domain.auth.port.repository import (
     RefreshTokenRepository,
     UserRepository,
 )
+from osa.domain.auth.port.role_repository import RoleAssignmentRepository
 from osa.domain.auth.service.token import TokenService
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
@@ -31,8 +34,10 @@ class AuthService(Service):
     _user_repo: UserRepository
     _linked_account_repo: LinkedAccountRepository
     _refresh_token_repo: RefreshTokenRepository
+    _role_repo: RoleAssignmentRepository
     _token_service: TokenService
     _outbox: Outbox
+    _base_role: Role | None
 
     async def initiate_login(
         self,
@@ -243,10 +248,33 @@ class AuthService(Service):
         )
         await self._linked_account_repo.save(linked_account)
 
+        # Assign configured base role to new users
         logger.info(
-            "New user created: user_id=%s, provider=%s",
+            "Base role check: _base_role=%r, is_not_none=%s, type=%s",
+            self._base_role,
+            self._base_role is not None,
+            type(self._base_role).__name__,
+        )
+        if self._base_role is not None:
+            assignment = RoleAssignment.create(
+                user_id=user.id,
+                role=self._base_role,
+                assigned_by=user.id,
+            )
+            logger.info(
+                "Saving base role assignment: user_id=%s, role=%s, assignment_id=%s",
+                user.id,
+                self._base_role.name,
+                assignment.id,
+            )
+            await self._role_repo.save(assignment)
+            logger.info("Base role assignment saved successfully")
+
+        logger.info(
+            "New user created: user_id=%s, provider=%s, base_role=%s",
             user.id,
             identity_info.provider,
+            self._base_role.name if self._base_role else None,
         )
 
         return user, linked_account

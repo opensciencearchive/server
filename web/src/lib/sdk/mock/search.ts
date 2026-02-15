@@ -1,9 +1,9 @@
 /**
- * MockAPI Implementation
- * In-memory implementation with realistic sample data for development.
+ * Mock search namespace for development.
+ * Returns deterministic sample data with simulated network delay.
  */
 
-import type { ApiInterface } from './interface';
+import type { SearchInterface } from '../search';
 import type {
   SearchOptions,
   IndexListResponse,
@@ -13,7 +13,6 @@ import type {
 } from '@/types';
 import { DEFAULT_INDEX, DEFAULT_LIMIT } from '@/lib/utils/constants';
 
-// Sample records representing biological datasets
 const MOCK_RECORDS: Array<{ srn: string; metadata: RecordMetadata }> = [
   {
     srn: 'urn:osa:localhost:dep:a1b2c3d4-e5f6-7890-abcd-ef1234567890',
@@ -173,9 +172,6 @@ const MOCK_RECORDS: Array<{ srn: string; metadata: RecordMetadata }> = [
   },
 ];
 
-/**
- * Calculate a mock relevance score based on query term matching.
- */
 function calculateMockScore(query: string, metadata: RecordMetadata): number {
   const queryTerms = query.toLowerCase().split(/\s+/);
   const searchText = [
@@ -195,48 +191,42 @@ function calculateMockScore(query: string, metadata: RecordMetadata): number {
     }
   }
 
-  // Base score + bonus for matches
   const matchRatio = matches / queryTerms.length;
   return Math.min(0.95, 0.3 + matchRatio * 0.6 + Math.random() * 0.1);
 }
 
-/**
- * MockAPI - In-memory implementation for development.
- */
-export class MockAPI implements ApiInterface {
+export class MockSearchNamespace implements SearchInterface {
   private records = MOCK_RECORDS;
 
+  /** List available search indexes. */
   async listIndexes(): Promise<IndexListResponse> {
-    // Simulate network delay
     await this.delay(100);
     return { indexes: ['vector'] };
   }
 
-  async search(
-    query: string,
+  /** Search records by natural language query. */
+  async query(
+    text: string,
     indexName: string = DEFAULT_INDEX,
-    options: SearchOptions = {}
+    options: SearchOptions = {},
   ): Promise<SearchResponse> {
     const { offset = 0, limit = DEFAULT_LIMIT } = options;
 
-    // Simulate network delay
     await this.delay(300 + Math.random() * 200);
 
-    // Score and sort records
     const scoredResults = this.records
       .map((record) => ({
         srn: record.srn,
-        score: calculateMockScore(query, record.metadata),
+        score: calculateMockScore(text, record.metadata),
         metadata: record.metadata,
       }))
       .sort((a, b) => b.score - a.score);
 
-    // Apply pagination
     const paginatedResults = scoredResults.slice(offset, offset + limit);
     const hasMore = offset + limit < scoredResults.length;
 
     return {
-      query,
+      query: text,
       index: indexName,
       total: scoredResults.length,
       has_more: hasMore,
@@ -244,8 +234,8 @@ export class MockAPI implements ApiInterface {
     };
   }
 
+  /** Fetch a single record by SRN. */
   async getRecord(srn: string): Promise<RecordResponse> {
-    // Simulate network delay
     await this.delay(200);
 
     const record = this.records.find((r) => r.srn === srn);

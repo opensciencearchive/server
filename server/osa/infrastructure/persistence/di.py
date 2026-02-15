@@ -69,6 +69,7 @@ class PersistenceProvider(Provider):
     ) -> AsyncIterable[AsyncSession]:
         async with session_factory() as session:
             yield session
+            await session.commit()
 
     # UOW-scoped repositories
     dep_repo = provide(PostgresDepositionRepository, scope=Scope.UOW, provides=DepositionRepository)

@@ -44,7 +44,11 @@ def _wrap_query_run_with_auth(cls: type, original_run: _HandlerMethod) -> _Handl
             return await original_run(self, cmd)
 
         if isinstance(auth_gate, AtLeast):
+            import logging as _logging
+
             from osa.domain.auth.model.principal import Principal
+
+            _auth_logger = _logging.getLogger("osa.authz")
 
             principal = getattr(self, "principal", None)
             if not isinstance(principal, Principal):
@@ -52,6 +56,14 @@ def _wrap_query_run_with_auth(cls: type, original_run: _HandlerMethod) -> _Handl
                     "Authentication required",
                     code="missing_token",
                 )
+
+            _auth_logger.debug(
+                "Auth check: handler=%s, required=%s, principal_roles=%s, user_id=%s",
+                type(self).__name__,
+                auth_gate.role,
+                principal.roles,
+                principal.user_id,
+            )
 
             if not principal.has_role(auth_gate.role):
                 raise AuthorizationError(
