@@ -58,6 +58,13 @@ dev-down:
 open-ui:
     open http://localhost:8080
 
+# === Code Quality ===
+
+# Lint all code (server + web)
+lint:
+    cd server && just lint
+    cd web && pnpm lint
+
 # === Individual Service Development ===
 
 # Run server independently (requires database)
@@ -75,6 +82,12 @@ web-build:
 # Lint web frontend code
 web-lint:
     cd web && pnpm lint
+
+# === Seed ===
+
+# Seed the database with sample data (run while dev is up)
+seed:
+    docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml exec server /app/.venv/bin/python /app/scripts/seed.py
 
 # === Database ===
 

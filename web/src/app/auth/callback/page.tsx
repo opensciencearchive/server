@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { OSAClient, parseAuthCallback } from '@/lib/sdk';
+import { osa, parseAuthCallback } from '@/lib/sdk';
 
 function AuthCallbackContent() {
   const router = useRouter();
@@ -33,9 +33,8 @@ function AuthCallbackContent() {
 
     processedRef.current = true;
 
-    // Store in client
-    const client = new OSAClient({ baseUrl: '/api/v1' });
-    client.handleAuthCallback(hash);
+    // Store via SDK singleton
+    osa.auth.handleCallback(hash);
 
     // Redirect to home (or wherever user came from)
     router.push('/');

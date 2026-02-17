@@ -7,6 +7,7 @@ from dishka import AsyncContainer, provide
 
 from osa.config import Config
 from osa.domain.curation.handler import AutoApproveCuration
+from osa.domain.deposition.handler.return_to_draft import ReturnToDraft
 from osa.domain.index.handler import FanOutToIndexBackends, KeywordIndexHandler, VectorIndexHandler
 from osa.domain.record.handler import ConvertDepositionToRecord
 from osa.domain.shared.event import EventHandler
@@ -38,6 +39,8 @@ HANDLERS: HandlerTypes = HandlerTypes(
         PullFromSource,
         # Validation handlers
         ValidateDeposition,
+        # Deposition handlers
+        ReturnToDraft,
         # Curation handlers
         AutoApproveCuration,
         # Record handlers

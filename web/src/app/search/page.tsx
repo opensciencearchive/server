@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
 import { redirect } from 'next/navigation';
-import { api } from '@/lib/api';
+import { osa } from '@/lib/sdk';
 import { SearchInput } from '@/components/search/SearchInput';
 import { SearchResults } from '@/components/search/SearchResults';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
@@ -17,7 +17,7 @@ async function SearchResultsLoader({ query }: { query: string }) {
   let errorMessage: string | null = null;
 
   try {
-    data = await api.search(query);
+    data = await osa.search.query(query);
   } catch (error) {
     errorMessage = isApiError(error)
       ? error.detail

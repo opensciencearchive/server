@@ -1,41 +1,25 @@
-import logfire
-
 from osa.domain.auth.model.principal import Principal
 from osa.domain.auth.model.role import Role
-from osa.domain.deposition.port import DepositionRepository, StoragePort
+from osa.domain.deposition.service.deposition import DepositionService
 from osa.domain.shared.authorization.gate import at_least
 from osa.domain.shared.command import Command, CommandHandler, Result
 from osa.domain.shared.model.srn import DepositionSRN
 
 
-class DeleteDepositionFiles(Command):
+class DeleteFile(Command):
     srn: DepositionSRN
+    filename: str
 
 
-class DepositionFilesDeleted(Result):
+class FileDeleted(Result):
     pass
 
 
-class DeleteDepositionFilesHandler(CommandHandler[DeleteDepositionFiles, DepositionFilesDeleted]):
+class DeleteFileHandler(CommandHandler[DeleteFile, FileDeleted]):
     __auth__ = at_least(Role.DEPOSITOR)
     principal: Principal
-    repository: DepositionRepository
-    storage: StoragePort
+    deposition_service: DepositionService
 
-    async def run(self, cmd: DeleteDepositionFiles) -> DepositionFilesDeleted:
-        with logfire.span("DeleteDepositionFiles"):
-            # 1. Load deposition
-            dep = await self.repository.get(cmd.srn)
-            if dep is None:
-                raise ValueError(f"Deposition not found: {cmd.srn}")
-
-            # 2. Clear files from aggregate (domain logic)
-            dep.remove_all_files()
-
-            # 3. Delete physically (infrastructure)
-            self.storage.delete_files_for_deposition(cmd.srn)
-
-            # 4. Persist changes
-            await self.repository.save(dep)
-
-            return DepositionFilesDeleted()
+    async def run(self, cmd: DeleteFile) -> FileDeleted:
+        await self.deposition_service.delete_file(cmd.srn, cmd.filename)
+        return FileDeleted()

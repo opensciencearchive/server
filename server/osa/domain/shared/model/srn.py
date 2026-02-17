@@ -3,12 +3,14 @@ from __future__ import annotations
 import re
 from enum import Enum
 from string import Template
-from typing import ClassVar, Generic, Self, Type, TypeVar, Union
+from typing import Any, ClassVar, Generic, Self, Type, TypeVar, Union
 
 from pydantic import (
     Field,
     RootModel,
     field_validator,
+    model_serializer,
+    model_validator,
 )
 
 from osa.domain.shared.model.value import ValueObject
@@ -103,7 +105,8 @@ class ResourceType(str, Enum):
     rec = "rec"
     dep = "dep"
     schema = "schema"
-    vocab = "vocab"
+    onto = "onto"
+    conv = "conv"
     snap = "snap"
     evt = "evt"
     val = "val"
@@ -133,6 +136,20 @@ class SRN(ValueObject):
 
     _tpl: ClassVar[Template] = Template("urn:osa:${domain}:${type}:${id}${version}")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _from_string(cls, data: Any) -> Any:
+        """Accept a plain SRN string and parse it into field dict."""
+        if isinstance(data, str):
+            domain, typ, id_str, version = SRN._extract_parts(data)
+            return {
+                "domain": domain,
+                "type": typ,
+                "id": id_str,
+                "version": version,
+            }
+        return data
+
     @field_validator("scheme")
     @classmethod
     def _scheme_ok(cls, v: str) -> str:
@@ -146,6 +163,10 @@ class SRN(ValueObject):
         if v != URN_NID:
             raise ValueError("nid must be 'osa'")
         return v
+
+    @model_serializer
+    def _serialize(self) -> str:
+        return self.render()
 
     def __str__(self) -> str:
         return self.render()
@@ -231,8 +252,13 @@ class SchemaSRN(SRN):
     version: Semver
 
 
-class VocabSRN(SRN):
-    type: ResourceType = Field(default=ResourceType.vocab, frozen=True)
+class OntologySRN(SRN):
+    type: ResourceType = Field(default=ResourceType.onto, frozen=True)
+    version: Semver
+
+
+class ConventionSRN(SRN):
+    type: ResourceType = Field(default=ResourceType.conv, frozen=True)
     version: Semver
 
 

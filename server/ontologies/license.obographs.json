@@ -1,0 +1,122 @@
+{
+  "graphs": [
+    {
+      "id": "http://purl.obolibrary.org/obo/osa/license.owl",
+      "lbl": "License",
+      "meta": {
+        "version": "1.0.0",
+        "definition": {
+          "val": "An ontology of common open-access and open-source license types for scientific data."
+        }
+      },
+      "nodes": [
+        {
+          "id": "OSAO:1000001",
+          "lbl": "license",
+          "type": "CLASS",
+          "meta": {
+            "definition": {
+              "val": "A legal instrument governing the use and redistribution of a creative work or dataset."
+            }
+          }
+        },
+        {
+          "id": "OSAO:1000002",
+          "lbl": "CC0 1.0",
+          "type": "CLASS",
+          "meta": {
+            "definition": {
+              "val": "Creative Commons Zero v1.0 Universal — public domain dedication."
+            },
+            "synonyms": [
+              { "val": "CC0" },
+              { "val": "Public Domain" }
+            ],
+            "xrefs": [
+              { "val": "SPDX:CC0-1.0" }
+            ]
+          }
+        },
+        {
+          "id": "OSAO:1000003",
+          "lbl": "CC BY 4.0",
+          "type": "CLASS",
+          "meta": {
+            "definition": {
+              "val": "Creative Commons Attribution 4.0 International — requires attribution."
+            },
+            "synonyms": [
+              { "val": "CC-BY" }
+            ],
+            "xrefs": [
+              { "val": "SPDX:CC-BY-4.0" }
+            ]
+          }
+        },
+        {
+          "id": "OSAO:1000004",
+          "lbl": "CC BY-SA 4.0",
+          "type": "CLASS",
+          "meta": {
+            "definition": {
+              "val": "Creative Commons Attribution-ShareAlike 4.0 International — requires attribution and share-alike."
+            },
+            "xrefs": [
+              { "val": "SPDX:CC-BY-SA-4.0" }
+            ]
+          }
+        },
+        {
+          "id": "OSAO:1000005",
+          "lbl": "CC BY-NC 4.0",
+          "type": "CLASS",
+          "meta": {
+            "definition": {
+              "val": "Creative Commons Attribution-NonCommercial 4.0 International — requires attribution, non-commercial use."
+            },
+            "xrefs": [
+              { "val": "SPDX:CC-BY-NC-4.0" }
+            ]
+          }
+        },
+        {
+          "id": "OSAO:1000006",
+          "lbl": "CC BY-NC-SA 4.0",
+          "type": "CLASS",
+          "meta": {
+            "definition": {
+              "val": "Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International."
+            },
+            "xrefs": [
+              { "val": "SPDX:CC-BY-NC-SA-4.0" }
+            ]
+          }
+        },
+        {
+          "id": "OSAO:1000007",
+          "lbl": "MIT License",
+          "type": "CLASS",
+          "meta": {
+            "definition": {
+              "val": "A permissive open-source license with minimal restrictions on reuse."
+            },
+            "synonyms": [
+              { "val": "MIT" }
+            ],
+            "xrefs": [
+              { "val": "SPDX:MIT" }
+            ]
+          }
+        }
+      ],
+      "edges": [
+        { "sub": "OSAO:1000002", "pred": "is_a", "obj": "OSAO:1000001" },
+        { "sub": "OSAO:1000003", "pred": "is_a", "obj": "OSAO:1000001" },
+        { "sub": "OSAO:1000004", "pred": "is_a", "obj": "OSAO:1000001" },
+        { "sub": "OSAO:1000005", "pred": "is_a", "obj": "OSAO:1000001" },
+        { "sub": "OSAO:1000006", "pred": "is_a", "obj": "OSAO:1000001" },
+        { "sub": "OSAO:1000007", "pred": "is_a", "obj": "OSAO:1000001" }
+      ]
+    }
+  ]
+}

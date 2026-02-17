@@ -1,6 +1,7 @@
 """SQLAlchemy table definitions - dialect-agnostic (works with SQLite and PostgreSQL)."""
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -25,12 +26,12 @@ depositions_table = Table(
     "depositions",
     metadata,
     Column("srn", String, primary_key=True),
+    Column("convention_srn", String, nullable=False),  # Convention submitted against
     Column("status", String(32), nullable=False),  # DepositionStatus as string
     Column("metadata", JSON, nullable=False),
-    Column("provenance", JSON, nullable=False),
     Column("files", JSON, nullable=False),
     Column("record_id", String, nullable=True),
-    Column("owner_id", String, ForeignKey("users.id"), nullable=True),
+    Column("owner_id", String, ForeignKey("users.id"), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
@@ -177,6 +178,73 @@ refresh_tokens_table = Table(
 Index("ix_refresh_tokens_user_id", refresh_tokens_table.c.user_id)
 Index("ix_refresh_tokens_token_hash", refresh_tokens_table.c.token_hash)
 Index("ix_refresh_tokens_family_id", refresh_tokens_table.c.family_id)
+
+
+# ============================================================================
+# ONTOLOGIES TABLE (Semantics)
+# ============================================================================
+ontologies_table = Table(
+    "ontologies",
+    metadata,
+    Column("srn", String, primary_key=True),  # Versioned SRN string
+    Column("title", String(255), nullable=False),
+    Column("description", Text, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+
+# ============================================================================
+# ONTOLOGY TERMS TABLE (Semantics)
+# ============================================================================
+ontology_terms_table = Table(
+    "ontology_terms",
+    metadata,
+    Column("id", String, primary_key=True),  # UUID as string
+    Column(
+        "ontology_srn",
+        String,
+        ForeignKey("ontologies.srn", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("term_id", String(255), nullable=False),
+    Column("label", String(255), nullable=False),
+    Column("synonyms", JSON, nullable=False, default=[]),
+    Column("parent_ids", JSON, nullable=False, default=[]),
+    Column("definition", Text, nullable=True),
+    Column("deprecated", Boolean, nullable=False, default=False),
+    UniqueConstraint("ontology_srn", "term_id", name="uq_ontology_term"),
+)
+
+Index("idx_ontology_terms_ontology_srn", ontology_terms_table.c.ontology_srn)
+
+
+# ============================================================================
+# SCHEMAS TABLE (Semantics)
+# ============================================================================
+schemas_table = Table(
+    "schemas",
+    metadata,
+    Column("srn", String, primary_key=True),  # Versioned SRN string
+    Column("title", String(255), nullable=False),
+    Column("fields", JSON, nullable=False),  # List of FieldDefinition dicts
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+
+# ============================================================================
+# CONVENTIONS TABLE (Deposition)
+# ============================================================================
+conventions_table = Table(
+    "conventions",
+    metadata,
+    Column("srn", String, primary_key=True),  # Versioned SRN string
+    Column("title", String(255), nullable=False),
+    Column("description", Text, nullable=True),
+    Column("schema_srn", String, nullable=False),  # Reference to schemas.srn
+    Column("file_requirements", JSON, nullable=False),  # FileRequirements as dict
+    Column("validator_refs", JSON, nullable=False, default=[]),  # List of ValidatorRef dicts
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
 
 
 # ============================================================================

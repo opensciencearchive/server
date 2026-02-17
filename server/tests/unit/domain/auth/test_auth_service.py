@@ -8,6 +8,7 @@ import pytest
 
 from osa.config import JwtConfig
 from osa.domain.auth.model.linked_account import LinkedAccount
+from osa.domain.auth.model.role import Role
 from osa.domain.auth.model.token import RefreshToken
 from osa.domain.auth.model.user import User
 from osa.domain.auth.model.value import IdentityId, RefreshTokenId, TokenFamilyId, UserId
@@ -21,8 +22,10 @@ def make_auth_service(
     user_repo: AsyncMock | None = None,
     linked_account_repo: AsyncMock | None = None,
     refresh_token_repo: AsyncMock | None = None,
+    role_repo: AsyncMock | None = None,
     token_service: TokenService | None = None,
     outbox: AsyncMock | None = None,
+    base_role: Role | None = None,
 ) -> AuthService:
     """Create an AuthService with mocked dependencies."""
     if user_repo is None:
@@ -31,6 +34,8 @@ def make_auth_service(
         linked_account_repo = AsyncMock()
     if refresh_token_repo is None:
         refresh_token_repo = AsyncMock()
+    if role_repo is None:
+        role_repo = AsyncMock()
     if token_service is None:
         config = JwtConfig(
             secret="test-secret-key-256-bits-long-xx",
@@ -46,8 +51,10 @@ def make_auth_service(
         _user_repo=user_repo,
         _linked_account_repo=linked_account_repo,
         _refresh_token_repo=refresh_token_repo,
+        _role_repo=role_repo,
         _token_service=token_service,
         _outbox=outbox,
+        _base_role=base_role,
     )
 
 
@@ -393,3 +400,104 @@ class TestAuthServiceLogout:
 
         assert result is True
         refresh_token_repo.revoke_family.assert_not_called()
+
+
+class TestAuthServiceBaseRole:
+    """Tests for base_role assignment on user creation."""
+
+    @pytest.mark.asyncio
+    async def test_new_user_gets_base_role_when_configured(self):
+        """complete_oauth should assign base_role to new users."""
+        user_repo = AsyncMock()
+        linked_account_repo = AsyncMock()
+        linked_account_repo.get_by_provider_and_external_id.return_value = None
+        refresh_token_repo = AsyncMock()
+        role_repo = AsyncMock()
+
+        service = make_auth_service(
+            user_repo=user_repo,
+            linked_account_repo=linked_account_repo,
+            refresh_token_repo=refresh_token_repo,
+            role_repo=role_repo,
+            base_role=Role.DEPOSITOR,
+        )
+        provider = make_identity_provider()
+
+        await service.complete_oauth(
+            provider=provider,
+            code="auth-code",
+            redirect_uri="http://localhost/callback",
+        )
+
+        role_repo.save.assert_called_once()
+        saved_assignment = role_repo.save.call_args[0][0]
+        assert saved_assignment.role == Role.DEPOSITOR
+
+    @pytest.mark.asyncio
+    async def test_new_user_no_role_when_base_role_not_configured(self):
+        """complete_oauth should not assign roles when base_role is None."""
+        user_repo = AsyncMock()
+        linked_account_repo = AsyncMock()
+        linked_account_repo.get_by_provider_and_external_id.return_value = None
+        refresh_token_repo = AsyncMock()
+        role_repo = AsyncMock()
+
+        service = make_auth_service(
+            user_repo=user_repo,
+            linked_account_repo=linked_account_repo,
+            refresh_token_repo=refresh_token_repo,
+            role_repo=role_repo,
+            base_role=None,
+        )
+        provider = make_identity_provider()
+
+        await service.complete_oauth(
+            provider=provider,
+            code="auth-code",
+            redirect_uri="http://localhost/callback",
+        )
+
+        role_repo.save.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_existing_user_not_reassigned_base_role(self):
+        """complete_oauth should not assign base_role to returning users."""
+        existing_user = User(
+            id=UserId(uuid4()),
+            display_name="Existing User",
+            created_at=datetime.now(UTC),
+            updated_at=None,
+        )
+        existing_linked_account = LinkedAccount(
+            id=IdentityId(uuid4()),
+            user_id=existing_user.id,
+            provider="orcid",
+            external_id="0000-0001-2345-6789",
+            metadata=None,
+            created_at=datetime.now(UTC),
+        )
+
+        user_repo = AsyncMock()
+        user_repo.get.return_value = existing_user
+        linked_account_repo = AsyncMock()
+        linked_account_repo.get_by_provider_and_external_id.return_value = existing_linked_account
+        refresh_token_repo = AsyncMock()
+        role_repo = AsyncMock()
+
+        service = make_auth_service(
+            user_repo=user_repo,
+            linked_account_repo=linked_account_repo,
+            refresh_token_repo=refresh_token_repo,
+            role_repo=role_repo,
+            base_role=Role.DEPOSITOR,
+        )
+        provider = make_identity_provider()
+
+        await service.complete_oauth(
+            provider=provider,
+            code="auth-code",
+            redirect_uri="http://localhost/callback",
+        )
+
+        # Existing user — no new role assignment
+        role_repo.save.assert_not_called()

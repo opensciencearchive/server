@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { SearchResponse, SearchHit as SearchHitType, Record } from '@/types';
-import { api } from '@/lib/api';
+import { osa } from '@/lib/sdk';
 import { SearchHit } from './SearchHit';
 import { RecordDetail } from '@/components/record/RecordDetail';
 import { RecordComparison } from '@/components/record/RecordComparison';
@@ -98,7 +98,7 @@ export function SearchResults({ initialData }: SearchResultsProps) {
 
     setLoading(true);
     try {
-      const response = await api.search(initialData.query, initialData.index, {
+      const response = await osa.search.query(initialData.query, initialData.index, {
         offset: results.length,
       });
       setResults((prev) => [...prev, ...response.results]);
