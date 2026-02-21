@@ -1,15 +1,8 @@
+from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.domain.validation.port.repository import ValidationRunRepository
-from osa.domain.validation.port.runner import (
-    ResourceLimits,
-    ValidationInputs,
-    ValidatorOutput,
-    ValidatorRunner,
-)
 
 __all__ = [
-    "ResourceLimits",
-    "ValidationInputs",
+    "HookInputs",
+    "HookRunner",
     "ValidationRunRepository",
-    "ValidatorOutput",
-    "ValidatorRunner",
 ]

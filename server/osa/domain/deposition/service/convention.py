@@ -5,15 +5,17 @@ from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.port.convention_repository import ConventionRepository
 from osa.domain.deposition.port.schema_reader import SchemaReader
+from osa.domain.feature.service.feature import FeatureService
 from osa.domain.shared.error import NotFoundError, ValidationError
+from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.srn import ConventionSRN, Domain, LocalId, SchemaSRN, Semver
-from osa.domain.shared.model.validator import ValidatorRef
 from osa.domain.shared.service import Service
 
 
 class ConventionService(Service):
     convention_repo: ConventionRepository
     schema_reader: SchemaReader
+    feature_service: FeatureService
     node_domain: Domain
 
     async def create_convention(
@@ -23,7 +25,7 @@ class ConventionService(Service):
         schema_srn: SchemaSRN,
         file_requirements: FileRequirements,
         description: str | None = None,
-        validator_refs: list[ValidatorRef] | None = None,
+        hooks: list[HookDefinition] | None = None,
     ) -> Convention:
         if not await self.schema_reader.schema_exists(schema_srn):
             raise ValidationError(f"Schema '{schema_srn}' not found")
@@ -39,9 +41,15 @@ class ConventionService(Service):
             description=description,
             schema_srn=schema_srn,
             file_requirements=file_requirements,
-            validator_refs=validator_refs or [],
+            hooks=hooks or [],
             created_at=datetime.now(UTC),
         )
+        # Create feature tables BEFORE persisting convention row.
+        # If DDL fails, no orphaned convention row is left behind.
+        if convention.hooks:
+            convention_id = str(convention.srn.id)
+            await self.feature_service.create_tables(convention_id, convention.hooks)
+
         await self.convention_repo.save(convention)
         return convention
 

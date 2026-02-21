@@ -1,246 +1,249 @@
+"""OCI hook runner using aiodocker."""
+
 import asyncio
 import json
 import re
-import tempfile
+import time
 from pathlib import Path
 from shutil import copytree
-from typing import Literal
 
 import aiodocker
 import logfire
-from pydantic import BaseModel
 
-from osa.domain.validation.model import CheckStatus
-from osa.domain.validation.port.runner import (
-    ResourceLimits,
-    ValidationInputs,
-    ValidatorOutput,
-    ValidatorRunner,
-)
+from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.validation.model.hook_result import HookResult, HookStatus, ProgressEntry
+from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 
 
-class ValidatorError(Exception):
-    """Raised when a validator container fails to run."""
-
-    pass
-
-
-class HostConfig(BaseModel):
-    """Docker host configuration for container resource limits and mounts."""
-
-    Binds: list[str]
-    Memory: int
-    NanoCpus: int
-    NetworkMode: Literal["none", "bridge", "host"] = "none"
-
-
-class ContainerConfig(BaseModel):
-    """Docker container configuration for running validators."""
-
-    Image: str
-    Env: list[str]
-    HostConfig: HostConfig
-    User: str = "nobody"
-
-
-class DockerValidatorRunner(ValidatorRunner):
-    """Executes OCI validators using Docker via aiodocker."""
+class OciHookRunner(HookRunner):
+    """Executes hooks in OCI containers via aiodocker."""
 
     def __init__(self, docker: aiodocker.Docker):
         self._docker = docker
 
     async def run(
         self,
-        image: str,
-        digest: str,
-        inputs: ValidationInputs,
-        timeout: int,
-        resources: ResourceLimits,
-    ) -> ValidatorOutput:
-        """
-        Run a validator container.
+        hook: HookDefinition,
+        inputs: HookInputs,
+        workspace_dir: Path,
+    ) -> HookResult:
+        image_ref = f"{hook.image}@{hook.digest}"
+        timeout = hook.limits.timeout_seconds
 
-        Sets up the $OSAP_IN and $OSAP_OUT filesystem contract:
-        - $OSAP_IN/record.json - the data payload
-        - $OSAP_IN/files/ - associated files (if any)
-        - $OSAP_IN/config.json - optional per-run configuration
-        - $OSAP_OUT/result.json - validator output
+        osa_in = workspace_dir / "in"
+        osa_out = workspace_dir / "out"
+        osa_in.mkdir(parents=True, exist_ok=True)
+        osa_out.mkdir(parents=True, exist_ok=True)
 
-        Args:
-            image: OCI image reference
-            digest: Image digest for reproducibility
-            inputs: Data to validate
-            timeout: Timeout in seconds
-            resources: CPU/memory limits
+        # Stage inputs
+        (osa_in / "record.json").write_text(json.dumps(inputs.record_json))
 
-        Returns:
-            ValidatorOutput with status and check results
-        """
-        image_ref = f"{image}@{digest}"
+        if inputs.files_dir and inputs.files_dir.exists():
+            copytree(inputs.files_dir, osa_in / "files")
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir_path = Path(tmpdir)
-            osap_in = tmpdir_path / "in"
-            osap_out = tmpdir_path / "out"
-            osap_in.mkdir()
-            osap_out.mkdir()
+        if inputs.config or hook.config:
+            config = {**(hook.config or {}), **(inputs.config or {})}
+            (osa_in / "config.json").write_text(json.dumps(config))
 
-            # Write inputs
-            (osap_in / "record.json").write_text(json.dumps(inputs.record_json))
+        start_time = time.monotonic()
 
-            if inputs.files_dir and inputs.files_dir.exists():
-                copytree(inputs.files_dir, osap_in / "files")
-
-            if inputs.config:
-                (osap_in / "config.json").write_text(json.dumps(inputs.config))
-
-            try:
-                return await asyncio.wait_for(
-                    self._run_container(self._docker, image_ref, osap_in, osap_out, resources),
-                    timeout=timeout,
-                )
-            except asyncio.TimeoutError:
-                logfire.error("Validator timed out", image=image, digest=digest)
-                return ValidatorOutput(
-                    status=CheckStatus.ERROR,
-                    checks=[],
-                    error=f"Validator timed out after {timeout}s",
-                )
+        try:
+            result = await asyncio.wait_for(
+                self._run_container(image_ref, osa_in, osa_out, hook),
+                timeout=timeout,
+            )
+            result_duration = time.monotonic() - start_time
+            return HookResult(
+                hook_name=hook.manifest.name,
+                status=result["status"],
+                features=result["features"],
+                rejection_reason=result.get("rejection_reason"),
+                error_message=result.get("error_message"),
+                progress=result.get("progress", []),
+                duration_seconds=result_duration,
+            )
+        except asyncio.TimeoutError:
+            duration = time.monotonic() - start_time
+            logfire.error("Hook timed out", hook=hook.manifest.name, timeout=timeout)
+            return HookResult(
+                hook_name=hook.manifest.name,
+                status=HookStatus.FAILED,
+                features=[],
+                error_message=f"Hook timed out after {timeout}s",
+                duration_seconds=duration,
+            )
 
     async def _run_container(
         self,
-        docker: aiodocker.Docker,
         image_ref: str,
-        osap_in: Path,
-        osap_out: Path,
-        resources: ResourceLimits,
-    ) -> ValidatorOutput:
-        """Run the container asynchronously."""
+        osa_in: Path,
+        osa_out: Path,
+        hook: HookDefinition,
+    ) -> dict:
         container = None
         try:
             # Pull image if needed
             try:
-                await docker.images.inspect(image_ref)
+                await self._docker.images.inspect(image_ref)
             except aiodocker.DockerError as e:
                 if e.status == 404:
-                    logfire.info("Pulling validator image", image=image_ref)
-                    await docker.images.pull(image_ref)
+                    logfire.info("Pulling hook image", image=image_ref)
+                    await self._docker.images.pull(image_ref)
                 else:
                     raise
 
-            # Create container config
-            config = ContainerConfig(
-                Image=image_ref,
-                Env=[
-                    "OSAP_IN=/osap/in",
-                    "OSAP_OUT=/osap/out",
-                ],
-                HostConfig=HostConfig(
-                    Binds=[
-                        f"{osap_in}:/osap/in:ro",
-                        f"{osap_out}:/osap/out:rw",
+            config = {
+                "Image": image_ref,
+                "Env": ["OSA_IN=/osa/in", "OSA_OUT=/osa/out"],
+                "User": "65534:65534",
+                "HostConfig": {
+                    "Binds": [
+                        f"{osa_in}:/osa/in:ro",
+                        f"{osa_out}:/osa/out:rw",
                     ],
-                    Memory=self._parse_memory(resources.memory),
-                    NanoCpus=int(float(resources.cpu) * 1e9),
-                    NetworkMode="none",
-                ),
-                User="nobody",
-            )
+                    "Memory": self._parse_memory(hook.limits.memory),
+                    "MemorySwap": self._parse_memory(hook.limits.memory),
+                    "NanoCpus": int(float(hook.limits.cpu) * 1e9),
+                    "NetworkMode": "none",
+                    "ReadonlyRootfs": True,
+                    "CapDrop": ["ALL"],
+                    "SecurityOpt": ["no-new-privileges"],
+                    "PidsLimit": 256,
+                    "Tmpfs": {"/tmp": "rw,noexec,nosuid,size=100m"},
+                },
+            }
 
-            # Create and start container
-            container = await docker.containers.create(config.model_dump())
+            container = await self._docker.containers.create(config)
             await container.start()
+            wait_result = await container.wait()
 
-            # Wait for completion
-            result = await container.wait()
-            exit_code = result.get("StatusCode", -1)
+            exit_code = wait_result.get("StatusCode", -1)
 
-            # Get logs for debugging
-            logs = await container.log(stdout=True, stderr=True)
-            logs_str = "".join(logs) if logs else ""
+            # Check OOM
+            inspect_data = await container.show()
+            oom_killed = inspect_data.get("State", {}).get("OOMKilled", False)
+
+            if oom_killed:
+                return {
+                    "status": HookStatus.FAILED,
+                    "features": [],
+                    "error_message": "Hook killed by OOM",
+                }
+
+            # Parse progress file
+            progress = self._parse_progress(osa_out)
+
+            # Check for rejection in progress
+            rejection = self._check_rejection(progress)
+            if rejection:
+                return {
+                    "status": HookStatus.REJECTED,
+                    "features": [],
+                    "rejection_reason": rejection,
+                    "progress": progress,
+                }
 
             if exit_code != 0:
-                logfire.warning(
-                    "Validator exited with non-zero code",
-                    exit_code=exit_code,
-                    logs=logs_str[:1000],
-                )
-                return ValidatorOutput(
-                    status=CheckStatus.ERROR,
-                    checks=[],
-                    error=f"Validator exited with code {exit_code}: {logs_str[:500]}",
-                )
+                logs = await container.log(stdout=True, stderr=True)
+                logs_str = "".join(logs) if logs else ""
+                return {
+                    "status": HookStatus.FAILED,
+                    "features": [],
+                    "error_message": f"Hook exited with code {exit_code}: {logs_str[:500]}",
+                    "progress": progress,
+                }
 
-            # Read result
-            result_path = osap_out / "result.json"
-            if not result_path.exists():
-                return ValidatorOutput(
-                    status=CheckStatus.ERROR,
-                    checks=[],
-                    error="Validator did not produce result.json",
-                )
+            # Collect features
+            features = self._collect_features(osa_out, hook)
 
-            result_data = json.loads(result_path.read_text())
-            status_str = result_data.get("status", "error")
-            checks = result_data.get("checks", [])
-
-            # Map status string to CheckStatus
-            status_map = {
-                "passed": CheckStatus.PASSED,
-                "warnings": CheckStatus.WARNINGS,
-                "failed": CheckStatus.FAILED,
+            return {
+                "status": HookStatus.PASSED,
+                "features": features,
+                "progress": progress,
             }
-            status = status_map.get(status_str, CheckStatus.ERROR)
-
-            return ValidatorOutput(status=status, checks=checks, error=None)
 
         except aiodocker.DockerError as e:
-            logfire.error("Docker error", error=str(e))
-            return ValidatorOutput(
-                status=CheckStatus.ERROR,
-                checks=[],
-                error=f"Docker error: {e}",
-            )
+            logfire.error("Docker error running hook", error=str(e))
+            return {
+                "status": HookStatus.FAILED,
+                "features": [],
+                "error_message": f"Docker error: {e}",
+            }
         except Exception as e:
-            logfire.error("Unexpected error running validator", error=str(e))
-            return ValidatorOutput(
-                status=CheckStatus.ERROR,
-                checks=[],
-                error=f"Unexpected error: {e}",
-            )
+            logfire.error("Unexpected error running hook", error=str(e))
+            return {
+                "status": HookStatus.FAILED,
+                "features": [],
+                "error_message": f"Unexpected error: {e}",
+            }
         finally:
-            # Clean up container
             if container is not None:
                 try:
                     await container.delete(force=True)
                 except Exception:
-                    logfire.warning("Failed to delete container", container_id=container.id)
                     pass
 
-    def _parse_memory(self, memory: str) -> int:
-        """Parse memory string like '256Mi' to bytes."""
-        memory = memory.strip()
-        Gi = 1024 * 1024 * 1024
-        Mi = 1024 * 1024
-        Ki = 1024
-        regex = r"^\d+(Gi|Mi|Ki)?$"
-        if not re.match(regex, memory):
-            raise ValueError(f"Invalid memory format: {memory}")
+    def _parse_progress(self, osa_out: Path) -> list[ProgressEntry]:
+        """Parse progress.jsonl from hook output."""
+        progress_file = osa_out / "progress.jsonl"
+        if not progress_file.exists():
+            return []
 
-        match = re.match(r"^(\d+)(Gi|Mi|Ki)?$", memory)
+        entries = []
+        for line in progress_file.read_text().strip().split("\n"):
+            if not line.strip():
+                continue
+            try:
+                data = json.loads(line)
+                entries.append(
+                    ProgressEntry(
+                        step=data.get("step"),
+                        status=data.get("status", "unknown"),
+                        message=data.get("message"),
+                    )
+                )
+            except json.JSONDecodeError:
+                continue
+        return entries
+
+    def _check_rejection(self, progress: list[ProgressEntry]) -> str | None:
+        """Check if any progress entry indicates rejection."""
+        for entry in reversed(progress):
+            if entry.status == "rejected":
+                return entry.message
+        return None
+
+    def _collect_features(self, osa_out: Path, hook: HookDefinition) -> list[dict]:
+        """Collect features from features.json."""
+        features_file = osa_out / "features.json"
+        if not features_file.exists():
+            return []
+
+        data = json.loads(features_file.read_text())
+        if isinstance(data, list):
+            return data
+        elif isinstance(data, dict):
+            return [data]
+        return []
+
+    def _parse_memory(self, memory: str) -> int:
+        """Parse memory string like '2g' or '512m' to bytes."""
+        memory = memory.strip().lower()
+        match = re.match(r"^(\d+(?:\.\d+)?)(g|m|k)?i?$", memory)
         if not match:
             raise ValueError(f"Invalid memory format: {memory}")
-        amount, unit = match.groups()
+
+        amount = float(match.group(1))
+        unit = match.group(2)
 
         match unit:
-            case "Gi":
-                return int(amount) * Gi
-            case "Mi":
-                return int(amount) * Mi
-            case "Ki":
-                return int(amount) * Ki
+            case "g":
+                return int(amount * 1024 * 1024 * 1024)
+            case "m":
+                return int(amount * 1024 * 1024)
+            case "k":
+                return int(amount * 1024)
             case None:
-                logfire.warn("Memory unit not specified, assuming bytes", memory=memory)
                 return int(amount)
             case _:
                 raise ValueError(f"Unknown memory unit: {unit}")

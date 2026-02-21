@@ -4,6 +4,7 @@ from osa.cli.util.paths import OSAPaths
 from osa.config import Config
 from osa.domain.auth.util.di import AuthProvider
 from osa.domain.deposition.util.di import DepositionProvider
+from osa.domain.feature.util.di import FeatureProvider
 from osa.domain.semantics.util.di.provider import SemanticsProvider
 from osa.domain.validation.util.di import ValidationProvider
 from osa.infrastructure.auth import AuthInfraProvider
@@ -31,6 +32,7 @@ def create_container() -> AsyncContainer:
         EventProvider(),
         HttpProvider(),
         DepositionProvider(),
+        FeatureProvider(),
         SemanticsProvider(),
         ValidationProvider(),
         AuthProvider(),

@@ -23,6 +23,7 @@ from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.deposition.service.deposition import DepositionService
 from osa.domain.shared.model.srn import Domain
 from osa.domain.shared.outbox import Outbox
+from osa.domain.feature.service.feature import FeatureService
 from osa.infrastructure.persistence.adapter.spreadsheet import OpenpyxlSpreadsheetAdapter
 from osa.util.di.base import Provider
 from osa.util.di.scope import Scope
@@ -51,11 +52,13 @@ class DepositionProvider(Provider):
         self,
         convention_repo: ConventionRepository,
         schema_reader: SchemaReader,
+        feature_service: FeatureService,
         config: Config,
     ) -> ConventionService:
         return ConventionService(
             convention_repo=convention_repo,
             schema_reader=schema_reader,
+            feature_service=feature_service,
             node_domain=Domain(config.server.domain),
         )
 

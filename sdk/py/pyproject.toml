@@ -1,0 +1,31 @@
+[project]
+name = "osa"
+version = "0.1.0"
+description = "OSA Python SDK — validators and transforms for the Open Scientific Archive"
+readme = "README.md"
+authors = [
+    { name = "Rory Byrne", email = "rory@rory.bio" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic>=2",
+]
+
+[project.scripts]
+osa = "osa.cli.main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[dependency-groups]
+dev = [
+    "pocketeer>=0.3.0",
+    "pytest>=9.0.2",
+    "ruff>=0.15.1",
+    "ty>=0.0.17",
+]
