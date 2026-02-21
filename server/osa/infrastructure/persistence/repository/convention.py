@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.port.convention_repository import ConventionRepository
+from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
-from osa.domain.shared.model.validator import ValidatorRef
 from osa.infrastructure.persistence.tables import conventions_table
 
 
@@ -18,7 +18,7 @@ def _convention_to_row(convention: Convention) -> dict[str, Any]:
         "description": convention.description,
         "schema_srn": str(convention.schema_srn),
         "file_requirements": convention.file_requirements.model_dump(),
-        "validator_refs": [v.model_dump() for v in convention.validator_refs],
+        "hooks": [h.model_dump() for h in convention.hooks],
         "created_at": convention.created_at,
     }
 
@@ -30,7 +30,7 @@ def _row_to_convention(row: dict[str, Any]) -> Convention:
         description=row.get("description"),
         schema_srn=SchemaSRN.parse(row["schema_srn"]),
         file_requirements=FileRequirements.model_validate(row["file_requirements"]),
-        validator_refs=[ValidatorRef.model_validate(v) for v in (row.get("validator_refs") or [])],
+        hooks=[HookDefinition.model_validate(h) for h in (row.get("hooks") or [])],
         created_at=row["created_at"],
     )
 

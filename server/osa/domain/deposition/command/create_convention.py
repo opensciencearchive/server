@@ -6,8 +6,8 @@ from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.shared.authorization.gate import at_least
 from osa.domain.shared.command import Command, CommandHandler, Result
+from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
-from osa.domain.shared.model.validator import ValidatorRef
 
 
 class CreateConvention(Command):
@@ -16,7 +16,7 @@ class CreateConvention(Command):
     schema_srn: SchemaSRN
     file_requirements: FileRequirements
     description: str | None = None
-    validator_refs: list[ValidatorRef] = []
+    hooks: list[HookDefinition] = []
 
 
 class ConventionCreated(Result):
@@ -39,7 +39,7 @@ class CreateConventionHandler(CommandHandler[CreateConvention, ConventionCreated
             schema_srn=cmd.schema_srn,
             file_requirements=cmd.file_requirements,
             description=cmd.description,
-            validator_refs=cmd.validator_refs,
+            hooks=cmd.hooks,
         )
         return ConventionCreated(
             srn=convention.srn,

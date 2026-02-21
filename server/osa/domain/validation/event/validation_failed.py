@@ -1,5 +1,6 @@
 from osa.domain.shared.event import Event, EventId
-from osa.domain.shared.model.srn import DepositionSRN
+from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+from osa.domain.validation.model import RunStatus
 
 
 class ValidationFailed(Event):
@@ -7,4 +8,6 @@ class ValidationFailed(Event):
 
     id: EventId
     deposition_srn: DepositionSRN
+    convention_srn: ConventionSRN
+    status: RunStatus
     reasons: list[str]

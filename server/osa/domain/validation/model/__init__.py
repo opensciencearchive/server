@@ -1,18 +1,13 @@
-from osa.domain.validation.model.entity import CheckResult, ValidationRun
+from osa.domain.validation.model.entity import ValidationRun
+from osa.domain.validation.model.hook_result import HookResult, HookStatus, ProgressEntry
 from osa.domain.validation.model.value import (
-    CheckStatus,
     RunStatus,
-    Validator,
-    ValidatorLimits,
-    ValidatorRef,
 )
 
 __all__ = [
-    "CheckResult",
-    "CheckStatus",
+    "HookResult",
+    "HookStatus",
+    "ProgressEntry",
     "RunStatus",
     "ValidationRun",
-    "Validator",
-    "ValidatorLimits",
-    "ValidatorRef",
 ]

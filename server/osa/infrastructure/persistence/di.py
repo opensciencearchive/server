@@ -17,6 +17,7 @@ from osa.domain.semantics.port.schema_repository import SchemaRepository
 from osa.domain.shared.model.srn import Domain
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.event_repository import EventRepository
+from osa.domain.feature.port.feature_store import FeatureStore
 from osa.domain.validation.port.repository import ValidationRunRepository
 from osa.infrastructure.persistence.adapter.readers import (
     OntologyReaderAdapter,
@@ -45,6 +46,7 @@ from osa.infrastructure.persistence.repository.record import (
 from osa.infrastructure.persistence.repository.schema import (
     PostgresSemanticsSchemaRepository,
 )
+from osa.infrastructure.persistence.feature_store import PostgresFeatureStore
 from osa.infrastructure.persistence.repository.validation import (
     PostgresValidationRunRepository,
 )
@@ -80,6 +82,11 @@ class PersistenceProvider(Provider):
         provides=ValidationRunRepository,
     )
     event_repo = provide(SQLAlchemyEventRepository, scope=Scope.UOW, provides=EventRepository)
+
+    # Feature store
+    @provide(scope=Scope.UOW)
+    def get_feature_store(self, engine: AsyncEngine, session: AsyncSession) -> FeatureStore:
+        return PostgresFeatureStore(engine=engine, session=session)
 
     # Semantics repositories
     ontology_repo = provide(

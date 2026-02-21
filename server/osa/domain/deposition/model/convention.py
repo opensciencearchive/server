@@ -2,8 +2,8 @@ from datetime import datetime
 
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.shared.model.aggregate import Aggregate
+from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
-from osa.domain.shared.model.validator import ValidatorRef
 
 
 class Convention(Aggregate):
@@ -14,5 +14,5 @@ class Convention(Aggregate):
     description: str | None = None
     schema_srn: SchemaSRN
     file_requirements: FileRequirements
-    validator_refs: list[ValidatorRef] = []
+    hooks: list[HookDefinition] = []
     created_at: datetime

@@ -1,22 +1,17 @@
 """Validation API routes."""
 
-import asyncio
-import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from dishka.integrations.fastapi import DishkaRoute, FromDishka
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from osa.domain.shared.model.srn import LocalId, ValidationRunSRN
 from osa.domain.validation.model import (
-    CheckResult,
-    CheckStatus,
+    HookResult,
+    HookStatus,
     RunStatus,
-    ValidationRun,
 )
-from osa.domain.validation.port.runner import ValidationInputs
-from osa.domain.validation.service import ValidationService
+from osa.domain.validation.service.validation import ValidationService
 
 
 router = APIRouter(
@@ -31,41 +26,12 @@ router = APIRouter(
 # =============================================================================
 
 
-class ValidatorInput(BaseModel):
-    """A validator to run."""
-
-    image: str = Field(..., description="OCI image reference")
-    digest: str = Field(..., description="Image digest (sha256:...)")
-
-
-class CheckResultDTO(BaseModel):
-    check_id: str
-    validator_digest: str
-    status: CheckStatus
-    message: str | None = None
-    details: dict | None = None
-
-
-class ValidateRequest(BaseModel):
-    """Request to validate data against validators."""
-
-    validators: list[ValidatorInput] = Field(
-        ...,
-        description="List of validators to run",
-        min_length=1,
-    )
-    record: dict = Field(
-        ...,
-        description="The data record to validate (JSON object)",
-    )
-
-
-class ValidateResponse(BaseModel):
-    """Response from submitting a validation request."""
-
-    run_id: str = Field(..., description="Unique ID for this validation run")
-    status: RunStatus = Field(..., description="Current status of the validation")
-    poll_url: str = Field(..., description="URL to poll for results")
+class HookResultDTO(BaseModel):
+    hook_name: str
+    status: HookStatus
+    rejection_reason: str | None = None
+    error_message: str | None = None
+    duration_seconds: float
 
 
 class ValidationStatusResponse(BaseModel):
@@ -73,17 +39,17 @@ class ValidationStatusResponse(BaseModel):
 
     run_id: str
     status: RunStatus
-    summary: CheckStatus | None = Field(
+    summary: HookStatus | None = Field(
         None,
-        description="Overall validation result (only set when completed)",
+        description="Overall hook result (only set when completed)",
     )
     progress: dict | None = Field(
         None,
-        description="Progress info (completed/total) while running",
+        description="Progress info while running",
     )
-    results: list[CheckResultDTO] = Field(
+    results: list[HookResultDTO] = Field(
         default_factory=list,
-        description="Individual validation results",
+        description="Individual hook results",
     )
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -94,20 +60,18 @@ class ValidationStatusResponse(BaseModel):
 # =============================================================================
 
 
-def _compute_summary(results: list[CheckResult]) -> CheckStatus | None:
-    """Compute overall summary from individual results."""
+def _compute_summary(results: list[HookResult]) -> HookStatus | None:
+    """Compute overall summary from individual hook results."""
     if not results:
         return None
 
     statuses = [r.status for r in results]
 
-    if CheckStatus.ERROR in statuses:
-        return CheckStatus.ERROR
-    if CheckStatus.FAILED in statuses:
-        return CheckStatus.FAILED
-    if CheckStatus.WARNINGS in statuses:
-        return CheckStatus.WARNINGS
-    return CheckStatus.PASSED
+    if HookStatus.FAILED in statuses:
+        return HookStatus.FAILED
+    if HookStatus.REJECTED in statuses:
+        return HookStatus.REJECTED
+    return HookStatus.PASSED
 
 
 # =============================================================================
@@ -115,73 +79,8 @@ def _compute_summary(results: list[CheckResult]) -> CheckStatus | None:
 # =============================================================================
 
 
-@router.post(
-    "/validate",
-    status_code=status.HTTP_202_ACCEPTED,
-    response_model=ValidateResponse,
-    description="Submit data for validation. Returns immediately with a run ID for polling.",
-)
-async def submit_validation(
-    payload: ValidateRequest,
-    service: FromDishka[ValidationService],
-) -> ValidateResponse:
-    # Create validation run
-    inputs = ValidationInputs(record_json=payload.record)
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
-
-    run_srn = ValidationRunSRN(
-        domain=service.node_domain,
-        id=LocalId(str(uuid.uuid4())),
-        version=None,
-    )
-    run = ValidationRun(
-        srn=run_srn,
-        status=RunStatus.PENDING,
-        expires_at=expires_at,
-    )
-    await service.run_repo.save(run)
-
-    # Spawn background task
-    validators = [(v.image, v.digest) for v in payload.validators]
-    asyncio.create_task(
-        _run_validation_background(service, run, inputs, validators),
-        name=f"validation-{run_srn.id}",
-    )
-
-    run_id = str(run.srn.id.root)
-    return ValidateResponse(
-        run_id=run_id,
-        status=run.status,
-        poll_url=f"/api/v1/validation/validate/{run_id}",
-    )
-
-
-async def _run_validation_background(
-    service: ValidationService,
-    run: ValidationRun,
-    inputs: ValidationInputs,
-    validators: list[tuple[str, str]],
-) -> None:
-    """Run validation in background, updating the run status."""
-    try:
-        await service.run_validation(run, inputs, validators)
-    except Exception as e:
-        run.status = RunStatus.FAILED
-        run.completed_at = datetime.now(timezone.utc)
-        run.results = [
-            CheckResult(
-                check_id="system",
-                validator_digest="",
-                status=CheckStatus.ERROR,
-                message=f"Validation failed: {e}",
-                details=None,
-            )
-        ]
-        await service.run_repo.save(run)
-
-
 @router.get(
-    "/validate/{run_id}",
+    "/runs/{run_id}",
     response_model=ValidationStatusResponse,
     description="Get the status and results of a validation run.",
 )
@@ -196,14 +95,13 @@ async def get_validation_status(
             detail=f"Validation run not found: {run_id}",
         )
 
-    # Build response based on status
     results_dto = [
-        CheckResultDTO(
-            check_id=r.check_id,
-            validator_digest=r.validator_digest,
+        HookResultDTO(
+            hook_name=r.hook_name,
             status=r.status,
-            message=r.message,
-            details=r.details,
+            rejection_reason=r.rejection_reason,
+            error_message=r.error_message,
+            duration_seconds=r.duration_seconds,
         )
         for r in run.results
     ]

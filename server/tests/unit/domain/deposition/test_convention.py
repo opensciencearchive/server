@@ -48,16 +48,16 @@ class TestConventionCreation:
         )
         assert conv.description == "A test convention"
 
-    def test_create_with_empty_validators(self):
+    def test_create_with_empty_hooks(self):
         conv = Convention(
             srn=_make_conv_srn(),
             title="Test",
             schema_srn=_make_schema_srn(),
             file_requirements=_make_file_reqs(),
-            validator_refs=[],
+            hooks=[],
             created_at=datetime.now(UTC),
         )
-        assert conv.validator_refs == []
+        assert conv.hooks == []
 
 
 class TestConventionImmutability:

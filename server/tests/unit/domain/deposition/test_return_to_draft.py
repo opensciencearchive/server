@@ -13,6 +13,7 @@ from osa.domain.deposition.model.value import DepositionStatus
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
 from osa.domain.validation.event.validation_failed import ValidationFailed
+from osa.domain.validation.model import RunStatus
 
 
 def _make_dep_srn(id: str = "test-dep") -> DepositionSRN:
@@ -41,6 +42,8 @@ class TestReturnToDraft:
         event = ValidationFailed(
             id=EventId(uuid4()),
             deposition_srn=dep.srn,
+            convention_srn=_make_conv_srn(),
+            status=RunStatus.FAILED,
             reasons=["Missing required field"],
         )
         await handler.handle(event)
@@ -57,6 +60,8 @@ class TestReturnToDraft:
         event = ValidationFailed(
             id=EventId(uuid4()),
             deposition_srn=_make_dep_srn(),
+            convention_srn=_make_conv_srn(),
+            status=RunStatus.FAILED,
             reasons=["error"],
         )
         # Should not raise — workers must be resilient
