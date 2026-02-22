@@ -22,23 +22,53 @@ class HookInfo:
 
 
 @dataclass
+class SourceInfo:
+    """Metadata from a registered source class."""
+
+    source_cls: type
+    name: str
+    schedule: object | None = None
+    initial_run: object | None = None
+
+
+@dataclass
 class ConventionInfo:
     """Metadata from a convention() declaration."""
 
     title: str
+    version: str
     schema_type: type
     file_requirements: dict
     hooks: list[Callable]
+    source_type: type | None = None
+    source_info: SourceInfo | None = None
 
 
 _hooks: list[HookInfo] = []
 _conventions: list[ConventionInfo] = []
+_sources: list[SourceInfo] = []
 
 
 def clear() -> None:
-    """Remove all registered hooks and conventions. Used in tests."""
+    """Remove all registered hooks, conventions, and sources. Used in tests."""
     _hooks.clear()
     _conventions.clear()
+    _sources.clear()
+
+
+def register_source(source_cls: type) -> SourceInfo:
+    """Register a source class and return its SourceInfo."""
+    name = getattr(source_cls, "name", source_cls.__name__)
+    schedule = getattr(source_cls, "schedule", None)
+    initial_run = getattr(source_cls, "initial_run", None)
+    info = SourceInfo(
+        source_cls=source_cls,
+        name=name,
+        schedule=schedule,
+        initial_run=initial_run,
+    )
+    _sources.append(info)
+    return info
 
 
 def _extract_hook_info(fn: Callable, hook_type: str) -> HookInfo:

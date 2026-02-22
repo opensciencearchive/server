@@ -7,6 +7,7 @@ from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.port.convention_repository import ConventionRepository
 from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.model.source import SourceDefinition
 from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
 from osa.infrastructure.persistence.tables import conventions_table
 
@@ -19,11 +20,13 @@ def _convention_to_row(convention: Convention) -> dict[str, Any]:
         "schema_srn": str(convention.schema_srn),
         "file_requirements": convention.file_requirements.model_dump(),
         "hooks": [h.model_dump() for h in convention.hooks],
+        "source": convention.source.model_dump() if convention.source else None,
         "created_at": convention.created_at,
     }
 
 
 def _row_to_convention(row: dict[str, Any]) -> Convention:
+    source_data = row.get("source")
     return Convention(
         srn=ConventionSRN.parse(row["srn"]),
         title=row["title"],
@@ -31,6 +34,7 @@ def _row_to_convention(row: dict[str, Any]) -> Convention:
         schema_srn=SchemaSRN.parse(row["schema_srn"]),
         file_requirements=FileRequirements.model_validate(row["file_requirements"]),
         hooks=[HookDefinition.model_validate(h) for h in (row.get("hooks") or [])],
+        source=SourceDefinition.model_validate(source_data) if source_data else None,
         created_at=row["created_at"],
     )
 

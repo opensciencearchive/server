@@ -1,7 +1,6 @@
 import logging
 import os
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, Union
 
@@ -31,44 +30,6 @@ class IndexConfig(BaseModel):
     name: str  # Unique name for this index (used in search API)
     backend: str  # "vector", "keyword", etc.
     config: AnyBackendConfig
-
-
-# =============================================================================
-# Source Configuration
-# =============================================================================
-
-
-class SourceSchedule(BaseModel):
-    """Schedule configuration for a source."""
-
-    cron: str  # Cron expression (e.g., "0 * * * *" for hourly)
-    limit: int | None = None  # Optional limit per scheduled run
-
-
-class InitialRun(BaseModel):
-    """Initial run configuration for a source."""
-
-    enabled: bool = False
-    limit: int | None  # Required: number to limit, or null for no limit
-    since: datetime | None = None  # Optional: bootstrap from specific date
-
-
-class SourceConfig(BaseModel):
-    """Configuration for a source.
-
-    The `config` field is validated at runtime based on the source type,
-    allowing external sources to define their own config schemas.
-    """
-
-    source: str  # "geo-entrez", etc. - matches entry point name
-    config: dict[str, Any] = {}  # Validated at runtime by source's config_class
-    schedule: SourceSchedule | None = None  # Optional: if set, runs on schedule
-    initial_run: InitialRun | None = None  # Optional: if set, runs on startup
-
-    @property
-    def name(self) -> str:
-        """The source name (same as source type for now)."""
-        return self.source
 
 
 # =============================================================================
@@ -205,7 +166,7 @@ class Config(BaseSettings):
     worker: WorkerConfig = WorkerConfig()  # Background worker settings
     auth: AuthConfig  # Required - set via OSA_AUTH__JWT__SECRET env var
     indexes: list[IndexConfig] = []  # list of index configs
-    sources: list[SourceConfig] = []  # list of source configs
+    host_data_dir: str | None = None  # Host path for OSA_DATA_DIR (sibling container mounts)
 
     model_config = {
         "env_prefix": "OSA_",

@@ -40,7 +40,7 @@ class TestDockerfileGeneration:
 
         dockerfile = generate_dockerfile(tmp_path)
         assert "ENTRYPOINT" in dockerfile
-        assert "osa.runtime.entrypoint" in dockerfile
+        assert "osa-run-hook" in dockerfile
 
     def test_raises_if_no_pyproject(self, tmp_path) -> None:
         from osa.cli.deploy import generate_dockerfile

@@ -109,6 +109,65 @@ class TestNewEntrypoint:
         assert data["status"] == "rejected"
         assert "Bad structure file" in data["reason"]
 
+    def test_envelope_format_populates_srn_and_metadata(self, tmp_path) -> None:
+        from osa.authoring.hook import hook
+        from osa.runtime.entrypoint import run_hook_entrypoint
+
+        captured_record = {}
+
+        @hook
+        def detect(record: Record[SampleSchema]) -> list[PocketResult]:
+            captured_record["srn"] = record.srn
+            captured_record["organism"] = record.metadata.organism
+            return [PocketResult(pocket_id="P1", score=0.85)]
+
+        input_dir = tmp_path / "in"
+        output_dir = tmp_path / "out"
+        input_dir.mkdir()
+        output_dir.mkdir()
+        (input_dir / "record.json").write_text(
+            json.dumps(
+                {
+                    "srn": "urn:osa:localhost:dep:abc123",
+                    "metadata": {"organism": "Human", "title": "Test"},
+                }
+            )
+        )
+
+        exit_code = run_hook_entrypoint(
+            hook_fn=detect, input_dir=input_dir, output_dir=output_dir
+        )
+        assert exit_code == 0
+        assert captured_record["srn"] == "urn:osa:localhost:dep:abc123"
+        assert captured_record["organism"] == "Human"
+
+    def test_flat_format_still_works(self, tmp_path) -> None:
+        from osa.authoring.hook import hook
+        from osa.runtime.entrypoint import run_hook_entrypoint
+
+        captured_record = {}
+
+        @hook
+        def detect(record: Record[SampleSchema]) -> list[PocketResult]:
+            captured_record["srn"] = record.srn
+            captured_record["organism"] = record.metadata.organism
+            return [PocketResult(pocket_id="P1", score=0.85)]
+
+        input_dir = tmp_path / "in"
+        output_dir = tmp_path / "out"
+        input_dir.mkdir()
+        output_dir.mkdir()
+        (input_dir / "record.json").write_text(
+            json.dumps({"organism": "Human", "title": "Test"})
+        )
+
+        exit_code = run_hook_entrypoint(
+            hook_fn=detect, input_dir=input_dir, output_dir=output_dir
+        )
+        assert exit_code == 0
+        assert captured_record["srn"] == ""
+        assert captured_record["organism"] == "Human"
+
     def test_entrypoint_reads_files_dir(self, tmp_path) -> None:
         from osa.authoring.hook import hook
         from osa.runtime.entrypoint import run_hook_entrypoint

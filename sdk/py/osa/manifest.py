@@ -45,9 +45,11 @@ class ConventionManifest(BaseModel):
     """Manifest entry for a convention."""
 
     title: str
+    version: str
     record_schema: str
     file_requirements: dict[str, Any]
     hook_names: list[str]
+    source_name: str | None = None
 
 
 class Manifest(BaseModel):
@@ -152,9 +154,11 @@ def generate_manifest() -> Manifest:
     conventions = [
         ConventionManifest(
             title=c.title,
+            version=c.version,
             record_schema=c.schema_type.__name__,
             file_requirements=c.file_requirements,
             hook_names=[h.__name__ for h in c.hooks],
+            source_name=getattr(c.source_type, "name", None) if c.source_type else None,
         )
         for c in _conventions
     ]

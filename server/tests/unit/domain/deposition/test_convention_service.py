@@ -8,7 +8,8 @@ import pytest
 from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.service.convention import ConventionService
-from osa.domain.shared.error import NotFoundError, ValidationError
+from osa.domain.semantics.model.value import Cardinality, FieldDefinition, FieldType
+from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.model.hook import (
     ColumnDef,
     FeatureSchema,
@@ -24,6 +25,17 @@ def _make_conv_srn(id: str = "test-conv", version: str = "1.0.0") -> ConventionS
 
 def _make_schema_srn(id: str = "test-schema", version: str = "1.0.0") -> SchemaSRN:
     return SchemaSRN.parse(f"urn:osa:localhost:schema:{id}@{version}")
+
+
+def _make_field_defs() -> list[FieldDefinition]:
+    return [
+        FieldDefinition(
+            name="title",
+            type=FieldType.TEXT,
+            required=True,
+            cardinality=Cardinality.EXACTLY_ONE,
+        ),
+    ]
 
 
 def _make_file_reqs() -> FileRequirements:
@@ -54,97 +66,85 @@ def _make_hook_def(name: str = "pocket_detect") -> HookDefinition:
 
 def _make_service(
     conv_repo: AsyncMock | None = None,
-    schema_reader: AsyncMock | None = None,
+    schema_service: AsyncMock | None = None,
     feature_service: AsyncMock | None = None,
+    outbox: AsyncMock | None = None,
 ) -> ConventionService:
+    mock_schema_service = schema_service or AsyncMock()
+    if not schema_service:
+        mock_schema = AsyncMock()
+        mock_schema.srn = _make_schema_srn()
+        mock_schema_service.create_schema.return_value = mock_schema
+
     return ConventionService(
         convention_repo=conv_repo or AsyncMock(),
-        schema_reader=schema_reader or AsyncMock(),
+        schema_service=mock_schema_service,
         feature_service=feature_service or AsyncMock(),
+        outbox=outbox or AsyncMock(),
         node_domain=Domain("localhost"),
     )
 
 
 class TestConventionServiceCreate:
     @pytest.mark.asyncio
-    async def test_create_convention_with_valid_schema(self):
+    async def test_create_convention_creates_schema(self):
         conv_repo = AsyncMock()
-        schema_reader = AsyncMock()
-        schema_reader.schema_exists.return_value = True
+        schema_service = AsyncMock()
+        mock_schema = AsyncMock()
+        mock_schema.srn = _make_schema_srn()
+        schema_service.create_schema.return_value = mock_schema
         feature_service = AsyncMock()
 
-        service = _make_service(conv_repo, schema_reader, feature_service)
+        service = _make_service(conv_repo, schema_service, feature_service)
         result = await service.create_convention(
             title="Test Convention",
             version="1.0.0",
-            schema_srn=_make_schema_srn(),
+            schema=_make_field_defs(),
             file_requirements=_make_file_reqs(),
         )
         assert result.title == "Test Convention"
         conv_repo.save.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_create_convention_rejects_invalid_schema(self):
-        schema_reader = AsyncMock()
-        schema_reader.schema_exists.return_value = False
-
-        service = _make_service(schema_reader=schema_reader)
-        with pytest.raises(ValidationError, match="Schema.*not found"):
-            await service.create_convention(
-                title="Bad",
-                version="1.0.0",
-                schema_srn=_make_schema_srn(),
-                file_requirements=_make_file_reqs(),
-            )
+        schema_service.create_schema.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_create_convention_generates_srn(self):
-        schema_reader = AsyncMock()
-        schema_reader.schema_exists.return_value = True
-
-        service = _make_service(schema_reader=schema_reader)
+        service = _make_service()
         result = await service.create_convention(
             title="Test",
             version="1.0.0",
-            schema_srn=_make_schema_srn(),
+            schema=_make_field_defs(),
             file_requirements=_make_file_reqs(),
         )
         assert str(result.srn).startswith("urn:osa:localhost:conv:")
 
     @pytest.mark.asyncio
     async def test_create_convention_with_hooks_creates_feature_tables(self):
-        schema_reader = AsyncMock()
-        schema_reader.schema_exists.return_value = True
         feature_service = AsyncMock()
 
-        service = _make_service(schema_reader=schema_reader, feature_service=feature_service)
+        service = _make_service(feature_service=feature_service)
         hooks = [_make_hook_def()]
         result = await service.create_convention(
             title="With Hooks",
             version="1.0.0",
-            schema_srn=_make_schema_srn(),
+            schema=_make_field_defs(),
             file_requirements=_make_file_reqs(),
             hooks=hooks,
         )
         assert result.hooks == hooks
-        feature_service.create_tables.assert_called_once()
-        call_args = feature_service.create_tables.call_args
-        assert call_args[0][1] == hooks
+        feature_service.create_table.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_create_convention_without_hooks_skips_feature_tables(self):
-        schema_reader = AsyncMock()
-        schema_reader.schema_exists.return_value = True
         feature_service = AsyncMock()
 
-        service = _make_service(schema_reader=schema_reader, feature_service=feature_service)
+        service = _make_service(feature_service=feature_service)
         await service.create_convention(
             title="No Hooks",
             version="1.0.0",
-            schema_srn=_make_schema_srn(),
+            schema=_make_field_defs(),
             file_requirements=_make_file_reqs(),
         )
-        feature_service.create_tables.assert_not_called()
+        feature_service.create_table.assert_not_called()
 
 
 class TestConventionServiceGet:

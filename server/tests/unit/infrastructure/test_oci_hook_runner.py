@@ -1,6 +1,5 @@
-"""Unit tests for OciHookRunner — container lifecycle, parsing, and feature collection."""
+"""Unit tests for OciHookRunner — container lifecycle, parsing, and bind-mount config."""
 
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -163,94 +162,6 @@ class TestCheckRejection:
         assert runner._check_rejection(entries) == "Second rejection"
 
 
-class TestCollectFeatures:
-    def test_empty_when_no_file(self, tmp_path: Path):
-        runner = _make_runner()
-        hook = _make_hook()
-        features = runner._collect_features(tmp_path, hook)
-        assert features == []
-
-    def test_collects_list(self, tmp_path: Path):
-        features_file = tmp_path / "features.json"
-        features_file.write_text(
-            json.dumps(
-                [
-                    {"score": 0.95, "pocket_id": "P1"},
-                    {"score": 0.82, "pocket_id": "P2"},
-                ]
-            )
-        )
-        runner = _make_runner()
-        features = runner._collect_features(tmp_path, _make_hook())
-        assert len(features) == 2
-        assert features[0]["score"] == 0.95
-
-    def test_wraps_single_dict_in_list(self, tmp_path: Path):
-        features_file = tmp_path / "features.json"
-        features_file.write_text(json.dumps({"score": 0.95}))
-        runner = _make_runner()
-        features = runner._collect_features(tmp_path, _make_hook())
-        assert len(features) == 1
-        assert features[0]["score"] == 0.95
-
-    def test_empty_list_returns_empty(self, tmp_path: Path):
-        features_file = tmp_path / "features.json"
-        features_file.write_text("[]")
-        runner = _make_runner()
-        features = runner._collect_features(tmp_path, _make_hook())
-        assert features == []
-
-
-class TestInputStaging:
-    """Test that run() correctly stages inputs to the workspace."""
-
-    @pytest.mark.asyncio
-    async def test_stages_record_json(self, tmp_path: Path):
-        """record.json is written to osa_in/."""
-        docker = AsyncMock()
-        container = AsyncMock()
-        docker.containers.create.return_value = container
-        container.wait.return_value = {"StatusCode": 0}
-        container.show.return_value = {"State": {"OOMKilled": False}}
-
-        runner = OciHookRunner(docker=docker)
-        hook = _make_hook()
-        inputs = HookInputs(record_json={"srn": "urn:osa:localhost:rec:123", "name": "test"})
-
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
-
-        await runner.run(hook, inputs, workspace)
-
-        record_file = workspace / "in" / "record.json"
-        assert record_file.exists()
-        data = json.loads(record_file.read_text())
-        assert data["srn"] == "urn:osa:localhost:rec:123"
-
-    @pytest.mark.asyncio
-    async def test_stages_config_json(self, tmp_path: Path):
-        """config.json is written when hook has config."""
-        docker = AsyncMock()
-        container = AsyncMock()
-        docker.containers.create.return_value = container
-        container.wait.return_value = {"StatusCode": 0}
-        container.show.return_value = {"State": {"OOMKilled": False}}
-
-        runner = OciHookRunner(docker=docker)
-        hook = _make_hook(config={"r_min": 3.0})
-        inputs = HookInputs(record_json={"srn": "test"})
-
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
-
-        await runner.run(hook, inputs, workspace)
-
-        config_file = workspace / "in" / "config.json"
-        assert config_file.exists()
-        data = json.loads(config_file.read_text())
-        assert data["r_min"] == 3.0
-
-
 class TestContainerLifecycle:
     @pytest.mark.asyncio
     async def test_successful_hook_returns_passed(self, tmp_path: Path):
@@ -264,10 +175,10 @@ class TestContainerLifecycle:
         hook = _make_hook()
         inputs = HookInputs(record_json={"srn": "test"})
 
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
 
-        result = await runner.run(hook, inputs, workspace)
+        result = await runner.run(hook, inputs, output_dir)
 
         assert result.status == HookStatus.PASSED
         assert result.hook_name == "pocket_detect"
@@ -287,10 +198,10 @@ class TestContainerLifecycle:
         hook = _make_hook()
         inputs = HookInputs(record_json={"srn": "test"})
 
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
 
-        result = await runner.run(hook, inputs, workspace)
+        result = await runner.run(hook, inputs, output_dir)
 
         assert result.status == HookStatus.FAILED
         assert "exit" in (result.error_message or "").lower()
@@ -307,10 +218,10 @@ class TestContainerLifecycle:
         hook = _make_hook()
         inputs = HookInputs(record_json={"srn": "test"})
 
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
 
-        result = await runner.run(hook, inputs, workspace)
+        result = await runner.run(hook, inputs, output_dir)
 
         assert result.status == HookStatus.FAILED
         assert "oom" in (result.error_message or "").lower()
@@ -334,10 +245,10 @@ class TestContainerLifecycle:
         hook = _make_hook(timeout=1)  # 1 second timeout
         inputs = HookInputs(record_json={"srn": "test"})
 
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
 
-        result = await runner.run(hook, inputs, workspace)
+        result = await runner.run(hook, inputs, output_dir)
 
         assert result.status == HookStatus.FAILED
         assert "timed out" in (result.error_message or "").lower()
@@ -354,46 +265,18 @@ class TestContainerLifecycle:
         hook = _make_hook()
         inputs = HookInputs(record_json={"srn": "test"})
 
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
 
-        # Pre-create the output directory and rejection progress
-        out_dir = workspace / "out"
-        out_dir.mkdir(parents=True)
-        (out_dir / "progress.jsonl").write_text(
+        # Pre-create rejection progress in the output_dir
+        (output_dir / "progress.jsonl").write_text(
             '{"step":"Validate","status":"rejected","message":"Missing atoms"}\n'
         )
 
-        result = await runner.run(hook, inputs, workspace)
+        result = await runner.run(hook, inputs, output_dir)
 
         assert result.status == HookStatus.REJECTED
         assert result.rejection_reason == "Missing atoms"
-
-    @pytest.mark.asyncio
-    async def test_features_collected_on_success(self, tmp_path: Path):
-        docker = AsyncMock()
-        container = AsyncMock()
-        docker.containers.create.return_value = container
-        container.wait.return_value = {"StatusCode": 0}
-        container.show.return_value = {"State": {"OOMKilled": False}}
-
-        runner = OciHookRunner(docker=docker)
-        hook = _make_hook()
-        inputs = HookInputs(record_json={"srn": "test"})
-
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
-
-        # Pre-create features output
-        out_dir = workspace / "out"
-        out_dir.mkdir(parents=True)
-        (out_dir / "features.json").write_text(json.dumps([{"score": 0.95}, {"score": 0.82}]))
-
-        result = await runner.run(hook, inputs, workspace)
-
-        assert result.status == HookStatus.PASSED
-        assert len(result.features) == 2
-        assert result.features[0]["score"] == 0.95
 
 
 class TestContainerConfig:
@@ -410,10 +293,10 @@ class TestContainerConfig:
         hook = _make_hook(memory="4g", cpu="4.0")
         inputs = HookInputs(record_json={"srn": "test"})
 
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
 
-        await runner.run(hook, inputs, workspace)
+        await runner.run(hook, inputs, output_dir)
 
         # Inspect the config passed to containers.create
         call_args = docker.containers.create.call_args
@@ -441,16 +324,71 @@ class TestContainerConfig:
         hook = _make_hook()
         inputs = HookInputs(record_json={"srn": "test"})
 
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
 
-        await runner.run(hook, inputs, workspace)
+        await runner.run(hook, inputs, output_dir)
 
         call_args = docker.containers.create.call_args
         config = call_args[0][0] if call_args[0] else call_args[1].get("config", {})
 
         assert "OSA_IN=/osa/in" in config["Env"]
         assert "OSA_OUT=/osa/out" in config["Env"]
+        assert "OSA_HOOK_NAME=pocket_detect" in config["Env"]
+
+    @pytest.mark.asyncio
+    async def test_nested_bind_mounts(self, tmp_path: Path):
+        """Runner uses nested bind-mounts: staging at /osa/in, files at /osa/in/files."""
+        docker = AsyncMock()
+        container = AsyncMock()
+        docker.containers.create.return_value = container
+        container.wait.return_value = {"StatusCode": 0}
+        container.show.return_value = {"State": {"OOMKilled": False}}
+
+        runner = OciHookRunner(docker=docker)
+        hook = _make_hook()
+        files_dir = tmp_path / "files"
+        files_dir.mkdir()
+        inputs = HookInputs(record_json={"srn": "test"}, files_dir=files_dir)
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        await runner.run(hook, inputs, output_dir)
+
+        call_args = docker.containers.create.call_args
+        config = call_args[0][0] if call_args[0] else call_args[1].get("config", {})
+
+        binds = config["HostConfig"]["Binds"]
+        # Should have 3 binds: staging:ro, output:rw, files:ro
+        assert len(binds) == 3
+        assert any(b.endswith(":/osa/in:ro") for b in binds)
+        assert any(b.endswith(":/osa/out:rw") for b in binds)
+        assert any(b.endswith(":/osa/in/files:ro") for b in binds)
+
+    @pytest.mark.asyncio
+    async def test_no_files_bind_when_no_files_dir(self, tmp_path: Path):
+        """When files_dir is None, only staging and output mounts are created."""
+        docker = AsyncMock()
+        container = AsyncMock()
+        docker.containers.create.return_value = container
+        container.wait.return_value = {"StatusCode": 0}
+        container.show.return_value = {"State": {"OOMKilled": False}}
+
+        runner = OciHookRunner(docker=docker)
+        hook = _make_hook()
+        inputs = HookInputs(record_json={"srn": "test"}, files_dir=None)
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        await runner.run(hook, inputs, output_dir)
+
+        call_args = docker.containers.create.call_args
+        config = call_args[0][0] if call_args[0] else call_args[1].get("config", {})
+
+        binds = config["HostConfig"]["Binds"]
+        assert len(binds) == 2  # staging + output only
 
     @pytest.mark.asyncio
     async def test_container_deleted_on_failure(self, tmp_path: Path):
@@ -466,10 +404,10 @@ class TestContainerConfig:
         hook = _make_hook()
         inputs = HookInputs(record_json={"srn": "test"})
 
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
 
-        result = await runner.run(hook, inputs, workspace)
+        result = await runner.run(hook, inputs, output_dir)
 
         assert result.status == HookStatus.FAILED
         container.delete.assert_called_once_with(force=True)

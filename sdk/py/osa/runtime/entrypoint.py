@@ -20,6 +20,15 @@ from osa.types.record import Record
 from osa.types.schema import MetadataSchema
 
 
+def _discover_conventions() -> None:
+    """Auto-discover convention packages via entry points."""
+    import importlib
+    import importlib.metadata
+
+    for ep in importlib.metadata.entry_points(group="osa.conventions"):
+        importlib.import_module(ep.value)
+
+
 def _get_schema_type(fn: Callable[..., Any]) -> type[MetadataSchema]:
     """Look up the schema type for a hook function from the registry."""
     for info in _hooks:
@@ -43,6 +52,8 @@ def run_hook_entrypoint(
 
     Returns 0 on successful execution, non-zero on unhandled errors.
     """
+    _discover_conventions()
+
     if input_dir is None:
         input_dir = Path(os.environ.get("OSA_IN", "/osa/in"))
     if output_dir is None:
@@ -72,14 +83,23 @@ def run_hook_entrypoint(
 
         file_collection = FileCollection(Path(tempfile.mkdtemp()))
 
+    # Detect envelope vs flat format
+    if "metadata" in meta_dict and "srn" in meta_dict:
+        srn = meta_dict["srn"]
+        metadata_fields = meta_dict["metadata"]
+    else:
+        srn = ""
+        metadata_fields = meta_dict
+
     # Build record
     schema_type = _get_schema_type(hook_fn)
-    metadata = schema_type(**meta_dict)
+    metadata = schema_type(**metadata_fields)
     record: Record = Record(
         id=str(uuid.uuid4()),
         created_at=datetime.now(),
         metadata=metadata,
         files=file_collection,
+        srn=srn,
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -106,3 +126,29 @@ def run_hook_entrypoint(
 
     (output_dir / "features.json").write_text(json.dumps(features, indent=2))
     return 0
+
+
+def _resolve_hook_fn() -> Callable[..., Any]:
+    """Resolve the hook function from OSA_HOOK_NAME or single-hook fallback."""
+    _discover_conventions()
+
+    hook_name = os.environ.get("OSA_HOOK_NAME")
+    if hook_name:
+        matches = [h for h in _hooks if h.name == hook_name]
+        if not matches:
+            print(f"Error: hook '{hook_name}' not found in registry", file=sys.stderr)
+            sys.exit(1)
+        return matches[0].fn
+    elif len(_hooks) == 1:
+        return _hooks[0].fn
+    else:
+        print(
+            f"Error: OSA_HOOK_NAME not set and {len(_hooks)} hooks registered",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def main() -> None:
+    """Console script entry point for osa-run-hook."""
+    sys.exit(run_hook_entrypoint(hook_fn=_resolve_hook_fn()))

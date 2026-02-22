@@ -2,6 +2,10 @@
 # Usage: docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up
 
 services:
+  db:
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
   server:
     build:
       context: ../server

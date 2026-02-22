@@ -105,6 +105,33 @@ class TestRunHook:
         )
         assert len(result) == 1
 
+    def test_passes_srn_to_record(self) -> None:
+        from osa.authoring.hook import hook
+        from osa.testing.harness import run_hook
+
+        @hook
+        def check(record: Record[SampleSchema]) -> QualityResult:
+            assert record.srn == "urn:osa:localhost:dep:abc123"
+            return QualityResult(atom_count=50, completeness=1.0)
+
+        result = run_hook(
+            check,
+            meta={"organism": "Human", "title": "Test"},
+            srn="urn:osa:localhost:dep:abc123",
+        )
+        assert result.completeness == 1.0
+
+    def test_srn_defaults_to_empty(self) -> None:
+        from osa.authoring.hook import hook
+        from osa.testing.harness import run_hook
+
+        @hook
+        def check(record: Record[SampleSchema]) -> QualityResult:
+            assert record.srn == ""
+            return QualityResult(atom_count=50, completeness=1.0)
+
+        run_hook(check, meta={"organism": "Human", "title": "Test"})
+
     def test_works_without_files(self) -> None:
         from osa.authoring.hook import hook
         from osa.testing.harness import run_hook

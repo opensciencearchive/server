@@ -1,68 +1,55 @@
-"""TriggerInitialSourceRun - triggers source pull on server startup if configured."""
+"""TriggerInitialSourceRun - triggers source pull on server startup for conventions with sources."""
 
 import logging
 from uuid import uuid4
 
 from osa.application.event import ServerStarted
-from osa.config import Config
+from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.outbox import Outbox
 from osa.domain.source.event.source_requested import SourceRequested
 from osa.domain.source.event.source_run_completed import SourceRunCompleted
-from osa.domain.source.model.registry import SourceRegistry
 
 logger = logging.getLogger(__name__)
 
 
 class TriggerInitialSourceRun(EventHandler[ServerStarted]):
-    """Emits SourceRequested on server startup for sources with initial_run enabled."""
+    """Emits SourceRequested on server startup for conventions that have initial_run configured."""
 
-    config: Config
-    sources: SourceRegistry
+    convention_service: ConventionService
     outbox: Outbox
 
     async def handle(self, event: ServerStarted) -> None:
-        """Check each source config and emit SourceRequested if initial_run is enabled."""
+        """Check conventions for source with initial_run and emit SourceRequested for each."""
+        conventions = await self.convention_service.list_conventions_with_source()
         logger.info(
-            f"TriggerInitialSourceRun: checking {len(self.config.sources)} configured sources"
+            "TriggerInitialSourceRun: found %d conventions with sources",
+            len(conventions),
         )
 
-        for source_config in self.config.sources:
-            if source_config.initial_run is None:
-                continue
-            if not source_config.initial_run.enabled:
+        for conv in conventions:
+            if conv.source is None:
                 continue
 
-            source_name = source_config.name
-
-            # Verify source exists in registry
-            if source_name not in self.sources:
-                logger.error(
-                    f"Initial source run: source '{source_name}' not found in registry. "
-                    f"Available: {self.sources.names()}"
-                )
+            if conv.source.initial_run is None:
                 continue
 
-            # Check if initial run already completed for this source
+            # Check if initial run already completed for this convention
             last_run = await self.outbox.find_latest(SourceRunCompleted)
-            if last_run and last_run.source_name == source_name:
+            if last_run and last_run.convention_srn == conv.srn:
                 logger.debug(
-                    f"Initial source run: skipping '{source_name}' - "
-                    f"already completed at {last_run.completed_at}"
+                    "Initial source run: skipping %s - already completed at %s",
+                    conv.srn,
+                    last_run.completed_at,
                 )
                 continue
 
-            initial_run = source_config.initial_run
-            limit = initial_run.limit
-            since = initial_run.since
-
-            logger.info(f"Initial source run: {source_name} (since={since}, limit={limit})")
+            logger.info("Initial source run: convention=%s", conv.srn)
 
             await self.outbox.append(
                 SourceRequested(
                     id=EventId(uuid4()),
-                    source_name=source_name,
-                    since=since,
-                    limit=limit,
+                    convention_srn=conv.srn,
+                    limit=conv.source.initial_run.limit,
                 )
             )

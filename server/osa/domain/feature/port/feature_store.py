@@ -12,14 +12,13 @@ class FeatureStore(Port, Protocol):
     """Manages feature tables for hook-derived data."""
 
     @abstractmethod
-    async def create_tables(self, convention_id: str, hooks: list[HookDefinition]) -> None:
-        """Create feature tables for each hook in a convention."""
+    async def create_table(self, hook_name: str, hook: HookDefinition) -> None:
+        """Create a feature table for a hook. Fails on name collision."""
         ...
 
     @abstractmethod
     async def insert_features(
         self,
-        convention_id: str,
         hook_name: str,
         record_srn: str,
         rows: list[dict[str, Any]],

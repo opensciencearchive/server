@@ -76,6 +76,40 @@ migrate-down:
 cli *ARGS:
     uv run osa {{ARGS}}
 
+# === Integration Tests ===
+# Configurable PG credentials (override via env or .env)
+PG_USER := env("PG_USER", "postgres")
+PG_PASS := env("PG_PASS", "osa")
+PG_HOST := env("PG_HOST", "localhost")
+PG_PORT := env("PG_PORT", "5432")
+TEST_DB := "osa_test"
+TEST_DB_URL := "postgresql+asyncpg://" + PG_USER + ":" + PG_PASS + "@" + PG_HOST + ":" + PG_PORT + "/" + TEST_DB
+
+# Create test database (idempotent)
+test-db-create:
+    PGPASSWORD={{PG_PASS}} psql -h {{PG_HOST}} -p {{PG_PORT}} -U {{PG_USER}} \
+        -tc "SELECT 1 FROM pg_database WHERE datname='{{TEST_DB}}'" \
+        | grep -q 1 || \
+        PGPASSWORD={{PG_PASS}} psql -h {{PG_HOST}} -p {{PG_PORT}} -U {{PG_USER}} \
+        -c "CREATE DATABASE {{TEST_DB}}"
+
+# Drop test database
+test-db-drop:
+    PGPASSWORD={{PG_PASS}} psql -h {{PG_HOST}} -p {{PG_PORT}} -U {{PG_USER}} \
+        -c "DROP DATABASE IF EXISTS {{TEST_DB}} WITH (FORCE)"
+
+# Run integration tests: wipe → create → migrate → test → wipe
+test-integration:
+    @just test-db-drop
+    @just test-db-create
+    OSA_DATABASE__URL="{{TEST_DB_URL}}" \
+    OSA_AUTH__JWT__SECRET="test-secret-for-integration-tests-minimum-32-chars" \
+        uv run alembic upgrade head
+    OSA_DATABASE__URL="{{TEST_DB_URL}}" \
+    OSA_AUTH__JWT__SECRET="test-secret-for-integration-tests-minimum-32-chars" \
+        uv run pytest tests/integration/persistence -v --tb=short -x; \
+    just test-db-drop
+
 # === Dependencies ===
 
 # Install/sync dependencies

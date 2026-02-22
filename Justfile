@@ -91,17 +91,17 @@ seed:
 
 # === Database ===
 
-# Start only the database
+# Start only the database (dev mode — exposes port to host)
 db-up:
-    docker compose -f deploy/docker-compose.yml up -d db
+    docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d db
 
 # Stop the database
 db-down:
-    docker compose -f deploy/docker-compose.yml stop db
+    docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml stop db
 
 # Connect to PostgreSQL
 db-connect:
-    docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d osa
+    docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml exec db psql -U postgres -d osa
 
 # === Maintenance ===
 

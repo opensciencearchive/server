@@ -39,12 +39,10 @@ def test_hook_result_passed():
     result = HookResult(
         hook_name="detect_pockets",
         status=HookStatus.PASSED,
-        features=[{"pocket_id": "P1", "score": 0.85}],
         duration_seconds=12.5,
     )
     assert result.hook_name == "detect_pockets"
     assert result.status == HookStatus.PASSED
-    assert len(result.features) == 1
     assert result.rejection_reason is None
     assert result.error_message is None
     assert result.duration_seconds == 12.5
@@ -56,13 +54,11 @@ def test_hook_result_rejected():
     result = HookResult(
         hook_name="check_structure",
         status=HookStatus.REJECTED,
-        features=[],
         rejection_reason="Missing coordinates",
         duration_seconds=2.1,
     )
     assert result.status == HookStatus.REJECTED
     assert result.rejection_reason == "Missing coordinates"
-    assert result.features == []
 
 
 def test_hook_result_failed():
@@ -71,7 +67,6 @@ def test_hook_result_failed():
     result = HookResult(
         hook_name="detect_pockets",
         status=HookStatus.FAILED,
-        features=[],
         error_message="OOM killed",
         duration_seconds=300.0,
     )
@@ -89,7 +84,6 @@ def test_hook_result_with_progress():
     result = HookResult(
         hook_name="detect_pockets",
         status=HookStatus.PASSED,
-        features=[{"pocket_id": "P1", "score": 0.9}],
         progress=[
             ProgressEntry(step="Loading", status="completed", message="Done"),
             ProgressEntry(step="Detecting", status="completed", message="Found 1"),
@@ -106,7 +100,6 @@ def test_hook_result_default_progress_empty():
     result = HookResult(
         hook_name="x",
         status=HookStatus.PASSED,
-        features=[],
         duration_seconds=0.1,
     )
     assert result.progress == []
@@ -122,7 +115,6 @@ def test_hook_result_serialization_roundtrip():
     result = HookResult(
         hook_name="detect_pockets",
         status=HookStatus.PASSED,
-        features=[{"a": 1}, {"a": 2}],
         progress=[ProgressEntry(step="step1", status="completed")],
         duration_seconds=7.3,
     )

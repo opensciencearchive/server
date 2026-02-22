@@ -13,6 +13,8 @@ dependencies = [
 
 [project.scripts]
 osa = "osa.cli.main:app"
+osa-run-hook = "osa.runtime.entrypoint:main"
+osa-run-source = "osa.runtime.source_entrypoint:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -15,7 +15,7 @@ class Record(Generic[T]):
     Provides typed access to metadata, associated files, and record identity.
     """
 
-    __slots__ = ("_id", "_created_at", "_metadata", "_files")
+    __slots__ = ("_id", "_srn", "_created_at", "_metadata", "_files")
 
     def __init__(
         self,
@@ -24,8 +24,10 @@ class Record(Generic[T]):
         created_at: datetime,
         metadata: T,
         files: FileCollection,
+        srn: str = "",
     ) -> None:
         self._id = id
+        self._srn = srn
         self._created_at = created_at
         self._metadata = metadata
         self._files = files
@@ -34,6 +36,11 @@ class Record(Generic[T]):
     def id(self) -> str:
         """Unique record identifier."""
         return self._id
+
+    @property
+    def srn(self) -> str:
+        """Structured Resource Name (deposition SRN during validation)."""
+        return self._srn
 
     @property
     def created_at(self) -> datetime:

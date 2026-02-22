@@ -1,7 +1,6 @@
 """Validation domain models for hook execution results."""
 
 from enum import StrEnum
-from typing import Any
 
 from pydantic import Field
 
@@ -27,7 +26,6 @@ class HookResult(ValueObject):
 
     hook_name: str
     status: HookStatus
-    features: list[dict[str, Any]]
     rejection_reason: str | None = None
     error_message: str | None = None
     progress: list[ProgressEntry] = Field(default_factory=list)

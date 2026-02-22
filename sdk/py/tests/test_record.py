@@ -70,6 +70,31 @@ class TestRecord:
         assert isinstance(rec.files, FileCollection)
         assert len(rec.files) >= 2
 
+    def test_srn_defaults_to_empty(self) -> None:
+        meta = ProteinStructure(
+            organism="H. sapiens", method="xray", uniprot_id="P12345"
+        )
+        rec = Record(
+            id="rec-006",
+            created_at=datetime(2025, 1, 1),
+            metadata=meta,
+            files=FileCollection(FIXTURES_DIR),
+        )
+        assert rec.srn == ""
+
+    def test_srn_returns_provided_value(self) -> None:
+        meta = ProteinStructure(
+            organism="H. sapiens", method="xray", uniprot_id="P12345"
+        )
+        rec = Record(
+            id="rec-007",
+            created_at=datetime(2025, 1, 1),
+            metadata=meta,
+            files=FileCollection(FIXTURES_DIR),
+            srn="urn:osa:localhost:dep:abc123",
+        )
+        assert rec.srn == "urn:osa:localhost:dep:abc123"
+
     def test_empty_file_collection(self, tmp_path: Path) -> None:
         meta = ProteinStructure(
             organism="H. sapiens", method="xray", uniprot_id="P12345"

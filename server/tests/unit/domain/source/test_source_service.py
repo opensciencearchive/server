@@ -1,199 +1,272 @@
-"""Unit tests for SourceService."""
+"""Unit tests for SourceService with OCI container model."""
 
-from collections.abc import AsyncIterator
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from osa.config import Config
-from osa.domain.shared.model.srn import Domain
+from osa.domain.deposition.model.aggregate import Deposition
+from osa.domain.deposition.model.convention import Convention
+from osa.domain.deposition.model.value import FileRequirements
+from osa.domain.shared.model.source import SourceDefinition
+from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, SchemaSRN
 from osa.domain.shared.outbox import Outbox
-from osa.domain.source.model.registry import SourceRegistry
+from osa.domain.source.port.source_runner import SourceOutput
 from osa.domain.source.service.source import SourceService
-from osa.sdk.source.record import UpstreamRecord
-from osa.sdk.source.source import PullResult
 
 
-class FakeSource:
-    """Fake source for testing."""
+def _make_conv_srn() -> ConventionSRN:
+    return ConventionSRN.parse("urn:osa:localhost:conv:test-conv-12345678@1.0.0")
 
-    name = "fake-source"
 
-    def __init__(self, records: list[UpstreamRecord]):
-        self._records = records
+def _make_dep_srn() -> DepositionSRN:
+    return DepositionSRN.parse("urn:osa:localhost:dep:test-dep-12345678")
 
-    async def pull(
-        self,
-        since: datetime | None = None,
-        limit: int | None = None,
-        offset: int = 0,
-        session: dict[str, Any] | None = None,
-    ) -> PullResult:
-        """Return records iterator and session (None for fake)."""
-        records_slice = self._records[offset : offset + limit if limit else len(self._records)]
 
-        async def generate() -> AsyncIterator[UpstreamRecord]:
-            for record in records_slice:
-                yield record
+def _make_source_def() -> SourceDefinition:
+    return SourceDefinition(
+        image="osa-sources/test:latest",
+        digest="sha256:abc123",
+        config={"batch_size": 100},
+    )
 
-        return generate(), session
+
+def _make_convention(source: SourceDefinition | None = None) -> Convention:
+    return Convention(
+        srn=_make_conv_srn(),
+        title="Test Convention",
+        schema_srn=SchemaSRN.parse("urn:osa:localhost:schema:test@1.0.0"),
+        file_requirements=FileRequirements(
+            accepted_types=[".cif"], min_count=0, max_count=5, max_file_size=500_000_000
+        ),
+        hooks=[],
+        source=source,
+        created_at=datetime.now(UTC),
+    )
 
 
 @pytest.fixture
 def mock_outbox() -> Outbox:
-    """Create a mock Outbox."""
     outbox = MagicMock(spec=Outbox)
     outbox.append = AsyncMock()
     return outbox
 
 
 @pytest.fixture
-def mock_config() -> Config:
-    """Create a mock Config with server domain."""
-    config = MagicMock(spec=Config)
-    config.server = MagicMock()
-    config.server.domain = "test.example.com"
-    return config
+def mock_deposition_service() -> AsyncMock:
+    dep_service = AsyncMock()
+    dep = MagicMock(spec=Deposition)
+    dep.srn = _make_dep_srn()
+    dep_service.create.return_value = dep
+    dep_service.update_metadata.return_value = dep
+    dep_service.submit.return_value = dep
+    return dep_service
 
 
 @pytest.fixture
-def sample_records() -> list[UpstreamRecord]:
-    """Create sample upstream records for testing."""
-    now = datetime.now(timezone.utc)
-    return [
-        UpstreamRecord(
-            source_id="GSE001",
-            source_type="geo",
-            metadata={"title": "Test Record 1", "organism": "human"},
-            fetched_at=now,
-        ),
-        UpstreamRecord(
-            source_id="GSE002",
-            source_type="geo",
-            metadata={"title": "Test Record 2", "organism": "mouse"},
-            fetched_at=now,
-        ),
-    ]
+def mock_convention_repo() -> AsyncMock:
+    repo = AsyncMock()
+    repo.get.return_value = _make_convention(source=_make_source_def())
+    return repo
+
+
+@pytest.fixture
+def mock_file_storage() -> MagicMock:
+    storage = MagicMock()
+    storage.get_source_staging_dir.return_value = Path("/tmp/staging")
+    storage.get_source_output_dir.return_value = Path("/tmp/output")
+    storage.move_source_files_to_deposition.return_value = None
+    return storage
+
+
+@pytest.fixture
+def mock_source_runner() -> AsyncMock:
+    runner = AsyncMock()
+    runner.run.return_value = SourceOutput(
+        records=[
+            {"source_id": "4HHB", "metadata": {"pdb_id": "4HHB", "title": "Hemoglobin"}},
+            {"source_id": "1CRN", "metadata": {"pdb_id": "1CRN", "title": "Crambin"}},
+        ],
+        session=None,
+        files_dir=Path("/tmp/staging"),
+    )
+    return runner
 
 
 class TestSourceService:
-    """Tests for SourceService."""
-
     @pytest.mark.asyncio
-    async def test_run_source_emits_deposition_events(
+    async def test_run_source_creates_depositions(
         self,
-        mock_outbox: Outbox,
-        mock_config: Config,
-        sample_records: list[UpstreamRecord],
+        mock_outbox,
+        mock_deposition_service,
+        mock_convention_repo,
+        mock_file_storage,
+        mock_source_runner,
     ):
-        """Service should emit DepositionSubmittedEvent for each record."""
-        # Arrange
-        fake_source = FakeSource(sample_records)
-        registry = SourceRegistry({"fake": fake_source})
-
         service = SourceService(
-            sources=registry,
+            source_runner=mock_source_runner,
+            deposition_service=mock_deposition_service,
+            file_storage=mock_file_storage,
+            convention_repo=mock_convention_repo,
             outbox=mock_outbox,
-            node_domain=Domain(mock_config.server.domain),
         )
-
-        # Act
-        result = await service.run_source(
-            source_name="fake",
-            since=None,
-            limit=None,
-        )
-
-        # Assert
+        result = await service.run_source(convention_srn=_make_conv_srn())
         assert result.record_count == 2
-        assert result.source_name == "fake"
-        # Two DepositionSubmittedEvent + one SourceRunCompleted
-        assert mock_outbox.append.call_count == 3
+        assert mock_deposition_service.create.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_run_source_with_limit(
+    async def test_run_source_moves_files(
         self,
-        mock_outbox: Outbox,
-        mock_config: Config,
-        sample_records: list[UpstreamRecord],
+        mock_outbox,
+        mock_deposition_service,
+        mock_convention_repo,
+        mock_file_storage,
+        mock_source_runner,
     ):
-        """Service should respect limit parameter."""
-        # Arrange
-        fake_source = FakeSource(sample_records)
-        registry = SourceRegistry({"fake": fake_source})
-
         service = SourceService(
-            sources=registry,
+            source_runner=mock_source_runner,
+            deposition_service=mock_deposition_service,
+            file_storage=mock_file_storage,
+            convention_repo=mock_convention_repo,
             outbox=mock_outbox,
-            node_domain=Domain(mock_config.server.domain),
         )
-
-        # Act
-        result = await service.run_source(
-            source_name="fake",
-            since=None,
-            limit=1,
-        )
-
-        # Assert
-        assert result.record_count == 1
+        await service.run_source(convention_srn=_make_conv_srn())
+        assert mock_file_storage.move_source_files_to_deposition.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_run_source_unknown_source_raises(
+    async def test_run_source_submits_each(
         self,
-        mock_outbox: Outbox,
-        mock_config: Config,
+        mock_outbox,
+        mock_deposition_service,
+        mock_convention_repo,
+        mock_file_storage,
+        mock_source_runner,
     ):
-        """Service should raise error for unknown source."""
-        # Arrange
-        registry = SourceRegistry({})
+        service = SourceService(
+            source_runner=mock_source_runner,
+            deposition_service=mock_deposition_service,
+            file_storage=mock_file_storage,
+            convention_repo=mock_convention_repo,
+            outbox=mock_outbox,
+        )
+        await service.run_source(convention_srn=_make_conv_srn())
+        assert mock_deposition_service.submit.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_run_source_uses_system_user(
+        self,
+        mock_outbox,
+        mock_deposition_service,
+        mock_convention_repo,
+        mock_file_storage,
+        mock_source_runner,
+    ):
+        from osa.domain.auth.model.value import SYSTEM_USER_ID
 
         service = SourceService(
-            sources=registry,
+            source_runner=mock_source_runner,
+            deposition_service=mock_deposition_service,
+            file_storage=mock_file_storage,
+            convention_repo=mock_convention_repo,
             outbox=mock_outbox,
-            node_domain=Domain(mock_config.server.domain),
         )
-
-        # Act & Assert
-        with pytest.raises(ValueError, match="Unknown source"):
-            await service.run_source(
-                source_name="nonexistent",
-                since=None,
-                limit=None,
-            )
+        await service.run_source(convention_srn=_make_conv_srn())
+        call_kwargs = mock_deposition_service.create.call_args_list[0]
+        assert call_kwargs[1]["owner_id"] == SYSTEM_USER_ID
 
     @pytest.mark.asyncio
     async def test_run_source_emits_completion_event(
         self,
-        mock_outbox: Outbox,
-        mock_config: Config,
-        sample_records: list[UpstreamRecord],
+        mock_outbox,
+        mock_deposition_service,
+        mock_convention_repo,
+        mock_file_storage,
+        mock_source_runner,
     ):
-        """Service should emit SourceRunCompleted event after pulling."""
-        # Arrange
-        fake_source = FakeSource(sample_records)
-        registry = SourceRegistry({"fake": fake_source})
-
-        service = SourceService(
-            sources=registry,
-            outbox=mock_outbox,
-            node_domain=Domain(mock_config.server.domain),
-        )
-
-        # Act
-        await service.run_source(
-            source_name="fake",
-            since=None,
-            limit=None,
-        )
-
-        # Assert - last call should be the completion event
         from osa.domain.source.event.source_run_completed import SourceRunCompleted
 
+        service = SourceService(
+            source_runner=mock_source_runner,
+            deposition_service=mock_deposition_service,
+            file_storage=mock_file_storage,
+            convention_repo=mock_convention_repo,
+            outbox=mock_outbox,
+        )
+        await service.run_source(convention_srn=_make_conv_srn())
         last_call = mock_outbox.append.call_args_list[-1]
         event = last_call[0][0]
         assert isinstance(event, SourceRunCompleted)
         assert event.record_count == 2
-        assert event.source_name == "fake"
+        assert event.convention_srn == _make_conv_srn()
+        assert event.is_final_chunk is True
+
+    @pytest.mark.asyncio
+    async def test_run_source_emits_continuation_when_session(
+        self,
+        mock_outbox,
+        mock_deposition_service,
+        mock_convention_repo,
+        mock_file_storage,
+        mock_source_runner,
+    ):
+        from osa.domain.source.event.source_requested import SourceRequested
+
+        mock_source_runner.run.return_value = SourceOutput(
+            records=[{"source_id": "4HHB", "metadata": {"pdb_id": "4HHB"}}],
+            session={"cursor": "abc"},
+            files_dir=Path("/tmp/staging"),
+        )
+        service = SourceService(
+            source_runner=mock_source_runner,
+            deposition_service=mock_deposition_service,
+            file_storage=mock_file_storage,
+            convention_repo=mock_convention_repo,
+            outbox=mock_outbox,
+        )
+        await service.run_source(convention_srn=_make_conv_srn())
+        # Should have emitted continuation + completion = 2 events
+        assert mock_outbox.append.call_count == 2
+        first_event = mock_outbox.append.call_args_list[0][0][0]
+        assert isinstance(first_event, SourceRequested)
+        assert first_event.session == {"cursor": "abc"}
+
+    @pytest.mark.asyncio
+    async def test_run_source_raises_for_missing_convention(
+        self,
+        mock_outbox,
+        mock_deposition_service,
+        mock_file_storage,
+        mock_source_runner,
+    ):
+        convention_repo = AsyncMock()
+        convention_repo.get.return_value = None
+        service = SourceService(
+            source_runner=mock_source_runner,
+            deposition_service=mock_deposition_service,
+            file_storage=mock_file_storage,
+            convention_repo=convention_repo,
+            outbox=mock_outbox,
+        )
+        with pytest.raises(ValueError, match="Convention not found"):
+            await service.run_source(convention_srn=_make_conv_srn())
+
+    @pytest.mark.asyncio
+    async def test_run_source_raises_for_no_source_defined(
+        self,
+        mock_outbox,
+        mock_deposition_service,
+        mock_file_storage,
+        mock_source_runner,
+    ):
+        convention_repo = AsyncMock()
+        convention_repo.get.return_value = _make_convention(source=None)
+        service = SourceService(
+            source_runner=mock_source_runner,
+            deposition_service=mock_deposition_service,
+            file_storage=mock_file_storage,
+            convention_repo=convention_repo,
+            outbox=mock_outbox,
+        )
+        with pytest.raises(ValueError, match="no source defined"):
+            await service.run_source(convention_srn=_make_conv_srn())

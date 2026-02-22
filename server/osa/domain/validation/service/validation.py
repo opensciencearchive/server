@@ -1,14 +1,11 @@
 """Validation service — orchestrates hook execution for depositions."""
 
-import shutil
-import tempfile
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
-from osa.domain.feature.service.feature import FeatureService
+from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.model.hook import HookDefinition
-from osa.domain.shared.model.srn import Domain, LocalId, ValidationRunSRN
+from osa.domain.shared.model.srn import DepositionSRN, Domain, LocalId, ValidationRunSRN
 from osa.domain.shared.service import Service
 from osa.domain.validation.model import (
     RunStatus,
@@ -24,7 +21,7 @@ class ValidationService(Service):
 
     run_repo: ValidationRunRepository
     hook_runner: HookRunner
-    feature_service: FeatureService
+    file_storage: FileStoragePort
     node_domain: Domain
 
     async def create_run(
@@ -52,11 +49,15 @@ class ValidationService(Service):
     async def run_hooks(
         self,
         run: ValidationRun,
-        convention_id: str,
+        deposition_srn: DepositionSRN,
         inputs: HookInputs,
         hooks: list[HookDefinition],
     ) -> tuple[ValidationRun, list[HookResult]]:
-        """Execute hooks sequentially. Halt on reject/fail."""
+        """Execute hooks sequentially. Halt on reject/fail.
+
+        Hook outputs are written to durable cold storage under the deposition directory.
+        Feature insertion is deferred to record publication time.
+        """
         run.status = RunStatus.RUNNING
         run.started_at = datetime.now(timezone.utc)
         await self.run_repo.save(run)
@@ -65,31 +66,15 @@ class ValidationService(Service):
         overall_failed = False
 
         for hook_def in hooks:
-            workspace_dir = Path(tempfile.mkdtemp())
-            try:
-                result = await self.hook_runner.run(hook_def, inputs, workspace_dir)
-                hook_results.append(result)
+            output_dir = self.file_storage.get_hook_output_dir(
+                deposition_srn, hook_def.manifest.name
+            )
+            result = await self.hook_runner.run(hook_def, inputs, output_dir)
+            hook_results.append(result)
 
-                if result.status == HookStatus.REJECTED:
-                    overall_failed = True
-                    break
-                elif result.status == HookStatus.FAILED:
-                    overall_failed = True
-                    break
-
-                # Insert features on success
-                if result.features:
-                    record_srn = inputs.record_json.get("srn")
-                    if not record_srn:
-                        raise ValueError("record_json missing required 'srn' field")
-                    await self.feature_service.insert_features(
-                        convention_id=convention_id,
-                        hook_name=result.hook_name,
-                        record_srn=record_srn,
-                        rows=result.features,
-                    )
-            finally:
-                shutil.rmtree(workspace_dir, ignore_errors=True)
+            if result.status in (HookStatus.REJECTED, HookStatus.FAILED):
+                overall_failed = True
+                break
 
         run.results = hook_results
         run.status = RunStatus.FAILED if overall_failed else RunStatus.COMPLETED

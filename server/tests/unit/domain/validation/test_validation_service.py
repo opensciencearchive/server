@@ -1,6 +1,7 @@
 """Unit tests for ValidationService — hook execution orchestration."""
 
-from unittest.mock import AsyncMock
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -10,7 +11,7 @@ from osa.domain.shared.model.hook import (
     HookDefinition,
     HookManifest,
 )
-from osa.domain.shared.model.srn import Domain
+from osa.domain.shared.model.srn import DepositionSRN, Domain
 from osa.domain.validation.model import RunStatus
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs
@@ -37,12 +38,10 @@ def _make_hook_def(name: str = "pocket_detect") -> HookDefinition:
 def _make_hook_result(
     name: str = "pocket_detect",
     status: HookStatus = HookStatus.PASSED,
-    features: list | None = None,
 ) -> HookResult:
     return HookResult(
         hook_name=name,
         status=status,
-        features=features or [],
         duration_seconds=1.5,
     )
 
@@ -50,20 +49,27 @@ def _make_hook_result(
 def _make_service(
     run_repo: AsyncMock | None = None,
     hook_runner: AsyncMock | None = None,
-    feature_service: AsyncMock | None = None,
+    file_storage: AsyncMock | None = None,
 ) -> ValidationService:
+    fs = file_storage or MagicMock()
+    if not hasattr(fs, "get_hook_output_dir") or not callable(fs.get_hook_output_dir):
+        fs.get_hook_output_dir = MagicMock(return_value=Path("/tmp/hooks/test"))
     return ValidationService(
         run_repo=run_repo or AsyncMock(),
         hook_runner=hook_runner or AsyncMock(),
-        feature_service=feature_service or AsyncMock(),
+        file_storage=fs,
         node_domain=Domain("localhost"),
     )
 
 
 def _make_inputs() -> HookInputs:
     return HookInputs(
-        record_json={"srn": "urn:osa:localhost:rec:test123", "name": "test"},
+        record_json={"srn": "urn:osa:localhost:dep:test123", "metadata": {"name": "test"}},
     )
+
+
+def _make_dep_srn() -> DepositionSRN:
+    return DepositionSRN.parse("urn:osa:localhost:dep:test123")
 
 
 class TestValidationServiceCreateRun:
@@ -83,16 +89,15 @@ class TestValidationServiceRunHooks:
     async def test_all_hooks_pass(self):
         hook_runner = AsyncMock()
         hook_runner.run.return_value = _make_hook_result()
-        feature_service = AsyncMock()
         run_repo = AsyncMock()
 
-        service = _make_service(run_repo, hook_runner, feature_service)
+        service = _make_service(run_repo, hook_runner)
         run = await service.create_run(inputs=_make_inputs())
 
         hook = _make_hook_def()
         run, results = await service.run_hooks(
             run=run,
-            convention_id="test-conv",
+            deposition_srn=_make_dep_srn(),
             inputs=_make_inputs(),
             hooks=[hook],
         )
@@ -113,7 +118,7 @@ class TestValidationServiceRunHooks:
         hooks = [_make_hook_def("hook1"), _make_hook_def("hook2")]
         run, results = await service.run_hooks(
             run=run,
-            convention_id="test-conv",
+            deposition_srn=_make_dep_srn(),
             inputs=_make_inputs(),
             hooks=hooks,
         )
@@ -132,7 +137,7 @@ class TestValidationServiceRunHooks:
 
         run, results = await service.run_hooks(
             run=run,
-            convention_id="test-conv",
+            deposition_srn=_make_dep_srn(),
             inputs=_make_inputs(),
             hooks=[_make_hook_def()],
         )
@@ -140,55 +145,35 @@ class TestValidationServiceRunHooks:
         assert run.status == RunStatus.FAILED
 
     @pytest.mark.asyncio
-    async def test_features_inserted_on_success(self):
-        features = [{"score": 0.95}]
+    async def test_output_dir_from_file_storage(self):
+        """ValidationService gets output_dir from file_storage.get_hook_output_dir."""
         hook_runner = AsyncMock()
-        hook_runner.run.return_value = _make_hook_result(features=features)
-        feature_service = AsyncMock()
+        hook_runner.run.return_value = _make_hook_result()
+        file_storage = MagicMock()
+        file_storage.get_hook_output_dir.return_value = Path("/cold/hooks/pocket_detect")
 
-        service = _make_service(hook_runner=hook_runner, feature_service=feature_service)
+        service = _make_service(hook_runner=hook_runner, file_storage=file_storage)
         run = await service.create_run(inputs=_make_inputs())
 
-        run, _ = await service.run_hooks(
+        dep_srn = _make_dep_srn()
+        await service.run_hooks(
             run=run,
-            convention_id="test-conv",
-            inputs=HookInputs(
-                record_json={"srn": "urn:osa:localhost:rec:test123"},
-            ),
-            hooks=[_make_hook_def()],
-        )
-
-        feature_service.insert_features.assert_called_once_with(
-            convention_id="test-conv",
-            hook_name="pocket_detect",
-            record_srn="urn:osa:localhost:rec:test123",
-            rows=features,
-        )
-
-    @pytest.mark.asyncio
-    async def test_no_features_skips_insert(self):
-        hook_runner = AsyncMock()
-        hook_runner.run.return_value = _make_hook_result(features=[])
-        feature_service = AsyncMock()
-
-        service = _make_service(hook_runner=hook_runner, feature_service=feature_service)
-        run = await service.create_run(inputs=_make_inputs())
-
-        run, _ = await service.run_hooks(
-            run=run,
-            convention_id="test-conv",
+            deposition_srn=dep_srn,
             inputs=_make_inputs(),
             hooks=[_make_hook_def()],
         )
 
-        feature_service.insert_features.assert_not_called()
+        file_storage.get_hook_output_dir.assert_called_once_with(dep_srn, "pocket_detect")
+        # Runner receives the cold storage output_dir
+        call_args = hook_runner.run.call_args
+        assert call_args[0][2] == Path("/cold/hooks/pocket_detect")
 
     @pytest.mark.asyncio
     async def test_sequential_execution_order(self):
         """Hooks run in order; first pass before second starts."""
         call_order = []
 
-        async def run_hook(hook, inputs, workspace_dir):
+        async def run_hook(hook, inputs, output_dir):
             call_order.append(hook.manifest.name)
             return _make_hook_result(name=hook.manifest.name)
 
@@ -201,7 +186,7 @@ class TestValidationServiceRunHooks:
         hooks = [_make_hook_def("hook_a"), _make_hook_def("hook_b")]
         run, results = await service.run_hooks(
             run=run,
-            convention_id="test-conv",
+            deposition_srn=_make_dep_srn(),
             inputs=_make_inputs(),
             hooks=hooks,
         )

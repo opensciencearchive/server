@@ -21,6 +21,10 @@ class UserId(RootModel[UUID]):
         return hash(self.root)
 
 
+SYSTEM_USER_ID = UserId(UUID("00000000-0000-0000-0000-000000000000"))
+"""Well-known user ID for system-owned resources (e.g. source-ingested depositions)."""
+
+
 class IdentityId(RootModel[UUID]):
     """Unique identifier for an Identity."""
 

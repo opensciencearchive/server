@@ -28,7 +28,11 @@ class HookRunner(Port, Protocol):
         self,
         hook: HookDefinition,
         inputs: HookInputs,
-        workspace_dir: Path,
+        output_dir: Path,
     ) -> HookResult:
-        """Run a hook and return its result."""
+        """Run a hook and return its result.
+
+        The runner creates its own staging dir internally for record.json/config.json.
+        Caller provides output_dir (cold storage) where hook outputs are written durably.
+        """
         ...

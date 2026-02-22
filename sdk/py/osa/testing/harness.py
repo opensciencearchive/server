@@ -27,6 +27,7 @@ def _build_record(
     fn: Callable[..., Any],
     meta: dict[str, Any] | MetadataSchema,
     files: Path | None,
+    srn: str | None = None,
 ) -> Record[Any]:
     """Construct a Record[T] for testing from a decorated function."""
     schema_type = _get_schema_type(fn)
@@ -48,6 +49,7 @@ def _build_record(
         created_at=datetime.now(),
         metadata=metadata,
         files=file_collection,
+        srn=srn or "",
     )
 
 
@@ -56,11 +58,12 @@ def run_hook(
     *,
     meta: dict[str, Any] | MetadataSchema,
     files: Path | None = None,
+    srn: str | None = None,
 ) -> Any:
     """Run a hook function in-process for testing.
 
     Constructs a :class:`Record[T]` from the provided metadata and
     optional files directory, then executes the hook.
     """
-    record = _build_record(fn, meta, files)
+    record = _build_record(fn, meta, files, srn=srn)
     return fn(record)

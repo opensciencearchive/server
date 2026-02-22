@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from osa.domain.shared.event import EventId, Schedule
+from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.outbox import Outbox
 from osa.domain.source.event.source_requested import SourceRequested
 from osa.domain.source.event.source_run_completed import SourceRunCompleted
@@ -24,29 +25,33 @@ class SourceSchedule(Schedule):
     outbox: Outbox
 
     async def run(self, **params: Any) -> None:
-        """Emit a SourceRequested event for the given source.
+        """Emit a SourceRequested event for the given convention.
 
         Params:
-            source_name: Key into config.sources list (e.g., "geo-entrez")
+            convention: Convention SRN string
             limit: Optional limit on records to fetch
         """
-        source_name: str = params["source_name"]
+        convention_srn = ConventionSRN.parse(params["convention"])
         limit: int | None = params.get("limit")
 
-        # Look up last completed run for this source
+        # Look up last completed run for this convention
         last_run = await self.outbox.find_latest(SourceRunCompleted)
 
-        # Only use last_run if it's for the same source
         since = None
-        if last_run is not None and last_run.source_name == source_name:
+        if last_run is not None and last_run.convention_srn == convention_srn:
             since = last_run.completed_at
 
-        logger.info(f"Scheduled source run: {source_name} (since={since}, limit={limit})")
+        logger.info(
+            "Scheduled source run: convention=%s (since=%s, limit=%s)",
+            convention_srn,
+            since,
+            limit,
+        )
 
         await self.outbox.append(
             SourceRequested(
                 id=EventId(uuid4()),
-                source_name=source_name,
+                convention_srn=convention_srn,
                 since=since,
                 limit=limit,
             )

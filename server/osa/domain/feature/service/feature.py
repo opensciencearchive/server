@@ -12,16 +12,15 @@ class FeatureService(Service):
 
     feature_store: FeatureStore
 
-    async def create_tables(self, convention_id: str, hooks: list[HookDefinition]) -> None:
-        """Create feature tables for each hook in a convention."""
-        await self.feature_store.create_tables(convention_id, hooks)
+    async def create_table(self, hook: HookDefinition) -> None:
+        """Create a feature table for a hook."""
+        await self.feature_store.create_table(hook.manifest.name, hook)
 
     async def insert_features(
         self,
-        convention_id: str,
         hook_name: str,
         record_srn: str,
         rows: list[dict[str, Any]],
     ) -> int:
         """Insert feature rows into the feature table. Returns row count."""
-        return await self.feature_store.insert_features(convention_id, hook_name, record_srn, rows)
+        return await self.feature_store.insert_features(hook_name, record_srn, rows)

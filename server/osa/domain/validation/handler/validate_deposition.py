@@ -41,13 +41,16 @@ class ValidateDeposition(EventHandler[DepositionSubmittedEvent]):
             logger.error(f"Convention not found: {dep.convention_srn}")
             return
 
-        # Create validation run
-        run = await self.validation_service.create_run(
-            inputs=HookInputs(
-                record_json=dep.metadata,
-                files_dir=None,
-            ),
+        # Build record_json envelope: {srn, metadata}
+        record_json = {"srn": str(dep.srn), "metadata": dep.metadata}
+        files_dir = self.file_storage.get_files_dir(dep.srn)
+        inputs = HookInputs(
+            record_json=record_json,
+            files_dir=files_dir,
         )
+
+        # Create validation run
+        run = await self.validation_service.create_run(inputs=inputs)
 
         if not convention.hooks:
             logger.debug("No hooks configured, instant pass")
@@ -67,14 +70,9 @@ class ValidateDeposition(EventHandler[DepositionSubmittedEvent]):
             return
 
         # Run hooks via the validation service
-        inputs = HookInputs(
-            record_json=dep.metadata,
-            files_dir=None,
-        )
-        convention_id = str(convention.srn.id)
         run, hook_results = await self.validation_service.run_hooks(
             run=run,
-            convention_id=convention_id,
+            deposition_srn=dep.srn,
             inputs=inputs,
             hooks=convention.hooks,
         )

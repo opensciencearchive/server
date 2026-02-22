@@ -95,9 +95,46 @@ def app() -> None:
         reject_command(reason=reason)
 
     elif command == "deploy":
-        from osa.cli.deploy import generate_dockerfile
+        import importlib
+        import importlib.metadata
+        import logging
 
-        print(generate_dockerfile())
+        from osa.cli.deploy import deploy
+
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+        # Auto-discover convention packages via entry points
+        for ep in importlib.metadata.entry_points(group="osa.conventions"):
+            importlib.import_module(ep.value)
+
+        # Parse --server and --token flags
+        server_url: str | None = None
+        token: str | None = None
+        i = 1
+        while i < len(args):
+            if args[i] == "--server" and i + 1 < len(args):
+                server_url = args[i + 1]
+                i += 2
+            elif args[i] == "--token" and i + 1 < len(args):
+                token = args[i + 1]
+                i += 2
+            else:
+                i += 1
+
+        if not server_url:
+            server_url = os.environ.get("OSA_SERVER")
+        if not token:
+            token = os.environ.get("OSA_TOKEN")
+
+        if not server_url:
+            print(
+                "Usage: osa deploy --server <url> [--token <jwt>]",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        result = deploy(server=server_url, token=token)
+        print(json.dumps(result, indent=2, default=str))
 
     else:
         print(f"Unknown command: {command}", file=sys.stderr)

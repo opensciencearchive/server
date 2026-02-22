@@ -2,10 +2,12 @@
 
 import asyncio
 import json
+import os
 import re
+import stat
 import time
 from pathlib import Path
-from shutil import copytree
+from shutil import rmtree
 
 import aiodocker
 import logfire
@@ -15,92 +17,105 @@ from osa.domain.validation.model.hook_result import HookResult, HookStatus, Prog
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 
 
+def _force_remove(func, path, exc):
+    """rmtree onexc handler: fix permissions left by Docker containers, then retry."""
+    os.chmod(path, stat.S_IRWXU)
+    func(path)
+
+
 class OciHookRunner(HookRunner):
     """Executes hooks in OCI containers via aiodocker."""
 
-    def __init__(self, docker: aiodocker.Docker):
+    def __init__(
+        self,
+        docker: aiodocker.Docker,
+        host_data_dir: str | None = None,
+        container_data_dir: str = "/data",
+    ):
         self._docker = docker
+        self._host_data_dir = host_data_dir
+        self._container_data_dir = container_data_dir
 
     async def run(
         self,
         hook: HookDefinition,
         inputs: HookInputs,
-        workspace_dir: Path,
+        output_dir: Path,
     ) -> HookResult:
-        image_ref = f"{hook.image}@{hook.digest}"
         timeout = hook.limits.timeout_seconds
 
-        osa_in = workspace_dir / "in"
-        osa_out = workspace_dir / "out"
-        osa_in.mkdir(parents=True, exist_ok=True)
-        osa_out.mkdir(parents=True, exist_ok=True)
-
-        # Stage inputs
-        (osa_in / "record.json").write_text(json.dumps(inputs.record_json))
-
-        if inputs.files_dir and inputs.files_dir.exists():
-            copytree(inputs.files_dir, osa_in / "files")
-
-        if inputs.config or hook.config:
-            config = {**(hook.config or {}), **(inputs.config or {})}
-            (osa_in / "config.json").write_text(json.dumps(config))
-
-        start_time = time.monotonic()
-
+        # Create staging dir under output_dir so it shares the same mount
+        staging_dir = output_dir / "_staging"
+        staging_dir.mkdir(parents=True, exist_ok=True)
         try:
-            result = await asyncio.wait_for(
-                self._run_container(image_ref, osa_in, osa_out, hook),
-                timeout=timeout,
-            )
-            result_duration = time.monotonic() - start_time
-            return HookResult(
-                hook_name=hook.manifest.name,
-                status=result["status"],
-                features=result["features"],
-                rejection_reason=result.get("rejection_reason"),
-                error_message=result.get("error_message"),
-                progress=result.get("progress", []),
-                duration_seconds=result_duration,
-            )
-        except asyncio.TimeoutError:
-            duration = time.monotonic() - start_time
-            logfire.error("Hook timed out", hook=hook.manifest.name, timeout=timeout)
-            return HookResult(
-                hook_name=hook.manifest.name,
-                status=HookStatus.FAILED,
-                features=[],
-                error_message=f"Hook timed out after {timeout}s",
-                duration_seconds=duration,
-            )
+            (staging_dir / "record.json").write_text(json.dumps(inputs.record_json))
+            # Pre-create files mountpoint so nested bind works with ReadonlyRootfs
+            (staging_dir / "files").mkdir(exist_ok=True)
+
+            if inputs.config or hook.config:
+                config = {**(hook.config or {}), **(inputs.config or {})}
+                (staging_dir / "config.json").write_text(json.dumps(config))
+
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            image_ref = await self._resolve_image(hook.image, hook.digest)
+
+            start_time = time.monotonic()
+
+            try:
+                result = await asyncio.wait_for(
+                    self._run_container(image_ref, staging_dir, inputs.files_dir, output_dir, hook),
+                    timeout=timeout,
+                )
+                result_duration = time.monotonic() - start_time
+                return HookResult(
+                    hook_name=hook.manifest.name,
+                    status=result["status"],
+                    rejection_reason=result.get("rejection_reason"),
+                    error_message=result.get("error_message"),
+                    progress=result.get("progress", []),
+                    duration_seconds=result_duration,
+                )
+            except asyncio.TimeoutError:
+                duration = time.monotonic() - start_time
+                logfire.error("Hook timed out", hook=hook.manifest.name, timeout=timeout)
+                return HookResult(
+                    hook_name=hook.manifest.name,
+                    status=HookStatus.FAILED,
+                    error_message=f"Hook timed out after {timeout}s",
+                    duration_seconds=duration,
+                )
+        finally:
+            rmtree(staging_dir, onexc=_force_remove)
 
     async def _run_container(
         self,
         image_ref: str,
-        osa_in: Path,
-        osa_out: Path,
+        staging_dir: Path,
+        files_dir: Path | None,
+        output_dir: Path,
         hook: HookDefinition,
     ) -> dict:
         container = None
         try:
-            # Pull image if needed
-            try:
-                await self._docker.images.inspect(image_ref)
-            except aiodocker.DockerError as e:
-                if e.status == 404:
-                    logfire.info("Pulling hook image", image=image_ref)
-                    await self._docker.images.pull(image_ref)
-                else:
-                    raise
+            # Nested bind-mounts: staging at /osa/in:ro, files at /osa/in/files:ro
+            binds = [
+                f"{self._host_path(staging_dir)}:/osa/in:ro",
+                f"{self._host_path(output_dir)}:/osa/out:rw",
+            ]
+            if files_dir and files_dir.exists():
+                binds.append(f"{self._host_path(files_dir)}:/osa/in/files:ro")
 
             config = {
                 "Image": image_ref,
-                "Env": ["OSA_IN=/osa/in", "OSA_OUT=/osa/out"],
+                "Env": [
+                    "OSA_IN=/osa/in",
+                    "OSA_OUT=/osa/out",
+                    f"OSA_HOOK_NAME={hook.manifest.name}",
+                ],
                 "User": "65534:65534",
                 "HostConfig": {
-                    "Binds": [
-                        f"{osa_in}:/osa/in:ro",
-                        f"{osa_out}:/osa/out:rw",
-                    ],
+                    "Binds": binds,
                     "Memory": self._parse_memory(hook.limits.memory),
                     "MemorySwap": self._parse_memory(hook.limits.memory),
                     "NanoCpus": int(float(hook.limits.cpu) * 1e9),
@@ -126,19 +141,17 @@ class OciHookRunner(HookRunner):
             if oom_killed:
                 return {
                     "status": HookStatus.FAILED,
-                    "features": [],
                     "error_message": "Hook killed by OOM",
                 }
 
             # Parse progress file
-            progress = self._parse_progress(osa_out)
+            progress = self._parse_progress(output_dir)
 
             # Check for rejection in progress
             rejection = self._check_rejection(progress)
             if rejection:
                 return {
                     "status": HookStatus.REJECTED,
-                    "features": [],
                     "rejection_reason": rejection,
                     "progress": progress,
                 }
@@ -148,17 +161,12 @@ class OciHookRunner(HookRunner):
                 logs_str = "".join(logs) if logs else ""
                 return {
                     "status": HookStatus.FAILED,
-                    "features": [],
-                    "error_message": f"Hook exited with code {exit_code}: {logs_str[:500]}",
+                    "error_message": f"Hook exited with code {exit_code}: {logs_str[:2000]}",
                     "progress": progress,
                 }
 
-            # Collect features
-            features = self._collect_features(osa_out, hook)
-
             return {
                 "status": HookStatus.PASSED,
-                "features": features,
                 "progress": progress,
             }
 
@@ -166,14 +174,12 @@ class OciHookRunner(HookRunner):
             logfire.error("Docker error running hook", error=str(e))
             return {
                 "status": HookStatus.FAILED,
-                "features": [],
                 "error_message": f"Docker error: {e}",
             }
         except Exception as e:
             logfire.error("Unexpected error running hook", error=str(e))
             return {
                 "status": HookStatus.FAILED,
-                "features": [],
                 "error_message": f"Unexpected error: {e}",
             }
         finally:
@@ -182,6 +188,35 @@ class OciHookRunner(HookRunner):
                     await container.delete(force=True)
                 except Exception:
                     pass
+
+    def _host_path(self, container_path: Path) -> str:
+        """Translate a container-internal path to a host path for bind mounts."""
+        path_str = str(container_path)
+        if self._host_data_dir:
+            path_str = path_str.replace(self._container_data_dir, self._host_data_dir, 1)
+        return path_str
+
+    async def _resolve_image(self, image: str, digest: str) -> str:
+        """Resolve an image reference, preferring local tag over registry pull."""
+        # Try the tag first (works for locally-built images)
+        try:
+            await self._docker.images.inspect(image)
+            return image
+        except aiodocker.DockerError:
+            pass
+
+        # Try digest reference
+        digest_ref = f"{image}@{digest}"
+        try:
+            await self._docker.images.inspect(digest_ref)
+            return digest_ref
+        except aiodocker.DockerError:
+            pass
+
+        # Pull from registry as last resort
+        logfire.info("Pulling hook image", image=image)
+        await self._docker.images.pull(image)
+        return image
 
     def _parse_progress(self, osa_out: Path) -> list[ProgressEntry]:
         """Parse progress.jsonl from hook output."""
@@ -212,19 +247,6 @@ class OciHookRunner(HookRunner):
             if entry.status == "rejected":
                 return entry.message
         return None
-
-    def _collect_features(self, osa_out: Path, hook: HookDefinition) -> list[dict]:
-        """Collect features from features.json."""
-        features_file = osa_out / "features.json"
-        if not features_file.exists():
-            return []
-
-        data = json.loads(features_file.read_text())
-        if isinstance(data, list):
-            return data
-        elif isinstance(data, dict):
-            return [data]
-        return []
 
     def _parse_memory(self, memory: str) -> int:
         """Parse memory string like '2g' or '512m' to bytes."""
