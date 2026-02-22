@@ -108,7 +108,7 @@ def run_hook_entrypoint(
         result = hook_fn(record)
     except Reject as e:
         # Write rejection to progress.jsonl
-        entry = {"status": "rejected", "reason": str(e)}
+        entry = {"status": "rejected", "message": str(e)}
         with (output_dir / "progress.jsonl").open("a") as f:
             f.write(json.dumps(entry) + "\n")
         return 0
