@@ -107,7 +107,7 @@ class TestNewEntrypoint:
         lines = progress_file.read_text().strip().split("\n")
         data = json.loads(lines[-1])
         assert data["status"] == "rejected"
-        assert "Bad structure file" in data["reason"]
+        assert "Bad structure file" in data["message"]
 
     def test_envelope_format_populates_srn_and_metadata(self, tmp_path) -> None:
         from osa.authoring.hook import hook

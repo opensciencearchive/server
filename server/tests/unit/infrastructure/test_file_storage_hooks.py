@@ -48,10 +48,10 @@ class TestReadHookFeatures:
         adapter = LocalFileStorageAdapter(base_path=str(tmp_path))
         dep_srn = _make_dep_srn()
 
-        # Write features.json
-        hook_dir = tmp_path / "depositions" / "localhost_test-dep" / "hooks" / "detect"
-        hook_dir.mkdir(parents=True)
-        (hook_dir / "features.json").write_text(json.dumps([{"score": 0.95}, {"score": 0.82}]))
+        # Write features.json in the output/ subdirectory
+        output_dir = tmp_path / "depositions" / "localhost_test-dep" / "hooks" / "detect" / "output"
+        output_dir.mkdir(parents=True)
+        (output_dir / "features.json").write_text(json.dumps([{"score": 0.95}, {"score": 0.82}]))
 
         features = await adapter.read_hook_features(dep_srn, "detect")
 
@@ -63,9 +63,9 @@ class TestReadHookFeatures:
         adapter = LocalFileStorageAdapter(base_path=str(tmp_path))
         dep_srn = _make_dep_srn()
 
-        hook_dir = tmp_path / "depositions" / "localhost_test-dep" / "hooks" / "detect"
-        hook_dir.mkdir(parents=True)
-        (hook_dir / "features.json").write_text(json.dumps({"score": 0.95}))
+        output_dir = tmp_path / "depositions" / "localhost_test-dep" / "hooks" / "detect" / "output"
+        output_dir.mkdir(parents=True)
+        (output_dir / "features.json").write_text(json.dumps({"score": 0.95}))
 
         features = await adapter.read_hook_features(dep_srn, "detect")
 
@@ -88,9 +88,9 @@ class TestHookFeaturesExist:
         adapter = LocalFileStorageAdapter(base_path=str(tmp_path))
         dep_srn = _make_dep_srn()
 
-        hook_dir = tmp_path / "depositions" / "localhost_test-dep" / "hooks" / "detect"
-        hook_dir.mkdir(parents=True)
-        (hook_dir / "features.json").write_text("[]")
+        output_dir = tmp_path / "depositions" / "localhost_test-dep" / "hooks" / "detect" / "output"
+        output_dir.mkdir(parents=True)
+        (output_dir / "features.json").write_text("[]")
 
         assert await adapter.hook_features_exist(dep_srn, "detect") is True
 

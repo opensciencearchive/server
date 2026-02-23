@@ -78,7 +78,7 @@ class SourceService(Service):
 
         # Prepare dirs
         staging_dir = self.file_storage.get_source_staging_dir(convention_srn)
-        output_dir = self.file_storage.get_source_output_dir(convention_srn, run_id)
+        work_dir = self.file_storage.get_source_output_dir(convention_srn, run_id)
 
         # Build inputs
         inputs = SourceInputs(
@@ -94,7 +94,7 @@ class SourceService(Service):
             source=source_def,
             inputs=inputs,
             files_dir=staging_dir,
-            output_dir=output_dir,
+            work_dir=work_dir,
         )
 
         # Process records

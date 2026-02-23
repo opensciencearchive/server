@@ -38,5 +38,5 @@ class SourceRunner(Protocol):
         source: SourceDefinition,
         inputs: SourceInputs,
         files_dir: Path,
-        output_dir: Path,
+        work_dir: Path,
     ) -> SourceOutput: ...

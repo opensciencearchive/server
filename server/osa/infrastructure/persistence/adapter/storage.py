@@ -44,7 +44,9 @@ class LocalFileStorageAdapter(FileStoragePort):
     async def read_hook_features(
         self, deposition_id: DepositionSRN, hook_name: str
     ) -> list[dict[str, Any]]:
-        features_file = self._dep_dir(deposition_id) / "hooks" / hook_name / "features.json"
+        features_file = (
+            self._dep_dir(deposition_id) / "hooks" / hook_name / "output" / "features.json"
+        )
         if not features_file.exists():
             return []
         data = json.loads(features_file.read_text())
@@ -55,7 +57,9 @@ class LocalFileStorageAdapter(FileStoragePort):
         return []
 
     async def hook_features_exist(self, deposition_id: DepositionSRN, hook_name: str) -> bool:
-        features_file = self._dep_dir(deposition_id) / "hooks" / hook_name / "features.json"
+        features_file = (
+            self._dep_dir(deposition_id) / "hooks" / hook_name / "output" / "features.json"
+        )
         return features_file.exists()
 
     async def save_file(

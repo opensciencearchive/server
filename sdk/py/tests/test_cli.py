@@ -111,6 +111,6 @@ class TestOsaReject:
             assert len(lines) == 1
             data = json.loads(lines[0])
             assert data["status"] == "rejected"
-            assert data["reason"] == "Bad data format"
+            assert data["message"] == "Bad data format"
         finally:
             del os.environ["OSA_OUT"]

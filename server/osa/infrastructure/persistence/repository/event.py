@@ -154,6 +154,31 @@ class SQLAlchemyEventRepository(EventRepository):
         (payload,) = row
         return self._deserialize(type_name, payload)  # type: ignore[return-value]
 
+    async def find_latest_by_type_and_field(
+        self, event_type: type[E], field: str, value: str
+    ) -> E | None:
+        """Find the most recent event of a given type where payload->>field = value."""
+        type_name = event_type.__name__
+
+        stmt = (
+            select(events_table.c.payload)
+            .where(
+                events_table.c.event_type == type_name,
+                events_table.c.payload[field].as_string() == value,
+            )
+            .order_by(events_table.c.created_at.desc())
+            .limit(1)
+        )
+
+        result = await self._session.execute(stmt)
+        row = result.first()
+
+        if row is None:
+            return None
+
+        (payload,) = row
+        return self._deserialize(type_name, payload)  # type: ignore[return-value]
+
     async def list_events(
         self,
         limit: int = 50,

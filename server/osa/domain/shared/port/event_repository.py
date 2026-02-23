@@ -46,6 +46,12 @@ class EventRepository(Protocol):
         """Find the most recent event of a given type."""
         ...
 
+    async def find_latest_by_type_and_field(
+        self, event_type: type[E], field: str, value: str
+    ) -> E | None:
+        """Find the most recent event of a given type where payload->>field = value."""
+        ...
+
     async def list_events(
         self,
         limit: int = 50,

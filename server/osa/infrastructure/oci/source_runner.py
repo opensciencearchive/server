@@ -11,6 +11,7 @@ from pathlib import Path
 import aiodocker
 import logfire
 
+from osa.domain.shared.error import ExternalServiceError
 from osa.domain.shared.model.source import SourceDefinition
 from osa.domain.source.port.source_runner import SourceInputs, SourceOutput, SourceRunner
 
@@ -45,7 +46,7 @@ class OciSourceRunner(SourceRunner):
         source: SourceDefinition,
         inputs: SourceInputs,
         files_dir: Path,
-        output_dir: Path,
+        work_dir: Path,
     ) -> SourceOutput:
         timeout = source.limits.timeout_seconds
 
@@ -56,11 +57,12 @@ class OciSourceRunner(SourceRunner):
             func(path)
 
         files_dir.mkdir(parents=True, exist_ok=True)
-        output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create staging dir under output_dir so it shares the same mount
-        staging_dir = output_dir / "_staging"
+        # Create sibling input/ and output/ dirs under work_dir
+        staging_dir = work_dir / "input"
         staging_dir.mkdir(parents=True, exist_ok=True)
+        container_output = work_dir / "output"
+        container_output.mkdir(parents=True, exist_ok=True)
         try:
             if inputs.config or source.config:
                 config = {**(source.config or {}), **(inputs.config or {})}
@@ -76,7 +78,7 @@ class OciSourceRunner(SourceRunner):
             try:
                 result = await asyncio.wait_for(
                     self._run_container(
-                        image_ref, staging_dir, files_dir, output_dir, source, inputs
+                        image_ref, staging_dir, files_dir, container_output, source, inputs
                     ),
                     timeout=timeout,
                 )
@@ -89,7 +91,7 @@ class OciSourceRunner(SourceRunner):
                     timeout=timeout,
                     duration=duration,
                 )
-                raise RuntimeError(f"Source timed out after {timeout}s")
+                raise ExternalServiceError(f"Source timed out after {timeout}s")
         finally:
             rmtree(staging_dir, onexc=_force_remove)
 
@@ -150,18 +152,18 @@ class OciSourceRunner(SourceRunner):
             oom_killed = inspect_data.get("State", {}).get("OOMKilled", False)
 
             if oom_killed:
-                raise RuntimeError("Source killed by OOM")
+                raise ExternalServiceError("Source killed by OOM")
 
             if exit_code != 0:
                 logs = await container.log(stdout=True, stderr=True)
                 logs_str = "".join(logs) if logs else ""
-                raise RuntimeError(f"Source exited with code {exit_code}: {logs_str[:500]}")
+                raise ExternalServiceError(f"Source exited with code {exit_code}: {logs_str[:500]}")
 
             return self._parse_output(output_dir, files_dir)
 
         except aiodocker.DockerError as e:
             logfire.error("Docker error running source", error=str(e))
-            raise RuntimeError(f"Docker error: {e}") from e
+            raise ExternalServiceError(f"Docker error: {e}") from e
         finally:
             if container is not None:
                 try:

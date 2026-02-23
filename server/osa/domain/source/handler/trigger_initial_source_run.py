@@ -35,8 +35,10 @@ class TriggerInitialSourceRun(EventHandler[ServerStarted]):
                 continue
 
             # Check if initial run already completed for this convention
-            last_run = await self.outbox.find_latest(SourceRunCompleted)
-            if last_run and last_run.convention_srn == conv.srn:
+            last_run = await self.outbox.find_latest_where(
+                SourceRunCompleted, convention_srn=str(conv.srn)
+            )
+            if last_run is not None:
                 logger.debug(
                     "Initial source run: skipping %s - already completed at %s",
                     conv.srn,

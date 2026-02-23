@@ -66,10 +66,8 @@ class ValidationService(Service):
         overall_failed = False
 
         for hook_def in hooks:
-            output_dir = self.file_storage.get_hook_output_dir(
-                deposition_srn, hook_def.manifest.name
-            )
-            result = await self.hook_runner.run(hook_def, inputs, output_dir)
+            work_dir = self.file_storage.get_hook_output_dir(deposition_srn, hook_def.manifest.name)
+            result = await self.hook_runner.run(hook_def, inputs, work_dir)
             hook_results.append(result)
 
             if result.status in (HookStatus.REJECTED, HookStatus.FAILED):

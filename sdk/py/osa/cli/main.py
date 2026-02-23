@@ -46,7 +46,7 @@ def reject_command(*, reason: str) -> None:
     """Write a rejection entry to $OSA_OUT/progress.jsonl."""
     output_dir = Path(os.environ.get("OSA_OUT", "/osa/out"))
     output_dir.mkdir(parents=True, exist_ok=True)
-    entry = {"status": "rejected", "reason": reason}
+    entry = {"status": "rejected", "message": reason}
     with (output_dir / "progress.jsonl").open("a") as f:
         f.write(json.dumps(entry) + "\n")
 

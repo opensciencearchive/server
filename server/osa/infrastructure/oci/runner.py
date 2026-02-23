@@ -40,13 +40,15 @@ class OciHookRunner(HookRunner):
         self,
         hook: HookDefinition,
         inputs: HookInputs,
-        output_dir: Path,
+        work_dir: Path,
     ) -> HookResult:
         timeout = hook.limits.timeout_seconds
 
-        # Create staging dir under output_dir so it shares the same mount
-        staging_dir = output_dir / "_staging"
+        # Create sibling input/ and output/ dirs under work_dir
+        staging_dir = work_dir / "input"
         staging_dir.mkdir(parents=True, exist_ok=True)
+        container_output = work_dir / "output"
+        container_output.mkdir(parents=True, exist_ok=True)
         try:
             (staging_dir / "record.json").write_text(json.dumps(inputs.record_json))
             # Pre-create files mountpoint so nested bind works with ReadonlyRootfs
@@ -56,15 +58,15 @@ class OciHookRunner(HookRunner):
                 config = {**(hook.config or {}), **(inputs.config or {})}
                 (staging_dir / "config.json").write_text(json.dumps(config))
 
-            output_dir.mkdir(parents=True, exist_ok=True)
-
             image_ref = await self._resolve_image(hook.image, hook.digest)
 
             start_time = time.monotonic()
 
             try:
                 result = await asyncio.wait_for(
-                    self._run_container(image_ref, staging_dir, inputs.files_dir, output_dir, hook),
+                    self._run_container(
+                        image_ref, staging_dir, inputs.files_dir, container_output, hook
+                    ),
                     timeout=timeout,
                 )
                 result_duration = time.monotonic() - start_time

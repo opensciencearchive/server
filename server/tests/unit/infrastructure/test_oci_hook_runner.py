@@ -265,15 +265,17 @@ class TestContainerLifecycle:
         hook = _make_hook()
         inputs = HookInputs(record_json={"srn": "test"})
 
-        output_dir = tmp_path / "output"
-        output_dir.mkdir()
+        work_dir = tmp_path / "hook_work"
+        work_dir.mkdir()
 
-        # Pre-create rejection progress in the output_dir
-        (output_dir / "progress.jsonl").write_text(
+        # Pre-create rejection progress in the output subdir (where the runner reads from)
+        container_output = work_dir / "output"
+        container_output.mkdir()
+        (container_output / "progress.jsonl").write_text(
             '{"step":"Validate","status":"rejected","message":"Missing atoms"}\n'
         )
 
-        result = await runner.run(hook, inputs, output_dir)
+        result = await runner.run(hook, inputs, work_dir)
 
         assert result.status == HookStatus.REJECTED
         assert result.rejection_reason == "Missing atoms"
@@ -338,7 +340,7 @@ class TestContainerConfig:
 
     @pytest.mark.asyncio
     async def test_nested_bind_mounts(self, tmp_path: Path):
-        """Runner uses nested bind-mounts: staging at /osa/in, files at /osa/in/files."""
+        """Runner uses sibling input/ and output/ dirs under work_dir."""
         docker = AsyncMock()
         container = AsyncMock()
         docker.containers.create.return_value = container
@@ -351,19 +353,23 @@ class TestContainerConfig:
         files_dir.mkdir()
         inputs = HookInputs(record_json={"srn": "test"}, files_dir=files_dir)
 
-        output_dir = tmp_path / "output"
-        output_dir.mkdir()
+        work_dir = tmp_path / "hook_work"
+        work_dir.mkdir()
 
-        await runner.run(hook, inputs, output_dir)
+        await runner.run(hook, inputs, work_dir)
 
         call_args = docker.containers.create.call_args
         config = call_args[0][0] if call_args[0] else call_args[1].get("config", {})
 
         binds = config["HostConfig"]["Binds"]
-        # Should have 3 binds: staging:ro, output:rw, files:ro
+        # Should have 3 binds: input:ro, output:rw, files:ro
         assert len(binds) == 3
-        assert any(b.endswith(":/osa/in:ro") for b in binds)
-        assert any(b.endswith(":/osa/out:rw") for b in binds)
+
+        # input/ and output/ are sibling dirs under work_dir
+        in_bind = [b for b in binds if b.endswith(":/osa/in:ro")][0]
+        out_bind = [b for b in binds if b.endswith(":/osa/out:rw")][0]
+        assert str(work_dir / "input") in in_bind
+        assert str(work_dir / "output") in out_bind
         assert any(b.endswith(":/osa/in/files:ro") for b in binds)
 
     @pytest.mark.asyncio

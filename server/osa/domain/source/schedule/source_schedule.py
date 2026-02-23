@@ -35,10 +35,12 @@ class SourceSchedule(Schedule):
         limit: int | None = params.get("limit")
 
         # Look up last completed run for this convention
-        last_run = await self.outbox.find_latest(SourceRunCompleted)
+        last_run = await self.outbox.find_latest_where(
+            SourceRunCompleted, convention_srn=str(convention_srn)
+        )
 
         since = None
-        if last_run is not None and last_run.convention_srn == convention_srn:
+        if last_run is not None:
             since = last_run.completed_at
 
         logger.info(
