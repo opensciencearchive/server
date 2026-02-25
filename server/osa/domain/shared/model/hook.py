@@ -1,16 +1,20 @@
 """Shared hook domain models used across deposition and validation domains."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field
 
 from osa.domain.shared.model.value import ValueObject
 
+# Lowercase alphanumeric + underscore, starting with a letter, max 63 chars.
+# Safe for use as PG identifiers, file path components, and env var values.
+PgIdentifier = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,62}$")]
+
 
 class ColumnDef(ValueObject):
     """Definition of a single column in a feature table."""
 
-    name: str
+    name: PgIdentifier
     json_type: Literal["string", "number", "integer", "boolean", "array", "object"]
     format: str | None = None
     required: bool
@@ -25,7 +29,7 @@ class FeatureSchema(ValueObject):
 class HookManifest(ValueObject):
     """Manifest describing what a hook produces."""
 
-    name: str
+    name: PgIdentifier
     record_schema: str
     cardinality: Literal["one", "many"]
     feature_schema: FeatureSchema

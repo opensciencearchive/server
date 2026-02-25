@@ -251,3 +251,101 @@ def test_hook_definition_serialization_roundtrip():
     restored = HookDefinition.model_validate(data)
     assert restored == hook_def
     assert restored.manifest.feature_schema.columns[1].required is False
+
+
+class TestNameValidation:
+    """Hook and column names must be safe PG identifiers."""
+
+    def test_manifest_name_rejects_uppercase(self):
+        from osa.domain.shared.model.hook import FeatureSchema, HookManifest
+
+        with pytest.raises(ValidationError):
+            HookManifest(
+                name="BadName",
+                record_schema="S",
+                cardinality="one",
+                feature_schema=FeatureSchema(columns=[]),
+            )
+
+    def test_manifest_name_rejects_newline_injection(self):
+        from osa.domain.shared.model.hook import FeatureSchema, HookManifest
+
+        with pytest.raises(ValidationError):
+            HookManifest(
+                name="hook\nEVIL_VAR=pwned",
+                record_schema="S",
+                cardinality="one",
+                feature_schema=FeatureSchema(columns=[]),
+            )
+
+    def test_manifest_name_rejects_path_traversal(self):
+        from osa.domain.shared.model.hook import FeatureSchema, HookManifest
+
+        with pytest.raises(ValidationError):
+            HookManifest(
+                name="../etc/passwd",
+                record_schema="S",
+                cardinality="one",
+                feature_schema=FeatureSchema(columns=[]),
+            )
+
+    def test_manifest_name_rejects_sql_injection(self):
+        from osa.domain.shared.model.hook import FeatureSchema, HookManifest
+
+        with pytest.raises(ValidationError):
+            HookManifest(
+                name="'; DROP TABLE --",
+                record_schema="S",
+                cardinality="one",
+                feature_schema=FeatureSchema(columns=[]),
+            )
+
+    def test_manifest_name_rejects_empty(self):
+        from osa.domain.shared.model.hook import FeatureSchema, HookManifest
+
+        with pytest.raises(ValidationError):
+            HookManifest(
+                name="",
+                record_schema="S",
+                cardinality="one",
+                feature_schema=FeatureSchema(columns=[]),
+            )
+
+    def test_manifest_name_rejects_leading_digit(self):
+        from osa.domain.shared.model.hook import FeatureSchema, HookManifest
+
+        with pytest.raises(ValidationError):
+            HookManifest(
+                name="1hook",
+                record_schema="S",
+                cardinality="one",
+                feature_schema=FeatureSchema(columns=[]),
+            )
+
+    def test_column_name_rejects_unsafe_input(self):
+        from osa.domain.shared.model.hook import ColumnDef
+
+        with pytest.raises(ValidationError):
+            ColumnDef(name="'; DROP TABLE --", json_type="number", required=True)
+
+    def test_column_name_rejects_spaces(self):
+        from osa.domain.shared.model.hook import ColumnDef
+
+        with pytest.raises(ValidationError):
+            ColumnDef(name="my column", json_type="number", required=True)
+
+    def test_valid_names_accepted(self):
+        from osa.domain.shared.model.hook import ColumnDef, FeatureSchema, HookManifest
+
+        valid_names = ["a", "hook_v2", "pocket_detect", "x1", "a_b_c_d"]
+        for name in valid_names:
+            manifest = HookManifest(
+                name=name,
+                record_schema="S",
+                cardinality="one",
+                feature_schema=FeatureSchema(columns=[]),
+            )
+            assert manifest.name == name
+
+            col = ColumnDef(name=name, json_type="number", required=True)
+            assert col.name == name
