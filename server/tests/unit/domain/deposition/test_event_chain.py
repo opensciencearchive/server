@@ -92,25 +92,17 @@ class TestValidateDepositionEmitsCompleted:
     @pytest.mark.asyncio
     async def test_emits_validation_completed(self):
         outbox = AsyncMock()
-        deposition_repo = AsyncMock()
-        deposition_repo.get.return_value = _make_deposition()
-        convention_repo = AsyncMock()
-        convention_repo.get.return_value = _make_convention()
-        file_storage = AsyncMock()
+        dep = _make_deposition()
 
-        # ValidationService mock
+        # ValidationService mock — validate_deposition returns (run, results, dep)
         validation_service = AsyncMock()
         run_mock = MagicMock()
         run_mock.srn = ValidationRunSRN.parse("urn:osa:localhost:val:run1")
         run_mock.status = RunStatus.COMPLETED
-        validation_service.create_run.return_value = run_mock
-        validation_service.run_repo = AsyncMock()
+        validation_service.validate_deposition.return_value = (run_mock, [], dep)
 
         handler = ValidateDeposition(
             outbox=outbox,
-            deposition_repo=deposition_repo,
-            convention_repo=convention_repo,
-            file_storage=file_storage,
             validation_service=validation_service,
         )
 
@@ -130,33 +122,19 @@ class TestValidateDepositionEmitsCompleted:
 
 class TestValidateDepositionPassesFilesDir:
     @pytest.mark.asyncio
-    async def test_handler_passes_files_dir_from_storage(self):
-        """ValidateDeposition must call file_storage.get_files_dir and pass result as files_dir."""
-        from pathlib import Path
-
+    async def test_handler_delegates_to_service(self):
+        """ValidateDeposition delegates to validation_service.validate_deposition."""
         outbox = AsyncMock()
         dep = _make_deposition()
-        dep.metadata = {"title": "Test"}
-        deposition_repo = AsyncMock()
-        deposition_repo.get.return_value = dep
-        convention = _make_convention()
-        convention_repo = AsyncMock()
-        convention_repo.get.return_value = convention
-        file_storage = MagicMock()
-        file_storage.get_files_dir.return_value = Path("/data/depositions/test-dep")
 
         validation_service = AsyncMock()
         run_mock = MagicMock()
         run_mock.srn = ValidationRunSRN.parse("urn:osa:localhost:val:run1")
         run_mock.status = RunStatus.COMPLETED
-        validation_service.create_run.return_value = run_mock
-        validation_service.run_repo = AsyncMock()
+        validation_service.validate_deposition.return_value = (run_mock, [], dep)
 
         handler = ValidateDeposition(
             outbox=outbox,
-            deposition_repo=deposition_repo,
-            convention_repo=convention_repo,
-            file_storage=file_storage,
             validation_service=validation_service,
         )
 
@@ -167,38 +145,37 @@ class TestValidateDepositionPassesFilesDir:
         )
         await handler.handle(event)
 
-        file_storage.get_files_dir.assert_called_once_with(dep.srn)
-        call_args = validation_service.create_run.call_args
-        inputs = call_args[1]["inputs"] if "inputs" in call_args[1] else call_args[0][0]
-        assert inputs.files_dir == Path("/data/depositions/test-dep")
+        validation_service.validate_deposition.assert_called_once_with(dep.srn)
 
 
 class TestValidateDepositionPassesEnvelope:
     @pytest.mark.asyncio
-    async def test_handler_passes_envelope_as_record_json(self):
-        """ValidateDeposition must wrap metadata in {srn, metadata} envelope."""
+    async def test_handler_emits_failed_on_rejected(self):
+        """ValidateDeposition emits ValidationFailed when run status is REJECTED."""
+        from osa.domain.validation.event.validation_failed import ValidationFailed
+        from osa.domain.validation.model.hook_result import HookResult, HookStatus
+
         outbox = AsyncMock()
         dep = _make_deposition()
-        dep.metadata = {"title": "Test"}
-        deposition_repo = AsyncMock()
-        deposition_repo.get.return_value = dep
-        convention = _make_convention()
-        convention_repo = AsyncMock()
-        convention_repo.get.return_value = convention
-        file_storage = AsyncMock()
 
         validation_service = AsyncMock()
         run_mock = MagicMock()
         run_mock.srn = ValidationRunSRN.parse("urn:osa:localhost:val:run1")
-        run_mock.status = RunStatus.COMPLETED
-        validation_service.create_run.return_value = run_mock
-        validation_service.run_repo = AsyncMock()
+        run_mock.status = RunStatus.REJECTED
+        hook_result = HookResult(
+            hook_name="pocket_detect",
+            status=HookStatus.REJECTED,
+            rejection_reason="Data quality too low",
+            duration_seconds=1.0,
+        )
+        validation_service.validate_deposition.return_value = (
+            run_mock,
+            [hook_result],
+            dep,
+        )
 
         handler = ValidateDeposition(
             outbox=outbox,
-            deposition_repo=deposition_repo,
-            convention_repo=convention_repo,
-            file_storage=file_storage,
             validation_service=validation_service,
         )
 
@@ -209,10 +186,10 @@ class TestValidateDepositionPassesEnvelope:
         )
         await handler.handle(event)
 
-        # Check the inputs passed to create_run
-        call_args = validation_service.create_run.call_args
-        inputs = call_args[1]["inputs"] if "inputs" in call_args[1] else call_args[0][0]
-        assert inputs.record_json == {"srn": str(dep.srn), "metadata": dep.metadata}
+        outbox.append.assert_called_once()
+        emitted = outbox.append.call_args[0][0]
+        assert isinstance(emitted, ValidationFailed)
+        assert emitted.status == RunStatus.REJECTED
 
 
 class TestAutoApproveCurationEmitsApproved:
@@ -276,28 +253,11 @@ class TestConvertDepositionToRecord:
 
 class TestInsertRecordFeatures:
     @pytest.mark.asyncio
-    async def test_inserts_features_on_record_published(self):
-        """InsertRecordFeatures reads from cold storage and inserts with record_srn."""
-        deposition_repo = AsyncMock()
-        dep = _make_deposition()
-        deposition_repo.get.return_value = dep
-
-        hook = _make_hook_def()
-        convention = _make_convention(hooks=[hook])
-        convention_repo = AsyncMock()
-        convention_repo.get.return_value = convention
-
-        file_storage = AsyncMock()
-        file_storage.hook_features_exist.return_value = True
-        file_storage.read_hook_features.return_value = [{"score": 0.95}]
-
+    async def test_delegates_to_feature_service(self):
+        """InsertRecordFeatures delegates to feature_service.insert_features_for_record."""
         feature_service = AsyncMock()
-        feature_service.insert_features.return_value = 1
 
         handler = InsertRecordFeatures(
-            deposition_repo=deposition_repo,
-            convention_repo=convention_repo,
-            file_storage=file_storage,
             feature_service=feature_service,
         )
 
@@ -309,73 +269,6 @@ class TestInsertRecordFeatures:
         )
         await handler.handle(event)
 
-        file_storage.hook_features_exist.assert_called_once_with(_make_dep_srn(), "pocket_detect")
-        file_storage.read_hook_features.assert_called_once_with(_make_dep_srn(), "pocket_detect")
-        feature_service.insert_features.assert_called_once_with(
-            hook_name="pocket_detect",
-            record_srn=str(_make_record_srn()),
-            rows=[{"score": 0.95}],
+        feature_service.insert_features_for_record.assert_called_once_with(
+            _make_dep_srn(), str(_make_record_srn())
         )
-
-    @pytest.mark.asyncio
-    async def test_skips_when_no_features(self):
-        """InsertRecordFeatures skips hooks with no features.json."""
-        deposition_repo = AsyncMock()
-        deposition_repo.get.return_value = _make_deposition()
-
-        convention = _make_convention(hooks=[_make_hook_def()])
-        convention_repo = AsyncMock()
-        convention_repo.get.return_value = convention
-
-        file_storage = AsyncMock()
-        file_storage.hook_features_exist.return_value = False
-
-        feature_service = AsyncMock()
-
-        handler = InsertRecordFeatures(
-            deposition_repo=deposition_repo,
-            convention_repo=convention_repo,
-            file_storage=file_storage,
-            feature_service=feature_service,
-        )
-
-        event = RecordPublished(
-            id=EventId(uuid4()),
-            record_srn=_make_record_srn(),
-            deposition_srn=_make_dep_srn(),
-            metadata={"title": "Test"},
-        )
-        await handler.handle(event)
-
-        feature_service.insert_features.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_skips_convention_with_no_hooks(self):
-        """InsertRecordFeatures does nothing for conventions without hooks."""
-        deposition_repo = AsyncMock()
-        deposition_repo.get.return_value = _make_deposition()
-
-        convention = _make_convention(hooks=[])
-        convention_repo = AsyncMock()
-        convention_repo.get.return_value = convention
-
-        file_storage = AsyncMock()
-        feature_service = AsyncMock()
-
-        handler = InsertRecordFeatures(
-            deposition_repo=deposition_repo,
-            convention_repo=convention_repo,
-            file_storage=file_storage,
-            feature_service=feature_service,
-        )
-
-        event = RecordPublished(
-            id=EventId(uuid4()),
-            record_srn=_make_record_srn(),
-            deposition_srn=_make_dep_srn(),
-            metadata={"title": "Test"},
-        )
-        await handler.handle(event)
-
-        file_storage.hook_features_exist.assert_not_called()
-        feature_service.insert_features.assert_not_called()

@@ -1,4 +1,4 @@
-"""Unit tests for InsertRecordFeatures event handler."""
+"""Unit tests for InsertRecordFeatures event handler and FeatureService.insert_features_for_record."""
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
@@ -11,6 +11,7 @@ from osa.domain.deposition.model.aggregate import Deposition
 from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.value import DepositionStatus, FileRequirements
 from osa.domain.feature.handler.insert_record_features import InsertRecordFeatures
+from osa.domain.feature.service.feature import FeatureService
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.hook import (
@@ -90,21 +91,44 @@ def _make_event() -> RecordPublished:
     )
 
 
-def _make_handler(
+def _make_feature_service(
+    feature_store: AsyncMock | None = None,
     deposition_repo: AsyncMock | None = None,
     convention_repo: AsyncMock | None = None,
     file_storage: AsyncMock | None = None,
-    feature_service: AsyncMock | None = None,
-) -> InsertRecordFeatures:
-    return InsertRecordFeatures(
+) -> FeatureService:
+    return FeatureService(
+        feature_store=feature_store or AsyncMock(),
         deposition_repo=deposition_repo or AsyncMock(),
         convention_repo=convention_repo or AsyncMock(),
         file_storage=file_storage or AsyncMock(),
+    )
+
+
+def _make_handler(
+    feature_service: FeatureService | AsyncMock | None = None,
+) -> InsertRecordFeatures:
+    return InsertRecordFeatures(
         feature_service=feature_service or AsyncMock(),
     )
 
 
 class TestInsertRecordFeaturesHandler:
+    @pytest.mark.asyncio
+    async def test_delegates_to_feature_service(self):
+        """Handler delegates to FeatureService.insert_features_for_record."""
+        feature_service = AsyncMock()
+        handler = _make_handler(feature_service=feature_service)
+
+        event = _make_event()
+        await handler.handle(event)
+
+        feature_service.insert_features_for_record.assert_called_once_with(
+            event.deposition_srn, str(event.record_srn)
+        )
+
+
+class TestFeatureServiceInsertFeaturesForRecord:
     @pytest.mark.asyncio
     async def test_inserts_features_from_cold_storage(self):
         """Reads features.json from cold storage and inserts with record_srn."""
@@ -119,22 +143,22 @@ class TestInsertRecordFeaturesHandler:
         file_storage.hook_features_exist.return_value = True
         file_storage.read_hook_features.return_value = [{"score": 0.95}, {"score": 0.82}]
 
-        feature_service = AsyncMock()
-        feature_service.insert_features.return_value = 2
+        feature_store = AsyncMock()
+        feature_store.insert_features.return_value = 2
 
-        handler = _make_handler(
+        service = _make_feature_service(
+            feature_store=feature_store,
             deposition_repo=deposition_repo,
             convention_repo=convention_repo,
             file_storage=file_storage,
-            feature_service=feature_service,
         )
 
-        await handler.handle(_make_event())
+        await service.insert_features_for_record(_make_dep_srn(), str(_make_record_srn()))
 
-        feature_service.insert_features.assert_called_once_with(
-            hook_name="pocket_detect",
-            record_srn=str(_make_record_srn()),
-            rows=[{"score": 0.95}, {"score": 0.82}],
+        feature_store.insert_features.assert_called_once_with(
+            "pocket_detect",
+            str(_make_record_srn()),
+            [{"score": 0.95}, {"score": 0.82}],
         )
 
     @pytest.mark.asyncio
@@ -149,19 +173,19 @@ class TestInsertRecordFeaturesHandler:
         file_storage = AsyncMock()
         file_storage.hook_features_exist.return_value = False
 
-        feature_service = AsyncMock()
+        feature_store = AsyncMock()
 
-        handler = _make_handler(
+        service = _make_feature_service(
+            feature_store=feature_store,
             deposition_repo=deposition_repo,
             convention_repo=convention_repo,
             file_storage=file_storage,
-            feature_service=feature_service,
         )
 
-        await handler.handle(_make_event())
+        await service.insert_features_for_record(_make_dep_srn(), str(_make_record_srn()))
 
         file_storage.read_hook_features.assert_not_called()
-        feature_service.insert_features.assert_not_called()
+        feature_store.insert_features.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_skips_empty_feature_list(self):
@@ -176,18 +200,18 @@ class TestInsertRecordFeaturesHandler:
         file_storage.hook_features_exist.return_value = True
         file_storage.read_hook_features.return_value = []
 
-        feature_service = AsyncMock()
+        feature_store = AsyncMock()
 
-        handler = _make_handler(
+        service = _make_feature_service(
+            feature_store=feature_store,
             deposition_repo=deposition_repo,
             convention_repo=convention_repo,
             file_storage=file_storage,
-            feature_service=feature_service,
         )
 
-        await handler.handle(_make_event())
+        await service.insert_features_for_record(_make_dep_srn(), str(_make_record_srn()))
 
-        feature_service.insert_features.assert_not_called()
+        feature_store.insert_features.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_handles_multiple_hooks(self):
@@ -206,19 +230,19 @@ class TestInsertRecordFeaturesHandler:
             [{"score": 0.8}],
         ]
 
-        feature_service = AsyncMock()
-        feature_service.insert_features.return_value = 1
+        feature_store = AsyncMock()
+        feature_store.insert_features.return_value = 1
 
-        handler = _make_handler(
+        service = _make_feature_service(
+            feature_store=feature_store,
             deposition_repo=deposition_repo,
             convention_repo=convention_repo,
             file_storage=file_storage,
-            feature_service=feature_service,
         )
 
-        await handler.handle(_make_event())
+        await service.insert_features_for_record(_make_dep_srn(), str(_make_record_srn()))
 
-        assert feature_service.insert_features.call_count == 2
+        assert feature_store.insert_features.call_count == 2
 
     @pytest.mark.asyncio
     async def test_convention_with_no_hooks(self):
@@ -230,19 +254,19 @@ class TestInsertRecordFeaturesHandler:
         convention_repo.get.return_value = _make_convention(hooks=[])
 
         file_storage = AsyncMock()
-        feature_service = AsyncMock()
+        feature_store = AsyncMock()
 
-        handler = _make_handler(
+        service = _make_feature_service(
+            feature_store=feature_store,
             deposition_repo=deposition_repo,
             convention_repo=convention_repo,
             file_storage=file_storage,
-            feature_service=feature_service,
         )
 
-        await handler.handle(_make_event())
+        await service.insert_features_for_record(_make_dep_srn(), str(_make_record_srn()))
 
         file_storage.hook_features_exist.assert_not_called()
-        feature_service.insert_features.assert_not_called()
+        feature_store.insert_features.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_missing_deposition_logs_and_returns(self):
@@ -250,16 +274,16 @@ class TestInsertRecordFeaturesHandler:
         deposition_repo = AsyncMock()
         deposition_repo.get.return_value = None
 
-        feature_service = AsyncMock()
+        feature_store = AsyncMock()
 
-        handler = _make_handler(
+        service = _make_feature_service(
+            feature_store=feature_store,
             deposition_repo=deposition_repo,
-            feature_service=feature_service,
         )
 
-        await handler.handle(_make_event())
+        await service.insert_features_for_record(_make_dep_srn(), str(_make_record_srn()))
 
-        feature_service.insert_features.assert_not_called()
+        feature_store.insert_features.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_missing_convention_logs_and_returns(self):
@@ -270,14 +294,14 @@ class TestInsertRecordFeaturesHandler:
         convention_repo = AsyncMock()
         convention_repo.get.return_value = None
 
-        feature_service = AsyncMock()
+        feature_store = AsyncMock()
 
-        handler = _make_handler(
+        service = _make_feature_service(
+            feature_store=feature_store,
             deposition_repo=deposition_repo,
             convention_repo=convention_repo,
-            feature_service=feature_service,
         )
 
-        await handler.handle(_make_event())
+        await service.insert_features_for_record(_make_dep_srn(), str(_make_record_srn()))
 
-        feature_service.insert_features.assert_not_called()
+        feature_store.insert_features.assert_not_called()

@@ -11,8 +11,8 @@ class FeatureTable(ValueObject):
     Not stored on Convention — computed by FeatureStore.
     """
 
-    convention_id: str
-    hook_name: str
-    pg_schema: str
-    table_name: str
+    convention_id: str  # todo: use a NewType
+    hook_name: str  # possibly use a NewType?
+    pg_schema: str  # possibly use a NewType?
+    table_name: str  # possibly use a NewType?
     feature_schema: FeatureSchema

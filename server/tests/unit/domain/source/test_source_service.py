@@ -270,3 +270,35 @@ class TestSourceService:
         )
         with pytest.raises(ValueError, match="no source defined"):
             await service.run_source(convention_srn=_make_conv_srn())
+
+    @pytest.mark.asyncio
+    async def test_run_source_final_when_session_but_zero_records(
+        self,
+        mock_outbox,
+        mock_deposition_service,
+        mock_convention_repo,
+        mock_file_storage,
+        mock_source_runner,
+    ):
+        """Source returns session but zero records → treated as final chunk."""
+        from osa.domain.source.event.source_run_completed import SourceRunCompleted
+
+        mock_source_runner.run.return_value = SourceOutput(
+            records=[],
+            session={"cursor": "x"},
+            files_dir=Path("/tmp/staging"),
+        )
+        service = SourceService(
+            source_runner=mock_source_runner,
+            deposition_service=mock_deposition_service,
+            file_storage=mock_file_storage,
+            convention_repo=mock_convention_repo,
+            outbox=mock_outbox,
+        )
+        await service.run_source(convention_srn=_make_conv_srn())
+
+        # Only one event (SourceRunCompleted), no continuation
+        assert mock_outbox.append.call_count == 1
+        event = mock_outbox.append.call_args_list[0][0][0]
+        assert isinstance(event, SourceRunCompleted)
+        assert event.is_final_chunk is True

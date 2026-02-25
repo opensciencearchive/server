@@ -7,7 +7,6 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from osa.domain.validation.model import (
-    HookResult,
     HookStatus,
     RunStatus,
 )
@@ -56,25 +55,6 @@ class ValidationStatusResponse(BaseModel):
 
 
 # =============================================================================
-# Helpers
-# =============================================================================
-
-
-def _compute_summary(results: list[HookResult]) -> HookStatus | None:
-    """Compute overall summary from individual hook results."""
-    if not results:
-        return None
-
-    statuses = [r.status for r in results]
-
-    if HookStatus.FAILED in statuses:
-        return HookStatus.FAILED
-    if HookStatus.REJECTED in statuses:
-        return HookStatus.REJECTED
-    return HookStatus.PASSED
-
-
-# =============================================================================
 # Validation API
 # =============================================================================
 
@@ -109,8 +89,8 @@ async def get_validation_status(
     summary = None
     progress = None
 
-    if run.status == RunStatus.COMPLETED or run.status == RunStatus.FAILED:
-        summary = _compute_summary(run.results)
+    if run.status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.REJECTED):
+        summary = run.summary
     elif run.status == RunStatus.RUNNING:
         progress = {"status": "running"}
 

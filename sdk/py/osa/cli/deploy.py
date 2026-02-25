@@ -9,6 +9,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from osa._registry import ConventionInfo, HookInfo, SourceInfo, _conventions, _hooks
 from osa.manifest import generate_feature_schema
 
@@ -331,8 +333,6 @@ def deploy(
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
-
-        import httpx
 
         url = f"{server.rstrip('/')}/api/v1/conventions"
         resp = httpx.post(url, json=payload, headers=headers, timeout=30.0)

@@ -88,5 +88,4 @@ class ConventionService(Service):
 
     async def list_conventions_with_source(self) -> list[Convention]:
         """Return conventions that have a source configured."""
-        all_convs = await self.convention_repo.list(limit=None, offset=None)
-        return [c for c in all_convs if c.source is not None]
+        return await self.convention_repo.list_with_source()

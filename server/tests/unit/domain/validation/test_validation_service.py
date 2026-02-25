@@ -50,6 +50,8 @@ def _make_service(
     run_repo: AsyncMock | None = None,
     hook_runner: AsyncMock | None = None,
     file_storage: AsyncMock | None = None,
+    deposition_repo: AsyncMock | None = None,
+    convention_repo: AsyncMock | None = None,
 ) -> ValidationService:
     fs = file_storage or MagicMock()
     if not hasattr(fs, "get_hook_output_dir") or not callable(fs.get_hook_output_dir):
@@ -58,6 +60,8 @@ def _make_service(
         run_repo=run_repo or AsyncMock(),
         hook_runner=hook_runner or AsyncMock(),
         file_storage=fs,
+        deposition_repo=deposition_repo or AsyncMock(),
+        convention_repo=convention_repo or AsyncMock(),
         node_domain=Domain("localhost"),
     )
 
@@ -123,7 +127,7 @@ class TestValidationServiceRunHooks:
             hooks=hooks,
         )
 
-        assert run.status == RunStatus.FAILED
+        assert run.status == RunStatus.REJECTED
         assert len(results) == 1  # Second hook never ran
 
     @pytest.mark.asyncio

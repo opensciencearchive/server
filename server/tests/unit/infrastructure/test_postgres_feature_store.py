@@ -1,10 +1,12 @@
 """Unit tests for PostgresFeatureStore — DDL generation, catalog registration, bulk insert."""
 
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import sqlalchemy as sa
 
+from osa.domain.shared.error import ConflictError, ValidationError
 from osa.domain.shared.model.hook import (
     ColumnDef,
     FeatureSchema,
@@ -54,10 +56,41 @@ def _mock_engine():
     return engine, conn
 
 
+def _mock_engine_with_reflect(table_name: str, feature_columns: list[str] | None = None):
+    """Create a mock AsyncEngine where run_sync simulates table reflection.
+
+    The reflected table will have id, record_srn, created_at plus any feature columns.
+    """
+    engine, conn = _mock_engine()
+
+    def fake_run_sync(fn, *args, **kwargs):
+        """Simulate metadata.reflect by registering a table on the metadata object."""
+        # fn is metadata.reflect, first arg of fn is the sync connection (irrelevant in mock)
+        # We need to find the MetaData that called reflect and register a table on it.
+        # run_sync calls fn(sync_conn, *args) — metadata.reflect is a bound method,
+        # so fn.__self__ is the MetaData object.
+        metadata = fn.__self__
+        cols = [
+            sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+            sa.Column("record_srn", sa.Text, nullable=False),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        ]
+        for col_name in feature_columns or []:
+            cols.append(sa.Column(col_name, sa.Float))
+        sa.Table(table_name, metadata, *cols)
+
+    conn.run_sync = AsyncMock(side_effect=fake_run_sync)
+    return engine, conn
+
+
 class TestCreateTable:
     @pytest.mark.asyncio
     async def test_creates_features_schema(self):
         engine, conn = _mock_engine()
+        # Mock catalog check to return no existing row
+        mock_result = MagicMock()
+        mock_result.first.return_value = None
+        conn.execute.return_value = mock_result
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
 
         await store.create_table("pocket_detect", _make_hook())
@@ -70,6 +103,9 @@ class TestCreateTable:
     @pytest.mark.asyncio
     async def test_creates_table_via_metadata(self):
         engine, conn = _mock_engine()
+        mock_result = MagicMock()
+        mock_result.first.return_value = None
+        conn.execute.return_value = mock_result
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
 
         await store.create_table("pocket_detect", _make_hook())
@@ -79,6 +115,9 @@ class TestCreateTable:
     @pytest.mark.asyncio
     async def test_registers_in_catalog(self):
         engine, conn = _mock_engine()
+        mock_result = MagicMock()
+        mock_result.first.return_value = None
+        conn.execute.return_value = mock_result
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
 
         await store.create_table("pocket_detect", _make_hook())
@@ -92,6 +131,9 @@ class TestCreateTable:
     @pytest.mark.asyncio
     async def test_catalog_contains_hook_name(self):
         engine, conn = _mock_engine()
+        mock_result = MagicMock()
+        mock_result.first.return_value = None
+        conn.execute.return_value = mock_result
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
 
         await store.create_table("pocket_detect", _make_hook())
@@ -105,11 +147,23 @@ class TestCreateTable:
         assert params["pg_table"] == "pocket_detect"
         assert params["schema_version"] == 1
 
+    @pytest.mark.asyncio
+    async def test_create_table_raises_conflict_on_duplicate(self):
+        engine, conn = _mock_engine()
+        # Mock catalog check to return an existing row
+        mock_result = MagicMock()
+        mock_result.first.return_value = ("pocket_detect",)
+        conn.execute.return_value = mock_result
+        store = PostgresFeatureStore(engine=engine, session=AsyncMock())
+
+        with pytest.raises(ConflictError, match="already exists"):
+            await store.create_table("pocket_detect", _make_hook())
+
 
 class TestInsertFeatures:
     @pytest.mark.asyncio
     async def test_inserts_rows(self):
-        engine, conn = _mock_engine()
+        engine, conn = _mock_engine_with_reflect("pocket_detect", ["score", "pocket_id"])
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
         rows = [
             {"score": 0.95, "pocket_id": "P1"},
@@ -132,7 +186,7 @@ class TestInsertFeatures:
 
     @pytest.mark.asyncio
     async def test_enriches_rows_with_record_srn(self):
-        engine, conn = _mock_engine()
+        engine, conn = _mock_engine_with_reflect("pocket_detect", ["score"])
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
 
         await store.insert_features("pocket_detect", "urn:rec:1", [{"score": 0.95}])
@@ -146,7 +200,7 @@ class TestInsertFeatures:
 
     @pytest.mark.asyncio
     async def test_chunks_large_inserts(self):
-        engine, conn = _mock_engine()
+        engine, conn = _mock_engine_with_reflect("hook", ["score"])
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
         rows = [{"score": float(i)} for i in range(2500)]
 
@@ -157,7 +211,7 @@ class TestInsertFeatures:
 
     @pytest.mark.asyncio
     async def test_single_chunk_for_small_batch(self):
-        engine, conn = _mock_engine()
+        engine, conn = _mock_engine_with_reflect("hook", ["score"])
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
         rows = [{"score": float(i)} for i in range(999)]
 
@@ -166,23 +220,29 @@ class TestInsertFeatures:
         assert count == 999
         assert conn.execute.call_count == 1
 
-    def test_builds_correct_insert_sql(self):
+    @pytest.mark.asyncio
+    async def test_insert_rejects_invalid_hook_name(self):
         engine = AsyncMock()
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
 
-        sql = store._build_insert_sql("pocket_detect", ["record_srn", "created_at", "score"])
-
-        assert f'"{FEATURES_SCHEMA}"."pocket_detect"' in sql
-        assert '"record_srn", "created_at", "score"' in sql
-        assert ":record_srn, :created_at, :score" in sql
+        with pytest.raises(ValidationError, match="Invalid identifier"):
+            await store.insert_features("'; DROP TABLE --", "urn:rec:1", [{"score": 1}])
 
     @pytest.mark.asyncio
-    async def test_uses_features_schema(self):
+    async def test_create_rejects_invalid_hook_name(self):
         engine, conn = _mock_engine()
+        store = PostgresFeatureStore(engine=engine, session=AsyncMock())
+
+        with pytest.raises(ValidationError, match="Invalid identifier"):
+            await store.create_table("'; DROP TABLE --", _make_hook())
+
+    @pytest.mark.asyncio
+    async def test_reflects_table_before_insert(self):
+        """insert_features reflects the real table schema instead of guessing types."""
+        engine, conn = _mock_engine_with_reflect("hook", ["score"])
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
 
         await store.insert_features("hook", "urn:rec:1", [{"score": 0.95}])
 
-        call_args = conn.execute.call_args
-        sql_text = str(call_args[0][0].text)
-        assert f'"{FEATURES_SCHEMA}"' in sql_text
+        # run_sync should have been called for reflection
+        conn.run_sync.assert_called_once()

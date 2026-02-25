@@ -70,3 +70,12 @@ class PostgresConventionRepository(ConventionRepository):
         stmt = select(conventions_table.c.srn).where(conventions_table.c.srn == str(srn))
         result = await self.session.execute(stmt)
         return result.first() is not None
+
+    async def list_with_source(self) -> List[Convention]:
+        stmt = (
+            select(conventions_table)
+            .where(conventions_table.c.source.isnot(None))
+            .order_by(conventions_table.c.created_at.desc())
+        )
+        result = await self.session.execute(stmt)
+        return [_row_to_convention(dict(r)) for r in result.mappings().all()]

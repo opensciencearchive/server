@@ -61,8 +61,10 @@ class FileStoragePort(Port, Protocol):
     ) -> None: ...
 
     @abstractmethod
-    def get_source_staging_dir(self, convention_srn: ConventionSRN) -> Path:
-        """Staging dir for source-ingested files. Bind-mounted into source containers.
+    def get_source_staging_dir(self, convention_srn: ConventionSRN, run_id: str) -> Path:
+        """Staging dir for source-ingested files, isolated per run.
+
+        Bind-mounted into source containers.
         Files written here are renamed into deposition dirs after deposition creation."""
         ...
 

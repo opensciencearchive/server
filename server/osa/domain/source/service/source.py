@@ -77,7 +77,7 @@ class SourceService(Service):
         )
 
         # Prepare dirs
-        staging_dir = self.file_storage.get_source_staging_dir(convention_srn)
+        staging_dir = self.file_storage.get_source_staging_dir(convention_srn, run_id)
         work_dir = self.file_storage.get_source_output_dir(convention_srn, run_id)
 
         # Build inputs
@@ -126,7 +126,7 @@ class SourceService(Service):
                 logger.info("  Processed %d records so far...", count)
 
         completed_at = datetime.now(UTC)
-        is_final_chunk = output.session is None
+        is_final_chunk = output.session is None or count == 0
 
         logger.info(
             "Source run completed: %d records (run=%s, is_final=%s)",

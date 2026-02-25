@@ -73,13 +73,16 @@ class OciSourceRunner(SourceRunner):
 
             start_time = time.monotonic()
 
-            image_ref = await self._resolve_image(source.image, source.digest)
-
             try:
-                result = await asyncio.wait_for(
-                    self._run_container(
+
+                async def _resolve_and_run():
+                    image_ref = await self._resolve_image(source.image, source.digest)
+                    return await self._run_container(
                         image_ref, staging_dir, files_dir, container_output, source, inputs
-                    ),
+                    )
+
+                result = await asyncio.wait_for(
+                    _resolve_and_run(),
                     timeout=timeout,
                 )
                 return result

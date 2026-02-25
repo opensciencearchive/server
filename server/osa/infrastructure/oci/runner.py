@@ -58,15 +58,18 @@ class OciHookRunner(HookRunner):
                 config = {**(hook.config or {}), **(inputs.config or {})}
                 (staging_dir / "config.json").write_text(json.dumps(config))
 
-            image_ref = await self._resolve_image(hook.image, hook.digest)
-
             start_time = time.monotonic()
 
             try:
-                result = await asyncio.wait_for(
-                    self._run_container(
+
+                async def _resolve_and_run():
+                    image_ref = await self._resolve_image(hook.image, hook.digest)
+                    return await self._run_container(
                         image_ref, staging_dir, inputs.files_dir, container_output, hook
-                    ),
+                    )
+
+                result = await asyncio.wait_for(
+                    _resolve_and_run(),
                     timeout=timeout,
                 )
                 result_duration = time.monotonic() - start_time
@@ -108,6 +111,7 @@ class OciHookRunner(HookRunner):
             if files_dir and files_dir.exists():
                 binds.append(f"{self._host_path(files_dir)}:/osa/in/files:ro")
 
+            # todo: use pydantic
             config = {
                 "Image": image_ref,
                 "Env": [
