@@ -1,8 +1,8 @@
 from typing import Any
 
 from osa.domain.shared.event import Event, EventId
-from osa.domain.shared.model.srn import DepositionSRN, ValidationRunSRN
-from osa.domain.validation.model import CheckResult, RunStatus
+from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, ValidationRunSRN
+from osa.domain.validation.model import RunStatus
 
 
 class ValidationCompleted(Event):
@@ -11,6 +11,7 @@ class ValidationCompleted(Event):
     id: EventId
     validation_run_srn: ValidationRunSRN
     deposition_srn: DepositionSRN
+    convention_srn: ConventionSRN
     status: RunStatus
-    results: list[CheckResult]
-    metadata: dict[str, Any]  # Pass through the original metadata
+    hook_results: list[dict[str, Any]]
+    metadata: dict[str, Any]

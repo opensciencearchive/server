@@ -273,14 +273,12 @@ class WorkerPool:
         self,
         container: AsyncContainer | None = None,
         stale_claim_interval: float = 60.0,
-        schedules: "ScheduleConfigs | None" = None,
     ) -> None:
         self._container = container
         self._workers: list[Worker] = []
         self._stale_claim_interval = stale_claim_interval
         self._stale_claim_task: asyncio.Task | None = None
         self._shutdown = False
-        self._schedules = schedules or ScheduleConfigs([])
         self._scheduler: AsyncScheduler | None = None
         self._exit_stack: AsyncExitStack | None = None
         self._schedule_failures: dict[str, int] = {}
@@ -351,8 +349,9 @@ class WorkerPool:
         self._scheduler = AsyncScheduler()
         await self._exit_stack.enter_async_context(self._scheduler)
 
-        # Register schedules as cron tasks
-        for config in self._schedules:
+        # Build schedules dynamically from conventions with sources
+        schedules = await self._build_schedules_from_conventions()
+        for config in schedules:
             await self._scheduler.add_schedule(
                 self._run_schedule,
                 CronTrigger.from_crontab(config.cron),
@@ -377,9 +376,41 @@ class WorkerPool:
             )
 
         logger.info(
-            f"WorkerPool started with {len(self._workers)} workers, "
-            f"{len(self._schedules)} schedules"
+            f"WorkerPool started with {len(self._workers)} workers, {len(schedules)} schedules"
         )
+
+    async def _build_schedules_from_conventions(self) -> list[ScheduleConfig]:
+        """Query conventions with sources and build schedule configs."""
+        if self._container is None:
+            return []
+
+        from osa.domain.deposition.service.convention import ConventionService
+        from osa.domain.source.schedule import SourceSchedule as SourceScheduleType
+
+        configs: list[ScheduleConfig] = []
+        try:
+            async with self._container(scope=Scope.UOW, context={Identity: System()}) as scope:
+                convention_service = await scope.get(ConventionService)
+                conventions = await convention_service.list_conventions_with_source()
+
+                for conv in conventions:
+                    if conv.source is None or conv.source.schedule is None:
+                        continue
+                    configs.append(
+                        ScheduleConfig(
+                            schedule_type=SourceScheduleType,
+                            cron=conv.source.schedule.cron,
+                            id=f"source-{conv.srn}",
+                            params={
+                                "convention": str(conv.srn),
+                                "limit": conv.source.schedule.limit,
+                            },
+                        )
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to build schedules from conventions: {e}")
+
+        return configs
 
     async def _emit_server_started(self) -> None:
         """Emit ServerStarted event to trigger startup handlers."""

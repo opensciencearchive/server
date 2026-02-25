@@ -1,12 +1,15 @@
-from osa.util.di.scope import Scope
 from typing import AsyncIterable
 
 import aiodocker
 from dishka import provide
 
-from osa.domain.validation.port.runner import ValidatorRunner
-from osa.infrastructure.oci.runner import DockerValidatorRunner
+from osa.config import Config
+from osa.domain.source.port.source_runner import SourceRunner
+from osa.domain.validation.port.hook_runner import HookRunner
+from osa.infrastructure.oci.runner import OciHookRunner
+from osa.infrastructure.oci.source_runner import OciSourceRunner
 from osa.util.di.base import Provider
+from osa.util.di.scope import Scope
 
 
 class OciProvider(Provider):
@@ -17,5 +20,9 @@ class OciProvider(Provider):
         await docker.close()
 
     @provide(scope=Scope.UOW)
-    def get_runner(self, docker: aiodocker.Docker) -> ValidatorRunner:
-        return DockerValidatorRunner(docker=docker)
+    def get_hook_runner(self, docker: aiodocker.Docker, config: Config) -> HookRunner:
+        return OciHookRunner(docker=docker, host_data_dir=config.host_data_dir)
+
+    @provide(scope=Scope.UOW)
+    def get_source_runner(self, docker: aiodocker.Docker, config: Config) -> SourceRunner:
+        return OciSourceRunner(docker=docker, host_data_dir=config.host_data_dir)

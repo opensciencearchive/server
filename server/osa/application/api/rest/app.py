@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 import logfire
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from osa.application.api.v1.errors import map_osa_error
 from osa.application.api.v1.routes import (
@@ -25,7 +26,7 @@ from osa.config import Config, configure_logging
 from osa.domain.shared.authorization.startup import validate_all_handlers
 from osa.domain.shared.error import OSAError
 from osa.infrastructure.event.worker import WorkerPool
-from osa.infrastructure.source.discovery import validate_sources_at_startup
+from osa.infrastructure.persistence.seed import ensure_system_user
 from osa.util.di.fastapi import setup_dishka
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,10 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     container = app.state.dishka_container
+
+    # Seed required system rows before anything else
+    engine = await container.get(AsyncEngine)
+    await ensure_system_user(engine)
 
     # Run unified worker pool (pull-based event handlers + scheduled tasks)
     worker_pool = await container.get(WorkerPool)
@@ -52,9 +57,6 @@ def create_app() -> FastAPI:
     # Configure logging early
     configure_logging(config.logging)
     logger.info("Starting OSA server: %s v%s", config.server.name, config.server.version)
-
-    # Validate source configs at startup (fail fast with clear errors)
-    validate_sources_at_startup(config.sources)
 
     # Validate all handlers have authorization declarations (fail fast)
     validate_all_handlers()

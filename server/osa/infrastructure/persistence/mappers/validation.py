@@ -1,23 +1,15 @@
 from typing import Any
 
 from osa.domain.shared.model.srn import ValidationRunSRN
-from osa.domain.validation.model import CheckResult, ValidationRun
-from osa.domain.validation.model.value import CheckStatus, RunStatus
+from osa.domain.validation.model import ValidationRun
+from osa.domain.validation.model.hook_result import HookResult
+from osa.domain.validation.model.value import RunStatus
 
 
 def row_to_validation_run(row: dict[str, Any]) -> ValidationRun:
     """Convert database row to ValidationRun entity."""
     results_data = row.get("results", []) or []
-    results = [
-        CheckResult(
-            check_id=r["check_id"],
-            validator_digest=r["validator_digest"],
-            status=CheckStatus(r["status"]),
-            message=r.get("message"),
-            details=r.get("details"),
-        )
-        for r in results_data
-    ]
+    results = [HookResult(**r) for r in results_data]
     return ValidationRun(
         srn=ValidationRunSRN.parse(row["srn"]),
         status=RunStatus(row["status"]),

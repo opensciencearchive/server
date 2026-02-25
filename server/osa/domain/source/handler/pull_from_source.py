@@ -6,7 +6,7 @@ from osa.domain.source.service import SourceService
 
 
 class PullFromSource(EventHandler[SourceRequested]):
-    """Pulls from a data source and creates depositions.
+    """Runs a source container and creates depositions from its output.
 
     This handler delegates to SourceService for all business logic.
     Supports chunked processing with continuation events.
@@ -15,9 +15,9 @@ class PullFromSource(EventHandler[SourceRequested]):
     service: SourceService
 
     async def handle(self, event: SourceRequested) -> None:
-        """Delegate to SourceService to pull records and emit deposition events."""
+        """Delegate to SourceService to run source container and create depositions."""
         await self.service.run_source(
-            source_name=event.source_name,
+            convention_srn=event.convention_srn,
             since=event.since,
             limit=event.limit,
             offset=event.offset,

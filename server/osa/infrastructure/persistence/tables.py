@@ -242,8 +242,25 @@ conventions_table = Table(
     Column("description", Text, nullable=True),
     Column("schema_srn", String, nullable=False),  # Reference to schemas.srn
     Column("file_requirements", JSON, nullable=False),  # FileRequirements as dict
-    Column("validator_refs", JSON, nullable=False, default=[]),  # List of ValidatorRef dicts
+    Column("hooks", JSON, nullable=False, default=[]),  # List of HookDefinition dicts
+    Column("source", JSON, nullable=True),  # SourceDefinition as dict
     Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+
+# ============================================================================
+# FEATURE TABLES CATALOG (Validation)
+# ============================================================================
+feature_tables_table = Table(
+    "feature_tables",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("hook_name", String, nullable=False),
+    Column("pg_table", String, nullable=False),
+    Column("feature_schema", JSON, nullable=False),
+    Column("schema_version", Integer, nullable=False, default=1),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("hook_name", name="uq_feature_tables_hook_name"),
 )
 
 

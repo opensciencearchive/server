@@ -3,65 +3,58 @@
 import logging
 from uuid import uuid4
 
-from osa.config import Config
 from osa.domain.deposition.event.submitted import DepositionSubmittedEvent
 from osa.domain.shared.event import EventHandler, EventId
-from osa.domain.shared.model.srn import Domain, LocalId, ValidationRunSRN
 from osa.domain.shared.outbox import Outbox
 from osa.domain.validation.event.validation_completed import ValidationCompleted
 from osa.domain.validation.event.validation_failed import ValidationFailed
 from osa.domain.validation.model import RunStatus
+from osa.domain.validation.service.validation import ValidationService
 
 logger = logging.getLogger(__name__)
 
 
 class ValidateDeposition(EventHandler[DepositionSubmittedEvent]):
-    """Runs validation on depositions. 0 validators = instant pass."""
+    """Runs hooks on depositions. 0 hooks = instant pass."""
 
     outbox: Outbox
-    config: Config
+    validation_service: ValidationService
 
     async def handle(self, event: DepositionSubmittedEvent) -> None:
-        """Run validators and emit ValidationCompleted or ValidationFailed."""
+        """Run hooks and emit ValidationCompleted or ValidationFailed."""
         logger.debug(f"Validating deposition: {event.deposition_id}")
 
-        domain = Domain(self.config.server.domain)
+        try:
+            run, hook_results, dep = await self.validation_service.validate_deposition(
+                event.deposition_id
+            )
+        except ValueError:
+            logger.error(f"Validation setup failed for: {event.deposition_id}")
+            return
 
-        # Create validation run SRN
-        val_run_srn = ValidationRunSRN(
-            domain=domain,
-            id=LocalId(str(uuid4())),
-        )
-
-        # Run validators (none configured = instant pass)
-        # TODO: Load configured validators from convention
-        validators: list = []  # Empty for v1
-        if not validators:
-            logger.debug("No validators configured, instant pass")
-            status = RunStatus.COMPLETED
-            results = []
-            failure_reasons: list[str] = []
-        else:
-            # TODO: Actually run validators
-            status = RunStatus.COMPLETED
-            results = []
-            failure_reasons = []
-
-        if status == RunStatus.FAILED:
+        if run.status in (RunStatus.FAILED, RunStatus.REJECTED):
+            reasons = [
+                r.error_message or r.rejection_reason or "Unknown"
+                for r in hook_results
+                if r.error_message or r.rejection_reason
+            ]
             failed = ValidationFailed(
                 id=EventId(uuid4()),
                 deposition_srn=event.deposition_id,
-                reasons=failure_reasons,
+                convention_srn=dep.convention_srn,
+                status=run.status,
+                reasons=reasons,
             )
             await self.outbox.append(failed)
             logger.info(f"Validation failed for: {event.deposition_id}")
         else:
             completed = ValidationCompleted(
                 id=EventId(uuid4()),
-                validation_run_srn=val_run_srn,
+                validation_run_srn=run.srn,
                 deposition_srn=event.deposition_id,
-                status=status,
-                results=results,
+                convention_srn=dep.convention_srn,
+                status=run.status,
+                hook_results=[r.model_dump() for r in hook_results],
                 metadata=event.metadata,
             )
             await self.outbox.append(completed)

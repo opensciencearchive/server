@@ -6,8 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.port.convention_repository import ConventionRepository
+from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.model.source import SourceDefinition
 from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
-from osa.domain.shared.model.validator import ValidatorRef
 from osa.infrastructure.persistence.tables import conventions_table
 
 
@@ -18,19 +19,22 @@ def _convention_to_row(convention: Convention) -> dict[str, Any]:
         "description": convention.description,
         "schema_srn": str(convention.schema_srn),
         "file_requirements": convention.file_requirements.model_dump(),
-        "validator_refs": [v.model_dump() for v in convention.validator_refs],
+        "hooks": [h.model_dump() for h in convention.hooks],
+        "source": convention.source.model_dump() if convention.source else None,
         "created_at": convention.created_at,
     }
 
 
 def _row_to_convention(row: dict[str, Any]) -> Convention:
+    source_data = row.get("source")
     return Convention(
         srn=ConventionSRN.parse(row["srn"]),
         title=row["title"],
         description=row.get("description"),
         schema_srn=SchemaSRN.parse(row["schema_srn"]),
         file_requirements=FileRequirements.model_validate(row["file_requirements"]),
-        validator_refs=[ValidatorRef.model_validate(v) for v in (row.get("validator_refs") or [])],
+        hooks=[HookDefinition.model_validate(h) for h in (row.get("hooks") or [])],
+        source=SourceDefinition.model_validate(source_data) if source_data else None,
         created_at=row["created_at"],
     )
 
@@ -66,3 +70,12 @@ class PostgresConventionRepository(ConventionRepository):
         stmt = select(conventions_table.c.srn).where(conventions_table.c.srn == str(srn))
         result = await self.session.execute(stmt)
         return result.first() is not None
+
+    async def list_with_source(self) -> List[Convention]:
+        stmt = (
+            select(conventions_table)
+            .where(conventions_table.c.source.isnot(None))
+            .order_by(conventions_table.c.created_at.desc())
+        )
+        result = await self.session.execute(stmt)
+        return [_row_to_convention(dict(r)) for r in result.mappings().all()]

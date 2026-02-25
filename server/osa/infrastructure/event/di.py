@@ -5,23 +5,19 @@ from typing import Any, NewType
 
 from dishka import AsyncContainer, provide
 
-from osa.config import Config
 from osa.domain.curation.handler import AutoApproveCuration
 from osa.domain.deposition.handler.return_to_draft import ReturnToDraft
+from osa.domain.feature.handler import InsertRecordFeatures
 from osa.domain.index.handler import FanOutToIndexBackends, KeywordIndexHandler, VectorIndexHandler
 from osa.domain.record.handler import ConvertDepositionToRecord
 from osa.domain.shared.event import EventHandler
 from osa.domain.shared.event_log import EventLog
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.event_repository import EventRepository
-from osa.domain.source.handler import PullFromSource, TriggerInitialSourceRun
+from osa.domain.source.handler import PullFromSource, TriggerSourceOnDeploy
 from osa.domain.source.schedule import SourceSchedule
 from osa.domain.validation.handler import ValidateDeposition
-from osa.infrastructure.event.worker import (
-    ScheduleConfig,
-    ScheduleConfigs,
-    WorkerPool,
-)
+from osa.infrastructure.event.worker import WorkerPool
 from osa.util.di.base import Provider
 from osa.util.di.scope import Scope
 
@@ -35,7 +31,7 @@ HandlerTypes = NewType("HandlerTypes", list[type[EventHandler[Any]]])
 HANDLERS: HandlerTypes = HandlerTypes(
     [
         # Source handlers
-        TriggerInitialSourceRun,
+        TriggerSourceOnDeploy,
         PullFromSource,
         # Validation handlers
         ValidateDeposition,
@@ -45,6 +41,8 @@ HANDLERS: HandlerTypes = HandlerTypes(
         AutoApproveCuration,
         # Record handlers
         ConvertDepositionToRecord,
+        # Feature handlers
+        InsertRecordFeatures,
         # Index handlers
         FanOutToIndexBackends,
         VectorIndexHandler,
@@ -83,41 +81,17 @@ class EventProvider(Provider):
         return HANDLERS
 
     @provide(scope=Scope.APP)
-    def get_schedule_configs(self, config: Config) -> ScheduleConfigs:
-        """Build schedule configs from application config."""
-        configs: list[ScheduleConfig] = []
-
-        for source in config.sources:
-            if source.schedule is None:
-                continue
-
-            configs.append(
-                ScheduleConfig(
-                    schedule_type=SourceSchedule,
-                    cron=source.schedule.cron,
-                    id=f"source-{source.name}",
-                    params={
-                        "source_name": source.name,
-                        "limit": source.schedule.limit,
-                    },
-                )
-            )
-
-        return ScheduleConfigs(configs)
-
-    @provide(scope=Scope.APP)
     def get_worker_pool(
         self,
         container: AsyncContainer,
         handler_types: HandlerTypes,
-        schedules: ScheduleConfigs,
     ) -> WorkerPool:
         """WorkerPool with pull-based event handlers.
 
-        Registers all handlers and scheduled tasks.
-        Workers use the container to create scoped dependencies per operation.
+        Registers all handlers. Schedules are built dynamically at startup
+        by querying conventions with sources.
         """
-        pool = WorkerPool(container=container, stale_claim_interval=60.0, schedules=schedules)
+        pool = WorkerPool(container=container, stale_claim_interval=60.0)
 
         # Register all handlers
         for handler_type in handler_types:

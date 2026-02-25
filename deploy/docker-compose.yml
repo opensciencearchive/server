@@ -22,11 +22,15 @@ services:
       OSA_DATABASE__URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-osa}@db:5432/${POSTGRES_DB:-osa}
       OSA_DATA_DIR: /data
       OSA_LOGGING__LEVEL: ${LOG_LEVEL:-INFO}
+      OSA_AUTH__JWT__SECRET: ${JWT_SECRET:-change-me-in-production-must-be-32-chars-long}
     depends_on:
       db:
         condition: service_healthy
+    ports:
+      - "${SERVER_PORT:-8000}:8000"
     volumes:
       - server_data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8000/api/v1/health"]
       interval: 30s

@@ -10,7 +10,6 @@ from osa.domain.deposition.command.upload import UploadFileHandler
 from osa.domain.deposition.command.upload_spreadsheet import UploadSpreadsheetHandler
 from osa.domain.deposition.port.convention_repository import ConventionRepository
 from osa.domain.deposition.port.repository import DepositionRepository
-from osa.domain.deposition.port.schema_reader import SchemaReader
 from osa.domain.deposition.port.spreadsheet import SpreadsheetPort
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.deposition.query.download_file import DownloadFileHandler
@@ -21,6 +20,8 @@ from osa.domain.deposition.query.list_conventions import ListConventionsHandler
 from osa.domain.deposition.query.list_depositions import ListDepositionsHandler
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.deposition.service.deposition import DepositionService
+from osa.domain.feature.service.feature import FeatureService
+from osa.domain.semantics.service.schema import SchemaService
 from osa.domain.shared.model.srn import Domain
 from osa.domain.shared.outbox import Outbox
 from osa.infrastructure.persistence.adapter.spreadsheet import OpenpyxlSpreadsheetAdapter
@@ -50,12 +51,16 @@ class DepositionProvider(Provider):
     def get_convention_service(
         self,
         convention_repo: ConventionRepository,
-        schema_reader: SchemaReader,
+        schema_service: SchemaService,
+        feature_service: FeatureService,
+        outbox: Outbox,
         config: Config,
     ) -> ConventionService:
         return ConventionService(
             convention_repo=convention_repo,
-            schema_reader=schema_reader,
+            schema_service=schema_service,
+            feature_service=feature_service,
+            outbox=outbox,
             node_domain=Domain(config.server.domain),
         )
 

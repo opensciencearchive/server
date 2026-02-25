@@ -53,6 +53,13 @@ class Outbox(Service):
         """Find the most recent event of a given type."""
         return await self._repo.find_latest_by_type(event_type)
 
+    async def find_latest_where(self, event_type: type[E], **payload_filters: str) -> E | None:
+        """Find the most recent event of a given type matching payload field filters."""
+        if len(payload_filters) != 1:
+            raise ValueError("Exactly one payload filter required")
+        field, value = next(iter(payload_filters.items()))
+        return await self._repo.find_latest_by_type_and_field(event_type, field, value)
+
     async def claim(
         self,
         event_types: list[type[Event]],
