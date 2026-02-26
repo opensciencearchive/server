@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from pydantic import ConfigDict, Field
+
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.semantics.model.value import FieldDefinition
@@ -11,9 +13,11 @@ from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
 
 
 class CreateConvention(Command):
+    model_config = ConfigDict(populate_by_name=True)
+
     title: str
     version: str
-    schema: list[FieldDefinition]
+    schema_fields: list[FieldDefinition] = Field(alias="schema")
     file_requirements: FileRequirements
     description: str | None = None
     hooks: list[HookDefinition] = []
@@ -36,7 +40,7 @@ class CreateConventionHandler(CommandHandler[CreateConvention, ConventionCreated
         convention = await self.convention_service.create_convention(
             title=cmd.title,
             version=cmd.version,
-            schema=cmd.schema,
+            schema=cmd.schema_fields,
             file_requirements=cmd.file_requirements,
             description=cmd.description,
             hooks=cmd.hooks,

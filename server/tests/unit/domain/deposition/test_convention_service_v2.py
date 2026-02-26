@@ -7,12 +7,7 @@ import pytest
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.semantics.model.value import Cardinality, FieldDefinition, FieldType
-from osa.domain.shared.model.hook import (
-    ColumnDef,
-    FeatureSchema,
-    HookDefinition,
-    HookManifest,
-)
+from osa.domain.shared.model.hook import ColumnDef, FeatureSchema, HookDefinition, HookManifest
 from osa.domain.deposition.event.convention_registered import ConventionRegistered
 from osa.domain.shared.model.source import SourceDefinition
 from osa.domain.shared.model.srn import Domain, SchemaSRN
@@ -72,7 +67,6 @@ def _make_source_def() -> SourceDefinition:
 def _make_service(
     conv_repo: AsyncMock | None = None,
     schema_service: AsyncMock | None = None,
-    feature_service: AsyncMock | None = None,
     outbox: AsyncMock | None = None,
 ) -> ConventionService:
     """Create a ConventionService with mock deps."""
@@ -86,7 +80,6 @@ def _make_service(
     return ConventionService(
         convention_repo=conv_repo or AsyncMock(),
         schema_service=mock_schema_service,
-        feature_service=feature_service or AsyncMock(),
         outbox=outbox or AsyncMock(),
         node_domain=Domain("localhost"),
     )
@@ -159,9 +152,9 @@ class TestCreateConventionWithInlineSchema:
         assert result.source is None
 
     @pytest.mark.asyncio
-    async def test_convention_with_hooks_creates_feature_tables(self):
-        feature_service = AsyncMock()
-        service = _make_service(feature_service=feature_service)
+    async def test_convention_with_hooks_emits_hooks_in_event(self):
+        outbox = AsyncMock()
+        service = _make_service(outbox=outbox)
         hooks = [_make_hook_def()]
         await service.create_convention(
             title="With Hooks",
@@ -170,7 +163,9 @@ class TestCreateConventionWithInlineSchema:
             file_requirements=_make_file_reqs(),
             hooks=hooks,
         )
-        feature_service.create_table.assert_called_once()
+        emitted = outbox.append.call_args[0][0]
+        assert len(emitted.hooks) == 1
+        assert emitted.hooks[0].name == "detect_pockets"
 
 
 class TestConventionRegisteredEvent:

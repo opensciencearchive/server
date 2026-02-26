@@ -121,7 +121,8 @@ class TestWorkerPollLoop:
         assert len(handler.processed_events) == 1
         assert handler.processed_events[0] == event1
         outbox.claim.assert_called_once()
-        outbox.mark_delivered.assert_called_once_with(event1.id)
+        # Worker uses _delivery_id from claim result, falls back to str(event.id)
+        outbox.mark_delivered.assert_called_once_with(str(event1.id))
 
     @pytest.mark.asyncio
     async def test_worker_returns_false_when_no_events(self):

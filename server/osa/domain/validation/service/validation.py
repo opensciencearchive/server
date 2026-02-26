@@ -3,13 +3,22 @@
 import logging
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
-from osa.domain.deposition.model.aggregate import Deposition
-from osa.domain.deposition.port.convention_repository import ConventionRepository
-from osa.domain.deposition.port.repository import DepositionRepository
-from osa.domain.deposition.port.storage import FileStoragePort
-from osa.domain.shared.model.hook import HookDefinition
-from osa.domain.shared.model.srn import DepositionSRN, Domain, LocalId, ValidationRunSRN
+from osa.domain.shared.model.hook import (
+    FeatureSchema,
+    HookDefinition,
+    HookManifest,
+)
+from osa.domain.shared.model.hook_snapshot import HookSnapshot
+from osa.domain.shared.model.srn import (
+    ConventionSRN,
+    DepositionSRN,
+    Domain,
+    LocalId,
+    ValidationRunSRN,
+)
 from osa.domain.shared.service import Service
 from osa.domain.validation.model import (
     RunStatus,
@@ -18,8 +27,24 @@ from osa.domain.validation.model import (
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.domain.validation.port.repository import ValidationRunRepository
+from osa.domain.validation.port.storage import HookStoragePort
 
 logger = logging.getLogger(__name__)
+
+
+def _snapshot_to_hook_definition(snapshot: HookSnapshot) -> HookDefinition:
+    """Convert a HookSnapshot to a HookDefinition for the runner."""
+    return HookDefinition(
+        image=snapshot.image,
+        digest=snapshot.digest,
+        config=snapshot.config or None,
+        manifest=HookManifest(
+            name=snapshot.name,
+            record_schema="",
+            cardinality="one",
+            feature_schema=FeatureSchema(columns=snapshot.features),
+        ),
+    )
 
 
 class ValidationService(Service):
@@ -27,9 +52,7 @@ class ValidationService(Service):
 
     run_repo: ValidationRunRepository
     hook_runner: HookRunner
-    file_storage: FileStoragePort
-    deposition_repo: DepositionRepository
-    convention_repo: ConventionRepository
+    hook_storage: HookStoragePort
     node_domain: Domain
 
     async def create_run(
@@ -59,7 +82,7 @@ class ValidationService(Service):
         run: ValidationRun,
         deposition_srn: DepositionSRN,
         inputs: HookInputs,
-        hooks: list[HookDefinition],
+        hooks: list[HookSnapshot],
     ) -> tuple[ValidationRun, list[HookResult]]:
         """Execute hooks sequentially. Halt on reject/fail.
 
@@ -68,14 +91,14 @@ class ValidationService(Service):
         """
         run.status = RunStatus.RUNNING
         run.started_at = datetime.now(timezone.utc)
-        # todo: find a way to commit this mid-transaction, or maybe split it out into async events?
         await self.run_repo.save(run)
 
         hook_results: list[HookResult] = []
         overall_status: RunStatus = RunStatus.COMPLETED
 
-        for hook_def in hooks:
-            work_dir = self.file_storage.get_hook_output_dir(deposition_srn, hook_def.manifest.name)
+        for hook_snapshot in hooks:
+            work_dir = self.hook_storage.get_hook_output_dir(deposition_srn, hook_snapshot.name)
+            hook_def = _snapshot_to_hook_definition(hook_snapshot)
             result = await self.hook_runner.run(hook_def, inputs, work_dir)
             hook_results.append(result)
 
@@ -94,37 +117,36 @@ class ValidationService(Service):
         return run, hook_results
 
     async def validate_deposition(
-        self, deposition_srn: DepositionSRN
-    ) -> tuple[ValidationRun, list[HookResult], Deposition]:
-        """Full validation workflow: look up deposition, build inputs, run hooks."""
-        dep = await self.deposition_repo.get(deposition_srn)
-        if dep is None:
-            raise ValueError(f"Deposition not found: {deposition_srn}")
-
-        convention = await self.convention_repo.get(dep.convention_srn)
-        if convention is None:
-            raise ValueError(f"Convention not found: {dep.convention_srn}")
-
-        record_json = {"srn": str(dep.srn), "metadata": dep.metadata}
-        files_dir = self.file_storage.get_files_dir(dep.srn)
-        inputs = HookInputs(record_json=record_json, files_dir=files_dir)
+        self,
+        deposition_srn: DepositionSRN,
+        convention_srn: ConventionSRN,
+        metadata: dict[str, Any],
+        hooks: list[HookSnapshot],
+        files_dir: str,
+    ) -> tuple[ValidationRun, list[HookResult]]:
+        """Full validation workflow using enriched event data."""
+        record_json = {"srn": str(deposition_srn), "metadata": metadata}
+        inputs = HookInputs(
+            record_json=record_json,
+            files_dir=Path(files_dir) if files_dir else None,
+        )
 
         run = await self.create_run(inputs=inputs)
 
-        if not convention.hooks:
+        if not hooks:
             logger.debug("No hooks configured, instant pass")
             run.status = RunStatus.COMPLETED
             await self.run_repo.save(run)
-            return run, [], dep
+            return run, []
 
         run, hook_results = await self.run_hooks(
             run=run,
-            deposition_srn=dep.srn,
+            deposition_srn=deposition_srn,
             inputs=inputs,
-            hooks=convention.hooks,
+            hooks=hooks,
         )
 
-        return run, hook_results, dep
+        return run, hook_results
 
     async def save_run(self, run: ValidationRun) -> None:
         """Persist a validation run."""

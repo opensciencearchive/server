@@ -15,6 +15,8 @@ from osa.domain.deposition.port.repository import DepositionRepository
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.error import NotFoundError, ValidationError
 from osa.domain.shared.event import EventId
+from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.model.hook_snapshot import HookSnapshot
 from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, Domain, LocalId
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
@@ -172,6 +174,13 @@ class DepositionService(Service):
         stream = await self.file_storage.get_file(srn, filename)
         return stream, file_meta
 
+    async def return_to_draft(self, srn: DepositionSRN) -> Deposition:
+        """Transition a deposition back to DRAFT (e.g. after validation failure)."""
+        dep = await self.get(srn)
+        dep.return_to_draft()
+        await self.deposition_repo.save(dep)
+        return dep
+
     async def submit(self, srn: DepositionSRN) -> Deposition:
         dep = await self.get(srn)
         convention = await self.convention_repo.get(dep.convention_srn)
@@ -187,13 +196,33 @@ class DepositionService(Service):
         dep.submit()
         await self.deposition_repo.save(dep)
 
+        hook_snapshots = _to_hook_snapshots(convention.hooks)
+        files_dir = self.file_storage.get_files_dir(dep.srn)
+
         event = DepositionSubmittedEvent(
             id=EventId(uuid4()),
             deposition_id=srn,
             metadata=dep.metadata,
+            convention_srn=dep.convention_srn,
+            hooks=hook_snapshots,
+            files_dir=str(files_dir),
         )
         await self.outbox.append(event)
         return dep
+
+
+def _to_hook_snapshots(hooks: list[HookDefinition]) -> list[HookSnapshot]:
+    """Convert HookDefinitions to HookSnapshots for event payload."""
+    return [
+        HookSnapshot(
+            name=h.manifest.name,
+            image=h.image,
+            digest=h.digest,
+            features=h.manifest.feature_schema.columns,
+            config=h.config or {},
+        )
+        for h in hooks
+    ]
 
 
 def _get_extension(filename: str) -> str:
