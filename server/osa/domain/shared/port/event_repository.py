@@ -10,36 +10,28 @@ E = TypeVar("E", bound=Event)
 class EventRepository(Protocol):
     """Repository for domain events - pure data access.
 
-    Delivery semantics (pending/delivered/failed) are handled by the Outbox service.
+    Events are stored in an append-only log. Delivery tracking is handled
+    via a separate deliveries table, one row per (event, consumer_group) pair.
     """
 
-    async def save(
-        self, event: Event, status: str = "pending", routing_key: str | None = None
+    async def save_with_deliveries(
+        self,
+        event: Event,
+        consumer_groups: set[str],
+        routing_key: str | None = None,
     ) -> None:
-        """Persist an event with initial status and optional routing key."""
+        """Save event to the append-only log and create delivery rows.
+
+        Args:
+            event: The event to persist.
+            consumer_groups: Set of consumer group names to create deliveries for.
+                If empty, the event is saved without any delivery rows (audit-only).
+            routing_key: Optional routing key stored on delivery rows for filtering.
+        """
         ...
 
     async def get(self, event_id: EventId) -> Event | None:
         """Get an event by ID."""
-        ...
-
-    async def update_status(
-        self,
-        event_id: EventId,
-        status: str,
-        error: str | None = None,
-    ) -> None:
-        """Update an event's delivery status."""
-        ...
-
-    async def find_pending(self, limit: int = 100, fair: bool = True) -> list[Event]:
-        """Find events with pending status.
-
-        Args:
-            limit: Maximum number of events to return.
-            fair: If True, fetch equally from each event type (round-robin).
-                  If False, use strict FIFO ordering (oldest first).
-        """
         ...
 
     async def find_latest_by_type(self, event_type: type[E]) -> E | None:
@@ -77,33 +69,46 @@ class EventRepository(Protocol):
         """Count events, optionally filtered by types."""
         ...
 
-    async def claim(
+    async def claim_delivery(
         self,
+        consumer_group: str,
         event_types: list[str],
-        limit: int,
-        routing_key: str | None = None,
+        limit: int = 1,
     ) -> ClaimResult:
-        """Claim pending events for processing using FOR UPDATE SKIP LOCKED.
+        """Claim pending deliveries for a specific consumer group.
 
-        This atomically:
-        1. Selects pending events matching event_types and routing_key
-        2. Locks them with FOR UPDATE SKIP LOCKED (concurrent workers skip)
-        3. Sets status to 'claimed' and claimed_at to current timestamp
+        Atomically selects and locks delivery rows using FOR UPDATE SKIP LOCKED.
+        Joins to the events table to return the full event payload.
 
         Args:
-            event_types: Event type names to claim (class names).
-            limit: Maximum number of events to claim.
-            routing_key: Optional routing key filter. If None, claims unrouted events only.
+            consumer_group: The handler class name claiming deliveries.
+            event_types: Event type names to claim.
+            limit: Maximum deliveries to claim.
 
         Returns:
             ClaimResult containing claimed events and timestamp.
         """
         ...
 
-    async def reset_stale_claims(self, timeout_seconds: float) -> int:
-        """Reset events that have been claimed for longer than timeout.
+    async def mark_delivery_status(
+        self,
+        delivery_id: str,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        """Update a delivery's status.
 
-        Sets status back to 'pending' for events where:
+        Args:
+            delivery_id: The delivery row ID.
+            status: New status (delivered, failed, skipped).
+            error: Optional error message for failed/skipped.
+        """
+        ...
+
+    async def reset_stale_deliveries(self, timeout_seconds: float) -> int:
+        """Reset deliveries that have been claimed for too long.
+
+        Sets status back to 'pending' for deliveries where:
         - status = 'claimed'
         - claimed_at < now() - timeout_seconds
 
@@ -111,24 +116,24 @@ class EventRepository(Protocol):
             timeout_seconds: Consider claims older than this as stale.
 
         Returns:
-            Number of events reset.
+            Number of deliveries reset.
         """
         ...
 
     async def mark_failed_with_retry(
         self,
-        event_id: "EventId",
+        delivery_id: str,
         error: str,
         max_retries: int,
     ) -> None:
-        """Mark an event as failed with retry logic.
+        """Mark a delivery as failed with retry logic.
 
         If retry_count < max_retries, increments retry_count and resets
         status to 'pending' for retry.
         If retry_count >= max_retries, sets status to 'failed' permanently.
 
         Args:
-            event_id: The event ID.
+            delivery_id: The delivery row ID.
             error: Error message to record.
             max_retries: Maximum retry attempts before marking as failed.
         """

@@ -8,15 +8,15 @@ from osa.domain.shared.event import EventHandler
 class InsertRecordFeatures(EventHandler[RecordPublished]):
     """Reads hook outputs from cold storage and inserts features with record_srn.
 
-    Triggered after a record is published. Delegates to FeatureService which
-    looks up the deposition's convention, reads features.json from each hook's
-    output directory, and inserts them into the feature tables.
+    Uses enriched RecordPublished event data (hooks list) instead of
+    looking up the convention.
     """
 
     feature_service: FeatureService
 
     async def handle(self, event: RecordPublished) -> None:
-        # todo: error handling?
         await self.feature_service.insert_features_for_record(
-            event.deposition_srn, str(event.record_srn)
+            deposition_srn=event.deposition_srn,
+            record_srn=str(event.record_srn),
+            hooks=event.hooks,
         )

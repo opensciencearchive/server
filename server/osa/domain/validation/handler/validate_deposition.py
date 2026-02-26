@@ -25,8 +25,12 @@ class ValidateDeposition(EventHandler[DepositionSubmittedEvent]):
         logger.debug(f"Validating deposition: {event.deposition_id}")
 
         try:
-            run, hook_results, dep = await self.validation_service.validate_deposition(
-                event.deposition_id
+            run, hook_results = await self.validation_service.validate_deposition(
+                deposition_srn=event.deposition_id,
+                convention_srn=event.convention_srn,
+                metadata=event.metadata,
+                hooks=event.hooks,
+                files_dir=event.files_dir,
             )
         except ValueError:
             logger.error(f"Validation setup failed for: {event.deposition_id}")
@@ -41,7 +45,7 @@ class ValidateDeposition(EventHandler[DepositionSubmittedEvent]):
             failed = ValidationFailed(
                 id=EventId(uuid4()),
                 deposition_srn=event.deposition_id,
-                convention_srn=dep.convention_srn,
+                convention_srn=event.convention_srn,
                 status=run.status,
                 reasons=reasons,
             )
@@ -52,10 +56,12 @@ class ValidateDeposition(EventHandler[DepositionSubmittedEvent]):
                 id=EventId(uuid4()),
                 validation_run_srn=run.srn,
                 deposition_srn=event.deposition_id,
-                convention_srn=dep.convention_srn,
+                convention_srn=event.convention_srn,
                 status=run.status,
                 hook_results=[r.model_dump() for r in hook_results],
                 metadata=event.metadata,
+                hooks=event.hooks,
+                files_dir=event.files_dir,
             )
             await self.outbox.append(completed)
             logger.debug(f"Validation completed for: {event.deposition_id}")

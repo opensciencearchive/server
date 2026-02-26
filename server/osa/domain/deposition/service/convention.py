@@ -5,22 +5,35 @@ from osa.domain.deposition.event.convention_registered import ConventionRegister
 from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.port.convention_repository import ConventionRepository
-from osa.domain.feature.service.feature import FeatureService
 from osa.domain.semantics.model.value import FieldDefinition
 from osa.domain.semantics.service.schema import SchemaService
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.model.hook_snapshot import HookSnapshot
 from osa.domain.shared.model.source import SourceDefinition
 from osa.domain.shared.model.srn import ConventionSRN, Domain, LocalId, Semver
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
 
 
+def _to_hook_snapshots(hooks: list[HookDefinition]) -> list[HookSnapshot]:
+    """Convert HookDefinitions to HookSnapshots for event payload."""
+    return [
+        HookSnapshot(
+            name=h.manifest.name,
+            image=h.image,
+            digest=h.digest,
+            features=h.manifest.feature_schema.columns,
+            config=h.config or {},
+        )
+        for h in hooks
+    ]
+
+
 class ConventionService(Service):
     convention_repo: ConventionRepository
     schema_service: SchemaService
-    feature_service: FeatureService
     outbox: Outbox
     node_domain: Domain
 
@@ -38,6 +51,9 @@ class ConventionService(Service):
 
         The schema is created as a separate Schema row internally,
         and the convention references it via schema_srn.
+
+        Feature table creation is handled asynchronously by the
+        CreateFeatureTables handler reacting to ConventionRegistered.
         """
         # Create Schema row from inline field definitions
         created_schema = await self.schema_service.create_schema(
@@ -61,16 +77,13 @@ class ConventionService(Service):
             source=source,
             created_at=datetime.now(UTC),
         )
-        # Create feature tables BEFORE persisting convention row.
-        # If DDL fails, no orphaned convention row is left behind.
-        for hook_def in convention.hooks:
-            await self.feature_service.create_table(hook_def)
 
         await self.convention_repo.save(convention)
         await self.outbox.append(
             ConventionRegistered(
                 id=EventId(uuid4()),
                 convention_srn=srn,
+                hooks=_to_hook_snapshots(convention.hooks),
             )
         )
         return convention
