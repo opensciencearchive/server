@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 
-from osa.domain.shared.event import ClaimResult, Event, EventId
+from osa.domain.shared.event import ClaimResult, Delivery, Event, EventId
 
 
 class DummyEvent(Event):
@@ -29,14 +29,11 @@ class FakeEventRepository:
         self.events: dict[str, dict[str, Any]] = {}
         self._locked_ids: set[str] = set()
 
-    async def save(
-        self, event: Event, status: str = "pending", routing_key: str | None = None
-    ) -> None:
+    async def save(self, event: Event, status: str = "pending") -> None:
         """Save an event."""
         self.events[str(event.id)] = {
             "event": event,
             "status": status,
-            "routing_key": routing_key,
             "retry_count": 0,
             "claimed_at": None,
             "updated_at": datetime.now(UTC),
@@ -46,14 +43,13 @@ class FakeEventRepository:
         self,
         event_types: list[str],
         limit: int,
-        routing_key: str | None = None,
     ) -> ClaimResult:
         """Claim events, simulating FOR UPDATE SKIP LOCKED."""
-        claimed = []
+        deliveries: list[Delivery] = []
         now = datetime.now(UTC)
 
         for event_id, data in self.events.items():
-            if len(claimed) >= limit:
+            if len(deliveries) >= limit:
                 break
 
             # Skip already locked events (simulates SKIP LOCKED)
@@ -68,17 +64,13 @@ class FakeEventRepository:
             if type(data["event"]).__name__ not in event_types:
                 continue
 
-            # Check routing key
-            if routing_key is not None and data["routing_key"] != routing_key:
-                continue
-
             # Lock and claim
             self._locked_ids.add(event_id)
             data["status"] = "claimed"
             data["claimed_at"] = now
-            claimed.append(data["event"])
+            deliveries.append(Delivery(id=f"del-{event_id}", event=data["event"]))
 
-        return ClaimResult(events=claimed, claimed_at=now)
+        return ClaimResult(deliveries=deliveries, claimed_at=now)
 
     async def update_status(
         self,
@@ -186,25 +178,6 @@ class TestClaimWithSkipLocked:
         ids1 = {e.id for e in result1.events}
         ids2 = {e.id for e in result2.events}
         assert ids1.isdisjoint(ids2)
-
-    @pytest.mark.asyncio
-    async def test_claim_filters_by_routing_key(self, repo: FakeEventRepository):
-        """Claim should filter by routing_key when specified."""
-        # Arrange
-        event1 = DummyEvent(id=EventId(uuid4()), data="vector-event")
-        event2 = DummyEvent(id=EventId(uuid4()), data="keyword-event")
-        event3 = DummyEvent(id=EventId(uuid4()), data="unrouted-event")
-
-        await repo.save(event1, routing_key="vector")
-        await repo.save(event2, routing_key="keyword")
-        await repo.save(event3, routing_key=None)
-
-        # Act
-        vector_result = await repo.claim(event_types=["DummyEvent"], limit=10, routing_key="vector")
-
-        # Assert
-        assert len(vector_result) == 1
-        assert vector_result.events[0].data == "vector-event"
 
     @pytest.mark.asyncio
     async def test_claim_sets_status_to_claimed(self, repo: FakeEventRepository):

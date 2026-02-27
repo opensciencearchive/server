@@ -18,7 +18,6 @@ class EventRepository(Protocol):
         self,
         event: Event,
         consumer_groups: set[str],
-        routing_key: str | None = None,
     ) -> None:
         """Save event to the append-only log and create delivery rows.
 
@@ -26,7 +25,6 @@ class EventRepository(Protocol):
             event: The event to persist.
             consumer_groups: Set of consumer group names to create deliveries for.
                 If empty, the event is saved without any delivery rows (audit-only).
-            routing_key: Optional routing key stored on delivery rows for filtering.
         """
         ...
 
@@ -86,7 +84,7 @@ class EventRepository(Protocol):
             limit: Maximum deliveries to claim.
 
         Returns:
-            ClaimResult containing claimed events and timestamp.
+            ClaimResult containing Delivery envelopes and timestamp.
         """
         ...
 

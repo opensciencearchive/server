@@ -51,7 +51,6 @@ class Worker:
 
         # Read config from handler classvars
         self._event_type = handler_type.__event_type__
-        self._routing_key = handler_type.__routing_key__
         self._batch_size = handler_type.__batch_size__
         self._batch_timeout = handler_type.__batch_timeout__
         self._poll_interval = handler_type.__poll_interval__
@@ -61,7 +60,6 @@ class Worker:
         self._config = WorkerConfig(
             name=handler_type.__name__,
             event_types=(self._event_type,),
-            routing_key=self._routing_key,
             batch_size=self._batch_size,
             batch_timeout=self._batch_timeout,
             poll_interval=self._poll_interval,
@@ -156,7 +154,7 @@ class Worker:
                 consumer_group=self._consumer_group,
             )
 
-            if not result.events:
+            if not result.deliveries:
                 self._state.status = WorkerStatus.IDLE
                 return False
 
@@ -166,40 +164,38 @@ class Worker:
 
             try:
                 handler = await scope.get(self._handler_type)
+                events = result.events
 
                 if self._batch_size > 1:
-                    await handler.handle_batch(result.events)
+                    await handler.handle_batch(events)
                 else:
-                    await handler.handle(result.events[0])
+                    await handler.handle(events[0])
 
-                # Mark all deliveries as delivered (using delivery_id)
-                for event in result.events:
-                    delivery_id = getattr(event, "_delivery_id", str(event.id))
-                    await outbox.mark_delivered(delivery_id)
+                # Mark all deliveries as delivered
+                for delivery in result.deliveries:
+                    await outbox.mark_delivered(delivery.id)
 
-                self._state.processed_count += len(result.events)
+                self._state.processed_count += len(result.deliveries)
 
             except SkippedEvents as e:
                 logger.warning(
                     f"Worker '{self.name}' skipping {len(e.event_ids)} events: {e.reason}"
                 )
                 skipped_set = set(e.event_ids)
-                for event in result.events:
-                    delivery_id = getattr(event, "_delivery_id", str(event.id))
-                    if event.id in skipped_set:
-                        await outbox.mark_skipped(delivery_id, e.reason)
+                for delivery in result.deliveries:
+                    if delivery.event.id in skipped_set:
+                        await outbox.mark_skipped(delivery.id, e.reason)
                     else:
-                        await outbox.mark_delivered(delivery_id)
-                self._state.processed_count += len(result.events) - len(e.event_ids)
+                        await outbox.mark_delivered(delivery.id)
+                self._state.processed_count += len(result.deliveries) - len(e.event_ids)
 
             except Exception as e:
-                self._state.failed_count += len(result.events)
+                self._state.failed_count += len(result.deliveries)
                 self._state.error = e
                 logger.error(f"Worker '{self.name}' batch failed: {e}")
-                for event in result.events:
-                    delivery_id = getattr(event, "_delivery_id", str(event.id))
+                for delivery in result.deliveries:
                     await outbox.mark_failed_with_retry(
-                        delivery_id,
+                        delivery.id,
                         str(e),
                         max_retries=self._max_retries,
                     )

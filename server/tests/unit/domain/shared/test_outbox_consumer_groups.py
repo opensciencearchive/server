@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 
-from osa.domain.shared.event import ClaimResult, Event, EventId
+from osa.domain.shared.event import ClaimResult, Delivery, Event, EventId
 from osa.domain.shared.model.subscription_registry import SubscriptionRegistry
 from osa.domain.shared.outbox import Outbox
 
@@ -57,19 +57,7 @@ class TestOutboxAppendCreatesDeliveries:
         await outbox.append(event)
 
         mock_repo.save_with_deliveries.assert_called_once_with(
-            event, consumer_groups={"HandlerA", "HandlerB"}, routing_key=None
-        )
-
-    async def test_append_with_routing_key_passes_through(
-        self, outbox: Outbox, mock_repo: AsyncMock
-    ):
-        """append() should pass routing_key through to save_with_deliveries."""
-        event = DummyEvent(id=EventId(uuid4()), data="routed")
-
-        await outbox.append(event, routing_key="vector")
-
-        mock_repo.save_with_deliveries.assert_called_once_with(
-            event, consumer_groups={"HandlerA", "HandlerB"}, routing_key="vector"
+            event, consumer_groups={"HandlerA", "HandlerB"}
         )
 
     async def test_append_audit_only_event_creates_zero_deliveries(
@@ -85,9 +73,7 @@ class TestOutboxAppendCreatesDeliveries:
 
         await outbox.append(event)
 
-        mock_repo.save_with_deliveries.assert_called_once_with(
-            event, consumer_groups=set(), routing_key=None
-        )
+        mock_repo.save_with_deliveries.assert_called_once_with(event, consumer_groups=set())
 
 
 class TestOutboxClaimByConsumerGroup:
@@ -111,7 +97,7 @@ class TestOutboxClaimByConsumerGroup:
     async def test_claim_passes_consumer_group_to_repo(self, outbox: Outbox, mock_repo: AsyncMock):
         """claim() should pass consumer_group to repository's claim_delivery method."""
         now = datetime.now(UTC)
-        mock_repo.claim_delivery.return_value = ClaimResult(events=[], claimed_at=now)
+        mock_repo.claim_delivery.return_value = ClaimResult(deliveries=[], claimed_at=now)
 
         await outbox.claim(
             event_types=[DummyEvent],
@@ -131,7 +117,9 @@ class TestOutboxClaimByConsumerGroup:
         """claim() returns only events assigned to the calling consumer group."""
         event = DummyEvent(id=EventId(uuid4()), data="test")
         now = datetime.now(UTC)
-        mock_repo.claim_delivery.return_value = ClaimResult(events=[event], claimed_at=now)
+        mock_repo.claim_delivery.return_value = ClaimResult(
+            deliveries=[Delivery(id="del-1", event=event)], claimed_at=now
+        )
 
         result = await outbox.claim(
             event_types=[DummyEvent],

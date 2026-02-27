@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import INTERVAL
 from sqlalchemy.sql import literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from osa.domain.shared.event import ClaimResult, Event, EventId
+from osa.domain.shared.event import ClaimResult, Delivery, Event, EventId
 from osa.domain.shared.port.event_repository import EventRepository
 from osa.infrastructure.persistence.tables import deliveries_table, events_table
 
@@ -33,7 +33,6 @@ class SQLAlchemyEventRepository(EventRepository):
         self,
         event: Event,
         consumer_groups: set[str],
-        routing_key: str | None = None,
     ) -> None:
         """Save event to append-only log and create delivery rows."""
         now = datetime.now(UTC)
@@ -220,7 +219,7 @@ class SQLAlchemyEventRepository(EventRepository):
         rows = result.fetchall()
 
         if not rows:
-            return ClaimResult(events=[], claimed_at=now)
+            return ClaimResult(deliveries=[], claimed_at=now)
 
         # Update delivery status to 'claimed'
         delivery_ids = [row[0] for row in rows]
@@ -231,17 +230,15 @@ class SQLAlchemyEventRepository(EventRepository):
         )
         await self._session.execute(update_stmt)
 
-        # Deserialize events, attaching delivery_id for later mark operations
-        events: list[Event] = []
+        # Deserialize events and wrap in Delivery envelopes
+        deliveries: list[Delivery] = []
         for row in rows:
             delivery_id, event_type, payload = row
             event = self._deserialize(event_type, payload)
             if event is not None:
-                # Store delivery_id on the event for the Worker to use
-                event._delivery_id = delivery_id  # type: ignore[attr-defined]
-                events.append(event)
+                deliveries.append(Delivery(id=delivery_id, event=event))
 
-        return ClaimResult(events=events, claimed_at=now)
+        return ClaimResult(deliveries=deliveries, claimed_at=now)
 
     async def mark_delivery_status(
         self,

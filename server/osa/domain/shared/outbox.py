@@ -24,7 +24,7 @@ class Outbox(Service):
     _repo: EventRepository
     _registry: SubscriptionRegistry
 
-    async def append(self, event: Event, routing_key: str | None = None) -> None:
+    async def append(self, event: Event) -> None:
         """Add an event to the outbox for delivery.
 
         Creates one delivery row per consumer group subscribed to this event type.
@@ -32,13 +32,10 @@ class Outbox(Service):
 
         Args:
             event: The event to append.
-            routing_key: Optional routing key for worker filtering.
         """
         event_type_name = type(event).__name__
         consumer_groups = self._registry.get(event_type_name, set())
-        await self._repo.save_with_deliveries(
-            event, consumer_groups=consumer_groups, routing_key=routing_key
-        )
+        await self._repo.save_with_deliveries(event, consumer_groups=consumer_groups)
 
     async def claim(
         self,

@@ -46,7 +46,6 @@ class TestEventHandlerMetaclass:
             async def handle(self, event: DummyEvent) -> None:
                 pass
 
-        assert MyHandler.__routing_key__ is None
         assert MyHandler.__batch_size__ == 1
         assert MyHandler.__batch_timeout__ == 5.0
         assert MyHandler.__poll_interval__ == 0.5
@@ -57,13 +56,11 @@ class TestEventHandlerMetaclass:
         """EventHandler subclasses can override classvars."""
 
         class BatchHandler(EventHandler[DummyEvent]):
-            __routing_key__ = "my-queue"
             __batch_size__ = 100
             __batch_timeout__ = 10.0
 
             async def handle_batch(self, events: list[DummyEvent]) -> None:
                 pass
 
-        assert BatchHandler.__routing_key__ == "my-queue"
         assert BatchHandler.__batch_size__ == 100
         assert BatchHandler.__batch_timeout__ == 10.0

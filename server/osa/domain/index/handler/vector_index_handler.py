@@ -14,11 +14,9 @@ logger = logging.getLogger(__name__)
 class VectorIndexHandler(EventHandler[IndexRecord]):
     """Processes IndexRecord events for the vector backend.
 
-    Claims events with routing_key="vector" and processes them in batches
-    for efficient embedding generation.
+    Processes events in batches for efficient embedding generation.
     """
 
-    __routing_key__: ClassVar[str | None] = "vector"
     __batch_size__: ClassVar[int] = 100
     __batch_timeout__: ClassVar[float] = 5.0
 

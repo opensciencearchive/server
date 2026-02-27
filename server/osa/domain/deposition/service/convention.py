@@ -17,20 +17,6 @@ from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
 
 
-def _to_hook_snapshots(hooks: list[HookDefinition]) -> list[HookSnapshot]:
-    """Convert HookDefinitions to HookSnapshots for event payload."""
-    return [
-        HookSnapshot(
-            name=h.manifest.name,
-            image=h.image,
-            digest=h.digest,
-            features=h.manifest.feature_schema.columns,
-            config=h.config or {},
-        )
-        for h in hooks
-    ]
-
-
 class ConventionService(Service):
     convention_repo: ConventionRepository
     schema_service: SchemaService
@@ -83,7 +69,7 @@ class ConventionService(Service):
             ConventionRegistered(
                 id=EventId(uuid4()),
                 convention_srn=srn,
-                hooks=_to_hook_snapshots(convention.hooks),
+                hooks=HookSnapshot.from_definitions(convention.hooks),
             )
         )
         return convention

@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 
-from osa.domain.shared.event import ClaimResult, Event, EventId
+from osa.domain.shared.event import ClaimResult, Delivery, Event, EventId
 from osa.domain.shared.model.subscription_registry import SubscriptionRegistry
 from osa.domain.shared.outbox import Outbox
 
@@ -46,7 +46,10 @@ class TestOutboxClaim:
         event2 = DummyEvent(id=EventId(uuid4()), data="event2")
         now = datetime.now(UTC)
 
-        mock_repo.claim_delivery.return_value = ClaimResult(events=[event1, event2], claimed_at=now)
+        mock_repo.claim_delivery.return_value = ClaimResult(
+            deliveries=[Delivery(id="del-1", event=event1), Delivery(id="del-2", event=event2)],
+            claimed_at=now,
+        )
 
         result = await outbox.claim(
             event_types=[DummyEvent],
@@ -67,7 +70,7 @@ class TestOutboxClaim:
     async def test_claim_returns_empty_when_no_events(self, outbox: Outbox, mock_repo: AsyncMock):
         """Outbox.claim() should return empty ClaimResult when no events available."""
         now = datetime.now(UTC)
-        mock_repo.claim_delivery.return_value = ClaimResult(events=[], claimed_at=now)
+        mock_repo.claim_delivery.return_value = ClaimResult(deliveries=[], claimed_at=now)
 
         result = await outbox.claim(
             event_types=[DummyEvent],

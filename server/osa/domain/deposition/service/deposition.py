@@ -15,7 +15,6 @@ from osa.domain.deposition.port.repository import DepositionRepository
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.error import NotFoundError, ValidationError
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.hook_snapshot import HookSnapshot
 from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, Domain, LocalId
 from osa.domain.shared.outbox import Outbox
@@ -196,7 +195,7 @@ class DepositionService(Service):
         dep.submit()
         await self.deposition_repo.save(dep)
 
-        hook_snapshots = _to_hook_snapshots(convention.hooks)
+        hook_snapshots = HookSnapshot.from_definitions(convention.hooks)
         files_dir = self.file_storage.get_files_dir(dep.srn)
 
         event = DepositionSubmittedEvent(
@@ -209,20 +208,6 @@ class DepositionService(Service):
         )
         await self.outbox.append(event)
         return dep
-
-
-def _to_hook_snapshots(hooks: list[HookDefinition]) -> list[HookSnapshot]:
-    """Convert HookDefinitions to HookSnapshots for event payload."""
-    return [
-        HookSnapshot(
-            name=h.manifest.name,
-            image=h.image,
-            digest=h.digest,
-            features=h.manifest.feature_schema.columns,
-            config=h.config or {},
-        )
-        for h in hooks
-    ]
 
 
 def _get_extension(filename: str) -> str:
