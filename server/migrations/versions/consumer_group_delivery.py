@@ -70,7 +70,6 @@ def upgrade() -> None:
     op.drop_column("events", "updated_at")
     op.drop_column("events", "claimed_at")
     op.drop_column("events", "retry_count")
-    op.drop_column("events", "routing_key")
     op.drop_column("events", "delivery_error")
     op.drop_column("events", "delivered_at")
     op.drop_column("events", "delivery_status")
@@ -85,7 +84,6 @@ def downgrade() -> None:
     )
     op.add_column("events", sa.Column("delivered_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("events", sa.Column("delivery_error", sa.Text(), nullable=True))
-    op.add_column("events", sa.Column("routing_key", sa.String(255), nullable=True))
     op.add_column(
         "events", sa.Column("retry_count", sa.Integer(), nullable=False, server_default="0")
     )
@@ -102,7 +100,7 @@ def downgrade() -> None:
     op.create_index(
         "idx_events_claim",
         "events",
-        ["delivery_status", "event_type", "routing_key", "created_at"],
+        ["delivery_status", "event_type", "created_at"],
         postgresql_where=sa.text("delivery_status IN ('pending', 'claimed')"),
     )
     op.create_index(

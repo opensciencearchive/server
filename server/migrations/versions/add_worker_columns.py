@@ -23,7 +23,6 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Add worker columns to events table."""
     # Add new columns for pull-based claiming
-    op.add_column("events", sa.Column("routing_key", sa.String(255), nullable=True))
     op.add_column(
         "events", sa.Column("retry_count", sa.Integer(), nullable=False, server_default="0")
     )
@@ -36,11 +35,10 @@ def upgrade() -> None:
     )
 
     # Create partial index for efficient claiming query
-    # Covers: status=pending/claimed, event_type, routing_key, created_at
     op.create_index(
         "idx_events_claim",
         "events",
-        ["delivery_status", "event_type", "routing_key", "created_at"],
+        ["delivery_status", "event_type", "created_at"],
         postgresql_where=sa.text("delivery_status IN ('pending', 'claimed')"),
     )
 
@@ -69,4 +67,3 @@ def downgrade() -> None:
     op.drop_column("events", "updated_at")
     op.drop_column("events", "claimed_at")
     op.drop_column("events", "retry_count")
-    op.drop_column("events", "routing_key")
