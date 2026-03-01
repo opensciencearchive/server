@@ -41,7 +41,7 @@ class TestOsaMeta:
         assert len(data["hooks"]) == 1
         assert data["hooks"][0]["name"] == "detect"
 
-    def test_meta_includes_feature_schema(self) -> None:
+    def test_meta_includes_columns(self) -> None:
         from osa.authoring.hook import hook
         from osa.cli.main import meta_command
 
@@ -52,8 +52,8 @@ class TestOsaMeta:
         output = meta_command()
         data = json.loads(output)
         hook_data = data["hooks"][0]
-        assert "feature_schema" in hook_data
-        assert "columns" in hook_data["feature_schema"]
+        assert "columns" in hook_data
+        assert len(hook_data["columns"]) == 2
 
 
 class TestOsaEmit:

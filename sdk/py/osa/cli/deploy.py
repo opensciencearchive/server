@@ -95,10 +95,6 @@ ENTRYPOINT ["osa-run-source"]
 """
 
 
-# Keep old name as alias for backward compatibility in tests
-generate_dockerfile = generate_hook_dockerfile
-
-
 def _stage_sdk(project_dir: Path) -> Path | None:
     """Copy the local SDK into the build context. Returns the staged path or None."""
     sdk_path = _find_sdk_path(project_dir)

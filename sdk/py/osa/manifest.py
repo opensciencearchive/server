@@ -114,12 +114,6 @@ def generate_columns(model_cls: type[BaseModel]) -> list[ColumnDef]:
     return columns
 
 
-# Keep old name as alias for backward compatibility
-def generate_feature_schema(model_cls: type[BaseModel]) -> list[ColumnDef]:
-    """Deprecated alias for generate_columns."""
-    return generate_columns(model_cls)
-
-
 # ---- Manifest generation ----
 
 
