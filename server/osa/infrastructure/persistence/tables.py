@@ -75,7 +75,7 @@ Index("idx_records_published_at", records_table.c.published_at)
 
 
 # ============================================================================
-# EVENTS TABLE (Outbox)
+# EVENTS TABLE (append-only event log)
 # ============================================================================
 events_table = Table(
     "events",
@@ -84,16 +84,6 @@ events_table = Table(
     Column("event_type", String(128), nullable=False),
     Column("payload", JSON, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
-    Column(
-        "delivery_status", String(32), nullable=False
-    ),  # pending, claimed, delivered, failed, skipped
-    Column("delivered_at", DateTime(timezone=True), nullable=True),
-    Column("delivery_error", Text, nullable=True),
-    # Pull-based worker columns
-    Column("routing_key", String(255), nullable=True),
-    Column("retry_count", Integer, nullable=False, default=0),
-    Column("claimed_at", DateTime(timezone=True), nullable=True),
-    Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
 Index(
@@ -101,31 +91,51 @@ Index(
     events_table.c.event_type,
     events_table.c.created_at.desc(),
 )
-Index("idx_events_delivery_status", events_table.c.delivery_status)
 
-# Partial index for efficient claiming query
-Index(
-    "idx_events_claim",
-    events_table.c.delivery_status,
-    events_table.c.event_type,
-    events_table.c.routing_key,
-    events_table.c.created_at,
-    postgresql_where=text("delivery_status IN ('pending', 'claimed')"),
+
+# ============================================================================
+# DELIVERIES TABLE (per-consumer-group tracking)
+# ============================================================================
+deliveries_table = Table(
+    "deliveries",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("event_id", String, ForeignKey("events.id"), nullable=False),
+    Column("consumer_group", String(128), nullable=False),
+    Column("status", String(32), nullable=False, server_default=text("'pending'")),
+    Column("claimed_at", DateTime(timezone=True), nullable=True),
+    Column("delivered_at", DateTime(timezone=True), nullable=True),
+    Column("delivery_error", Text, nullable=True),
+    Column("retry_count", Integer, nullable=False, server_default=text("0")),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("event_id", "consumer_group", name="uq_delivery_event_consumer"),
 )
 
-# Partial index for stale claim detection
+# Primary worker polling index
 Index(
-    "idx_events_stale_claims",
-    events_table.c.claimed_at,
-    postgresql_where=text("delivery_status = 'claimed'"),
+    "idx_deliveries_claim",
+    deliveries_table.c.consumer_group,
+    deliveries_table.c.status,
+    deliveries_table.c.event_id,
+    postgresql_where=text("status IN ('pending', 'claimed')"),
 )
 
-# Partial index for failed event queries
+# For joining back to events
+Index("idx_deliveries_event", deliveries_table.c.event_id)
+
+# Stale claim detection
 Index(
-    "idx_events_failed",
-    events_table.c.event_type,
-    events_table.c.created_at,
-    postgresql_where=text("delivery_status = 'failed'"),
+    "idx_deliveries_stale",
+    deliveries_table.c.claimed_at,
+    postgresql_where=text("status = 'claimed'"),
+)
+
+# Failed delivery monitoring
+Index(
+    "idx_deliveries_failed",
+    deliveries_table.c.consumer_group,
+    deliveries_table.c.retry_count,
+    postgresql_where=text("status = 'failed'"),
 )
 
 

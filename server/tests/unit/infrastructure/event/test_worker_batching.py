@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.shared.event import (
     ClaimResult,
+    Delivery,
     Event,
     EventHandler,
     EventId,
@@ -70,7 +71,10 @@ class TestWorkerBatchSizeOne:
 
         # Arrange
         event = DummyEvent(id=EventId(uuid4()), data="test")
-        claim_result = ClaimResult(events=[event], claimed_at=datetime.now(UTC))
+        claim_result = ClaimResult(
+            deliveries=[Delivery(id="del-1", event=event)],
+            claimed_at=datetime.now(UTC),
+        )
 
         outbox = AsyncMock(spec=Outbox)
         outbox.claim.return_value = claim_result
@@ -111,7 +115,8 @@ class TestWorkerBatchAccumulation:
 
         # Arrange
         events = [DummyEvent(id=EventId(uuid4()), data=f"event{i}") for i in range(5)]
-        claim_result = ClaimResult(events=events, claimed_at=datetime.now(UTC))
+        deliveries = [Delivery(id=f"del-{i}", event=e) for i, e in enumerate(events)]
+        claim_result = ClaimResult(deliveries=deliveries, claimed_at=datetime.now(UTC))
 
         outbox = AsyncMock(spec=Outbox)
         outbox.claim.return_value = claim_result

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.shared.event import (
     ClaimResult,
+    Delivery,
     Event,
     EventHandler,
     EventId,
@@ -99,7 +100,11 @@ class TestWorkerPollLoop:
 
         # Arrange
         event1 = DummyEvent(id=EventId(uuid4()), data="event1")
-        claim_result = ClaimResult(events=[event1], claimed_at=datetime.now(UTC))
+        delivery_id = "delivery-abc"
+        claim_result = ClaimResult(
+            deliveries=[Delivery(id=delivery_id, event=event1)],
+            claimed_at=datetime.now(UTC),
+        )
 
         outbox = AsyncMock(spec=Outbox)
         outbox.claim.return_value = claim_result
@@ -121,7 +126,7 @@ class TestWorkerPollLoop:
         assert len(handler.processed_events) == 1
         assert handler.processed_events[0] == event1
         outbox.claim.assert_called_once()
-        outbox.mark_delivered.assert_called_once_with(event1.id)
+        outbox.mark_delivered.assert_called_once_with(delivery_id)
 
     @pytest.mark.asyncio
     async def test_worker_returns_false_when_no_events(self):
@@ -130,7 +135,7 @@ class TestWorkerPollLoop:
 
         # Arrange
         outbox = AsyncMock(spec=Outbox)
-        outbox.claim.return_value = ClaimResult(events=[], claimed_at=datetime.now(UTC))
+        outbox.claim.return_value = ClaimResult(deliveries=[], claimed_at=datetime.now(UTC))
 
         session = AsyncMock(spec=AsyncSession)
         session.commit = AsyncMock()
@@ -155,7 +160,10 @@ class TestWorkerPollLoop:
 
         # Arrange
         event = DummyEvent(id=EventId(uuid4()), data="test")
-        claim_result = ClaimResult(events=[event], claimed_at=datetime.now(UTC))
+        claim_result = ClaimResult(
+            deliveries=[Delivery(id="del-1", event=event)],
+            claimed_at=datetime.now(UTC),
+        )
 
         outbox = AsyncMock(spec=Outbox)
         outbox.claim.return_value = claim_result
@@ -194,7 +202,7 @@ class TestWorkerStartStop:
 
         # Arrange
         outbox = AsyncMock(spec=Outbox)
-        outbox.claim.return_value = ClaimResult(events=[], claimed_at=datetime.now(UTC))
+        outbox.claim.return_value = ClaimResult(deliveries=[], claimed_at=datetime.now(UTC))
 
         session = AsyncMock(spec=AsyncSession)
         session.commit = AsyncMock()
@@ -240,7 +248,7 @@ class TestWorkerStartStop:
 
         # Arrange
         outbox = AsyncMock(spec=Outbox)
-        outbox.claim.return_value = ClaimResult(events=[], claimed_at=datetime.now(UTC))
+        outbox.claim.return_value = ClaimResult(deliveries=[], claimed_at=datetime.now(UTC))
 
         session = AsyncMock(spec=AsyncSession)
         session.commit = AsyncMock()
@@ -277,7 +285,10 @@ class TestWorkerStartStop:
         event = DummyEvent(id=EventId(uuid4()), data="test")
 
         outbox = AsyncMock(spec=Outbox)
-        outbox.claim.return_value = ClaimResult(events=[event], claimed_at=datetime.now(UTC))
+        outbox.claim.return_value = ClaimResult(
+            deliveries=[Delivery(id="del-1", event=event)],
+            claimed_at=datetime.now(UTC),
+        )
         outbox.mark_delivered = AsyncMock()
 
         session = AsyncMock(spec=AsyncSession)
@@ -325,7 +336,11 @@ class TestWorkerStartStop:
 
         # Arrange
         event = DummyEvent(id=EventId(uuid4()), data="test")
-        claim_result = ClaimResult(events=[event], claimed_at=datetime.now(UTC))
+        delivery_id = "delivery-fail"
+        claim_result = ClaimResult(
+            deliveries=[Delivery(id=delivery_id, event=event)],
+            claimed_at=datetime.now(UTC),
+        )
 
         outbox = AsyncMock(spec=Outbox)
         outbox.claim.return_value = claim_result
@@ -343,7 +358,9 @@ class TestWorkerStartStop:
         # Act - Run one poll cycle
         await worker._poll_once()
 
-        # Assert - Event should be marked as failed
-        outbox.mark_failed_with_retry.assert_called_once()
+        # Assert - Event should be marked as failed using delivery_id
+        outbox.mark_failed_with_retry.assert_called_once_with(
+            delivery_id, "Processing failed", max_retries=3
+        )
         assert worker.state.failed_count == 1
         assert worker.state.error is not None

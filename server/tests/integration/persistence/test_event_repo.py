@@ -51,16 +51,6 @@ class TestEventRepoSaveAndGet:
         got = await repo.get(EventId(uuid4()))
         assert got is None
 
-    async def test_save_with_routing_key(self, pg_session: AsyncSession):
-        repo = SQLAlchemyEventRepository(pg_session)
-        event = PingEvent(id=EventId(uuid4()), data="routed")
-
-        await repo.save(event, routing_key="vector")
-        await pg_session.commit()
-
-        got = await repo.get(event.id)
-        assert got is not None
-
 
 @pytest.mark.asyncio
 class TestEventRepoClaim:
@@ -103,19 +93,6 @@ class TestEventRepoClaim:
         assert len(result.events) == 1
         assert isinstance(result.events[0], PongEvent)
         assert result.events[0].data == "pong"
-
-    async def test_claim_filters_by_routing_key(self, pg_session: AsyncSession):
-        repo = SQLAlchemyEventRepository(pg_session)
-
-        await repo.save(PingEvent(id=EventId(uuid4()), data="routed"), routing_key="vector")
-        await repo.save(PingEvent(id=EventId(uuid4()), data="unrouted"))
-        await pg_session.commit()
-
-        result = await repo.claim(event_types=["PingEvent"], limit=10, routing_key="vector")
-        await pg_session.commit()
-
-        assert len(result.events) == 1
-        assert result.events[0].data == "routed"
 
     async def test_claim_concurrent_sessions_see_disjoint_events(self, pg_engine: AsyncEngine):
         """Two concurrent sessions using FOR UPDATE SKIP LOCKED get disjoint sets."""

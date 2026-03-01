@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from osa.domain.feature.port.feature_store import FeatureStore
 from osa.domain.shared.error import ConflictError, ValidationError
-from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.model.hook import ColumnDef
 from osa.infrastructure.persistence.column_mapper import map_column
 from osa.infrastructure.persistence.tables import feature_tables_table
 
@@ -41,7 +41,7 @@ class PostgresFeatureStore(FeatureStore):
         self._engine = engine
         self._session = session
 
-    async def create_table(self, hook_name: str, hook: HookDefinition) -> None:
+    async def create_table(self, hook_name: str, columns: list[ColumnDef]) -> None:
         _validate_pg_identifier(hook_name)
 
         async with self._engine.begin() as conn:
@@ -59,7 +59,7 @@ class PostgresFeatureStore(FeatureStore):
 
             # Build dynamic table
             metadata = sa.MetaData(schema=FEATURES_SCHEMA)
-            columns: list[sa.Column] = [
+            sa_columns: list[sa.Column] = [
                 sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
                 sa.Column("record_srn", sa.Text, nullable=False, index=True),
                 sa.Column(
@@ -70,21 +70,22 @@ class PostgresFeatureStore(FeatureStore):
                 ),
             ]
 
-            for col_def in hook.manifest.feature_schema.columns:
-                columns.append(map_column(col_def))
+            for col_def in columns:
+                sa_columns.append(map_column(col_def))
 
             # sa.Table registers itself on the metadata object
-            sa.Table(hook_name, metadata, *columns)
+            sa.Table(hook_name, metadata, *sa_columns)
 
             # Create table
             await conn.run_sync(metadata.create_all, checkfirst=False)
 
             # Register in catalog
+            feature_schema = {"columns": [c.model_dump() for c in columns]}
             await conn.execute(
                 feature_tables_table.insert().values(
                     hook_name=hook_name,
                     pg_table=hook_name,
-                    feature_schema=hook.manifest.feature_schema.model_dump(),
+                    feature_schema=feature_schema,
                     schema_version=1,
                     created_at=datetime.now(UTC),
                 )

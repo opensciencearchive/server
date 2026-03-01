@@ -11,7 +11,11 @@ from osa.domain.deposition.port.repository import DepositionRepository
 from osa.domain.deposition.port.schema_reader import SchemaReader
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.record.port.repository import RecordRepository
+from osa.domain.record.query.get_record import GetRecordHandler
 from osa.domain.record.service import RecordService
+from osa.domain.source.port.storage import SourceStoragePort
+from osa.domain.feature.port.storage import FeatureStoragePort
+from osa.domain.validation.port.storage import HookStoragePort
 from osa.domain.semantics.port.ontology_repository import OntologyRepository
 from osa.domain.semantics.port.schema_repository import SchemaRepository
 from osa.domain.shared.model.srn import Domain
@@ -110,6 +114,18 @@ class PersistenceProvider(Provider):
     def get_file_storage(self, paths: "OSAPaths") -> FileStoragePort:
         return LocalFileStorageAdapter(base_path=str(paths.data_dir / "files"))
 
+    @provide(scope=Scope.APP)
+    def get_source_storage(self, file_storage: FileStoragePort) -> SourceStoragePort:
+        return file_storage  # type: ignore[return-value]
+
+    @provide(scope=Scope.APP)
+    def get_hook_storage(self, file_storage: FileStoragePort) -> HookStoragePort:
+        return file_storage  # type: ignore[return-value]
+
+    @provide(scope=Scope.APP)
+    def get_feature_storage(self, file_storage: FileStoragePort) -> FeatureStoragePort:
+        return file_storage  # type: ignore[return-value]
+
     @provide(scope=Scope.UOW)
     def get_record_service(
         self,
@@ -126,3 +142,6 @@ class PersistenceProvider(Provider):
             outbox=outbox,
             node_domain=Domain(config.server.domain),
         )
+
+    # Record query handlers
+    get_record_handler = provide(GetRecordHandler, scope=Scope.UOW)

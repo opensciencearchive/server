@@ -24,7 +24,6 @@ class TestWorkerConfigValidation:
         config = WorkerConfig(
             name="test-worker",
             event_types=(DummyEvent,),
-            routing_key="test-key",
             batch_size=10,
             batch_timeout=5.0,
             poll_interval=0.5,
@@ -33,7 +32,6 @@ class TestWorkerConfigValidation:
         )
         assert config.name == "test-worker"
         assert config.event_types == (DummyEvent,)
-        assert config.routing_key == "test-key"
         assert config.batch_size == 10
         assert config.batch_timeout == 5.0
         assert config.poll_interval == 0.5
@@ -46,7 +44,6 @@ class TestWorkerConfigValidation:
             name="test-worker",
             event_types=(DummyEvent,),
         )
-        assert config.routing_key is None
         assert config.batch_size == 1
         assert config.batch_timeout == 5.0
         assert config.poll_interval == 0.5

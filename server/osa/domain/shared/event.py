@@ -57,7 +57,6 @@ class WorkerConfig(BaseModel):
     Attributes:
         name: Unique worker identifier.
         event_types: Event types to claim.
-        routing_key: Optional routing key filter.
         batch_size: Max events per batch (default: 1).
         batch_timeout: Max seconds to wait for batch (default: 5.0).
         poll_interval: Seconds between polls when idle (default: 0.5).
@@ -69,7 +68,6 @@ class WorkerConfig(BaseModel):
 
     name: str
     event_types: tuple[type["Event"], ...]
-    routing_key: str | None = None
     batch_size: int = Field(default=1, ge=1)
     batch_timeout: float = Field(default=5.0, gt=0)
     poll_interval: float = Field(default=0.5, gt=0)
@@ -123,28 +121,45 @@ class WorkerState:
 
 
 @dataclass(frozen=True)
+class Delivery:
+    """Pairs a delivery row ID with its deserialized event.
+
+    Workers iterate over Delivery objects so they can mark each
+    delivery by its own row ID rather than the event's ID.
+    """
+
+    id: str
+    event: "Event"
+
+
+@dataclass(frozen=True)
 class ClaimResult:
     """Result of a claim operation.
 
     Attributes:
-        events: Claimed events (locked).
+        deliveries: Claimed deliveries (locked).
         claimed_at: Timestamp of claim.
     """
 
-    events: list["Event"]
+    deliveries: list[Delivery]
     claimed_at: datetime
 
+    @property
+    def events(self) -> list["Event"]:
+        """Return the events from all deliveries (convenience accessor)."""
+        return [d.event for d in self.deliveries]
+
     def __bool__(self) -> bool:
-        """Return True if events are present."""
-        return len(self.events) > 0
+        """Return True if deliveries are present."""
+        return len(self.deliveries) > 0
 
     def __len__(self) -> int:
-        """Return number of events."""
-        return len(self.events)
+        """Return number of deliveries."""
+        return len(self.deliveries)
 
-    def __iter__(self) -> Iterator["Event"]:
-        """Iterate over events."""
-        return iter(self.events)
+    def __iter__(self) -> Iterator[Delivery]:
+        """Iterate over deliveries."""
+        return iter(self.deliveries)
 
 
 # --- EventHandler ---
@@ -187,7 +202,6 @@ class EventHandler(Generic[E], metaclass=_EventHandlerMeta):
     The __event_type__ is extracted from the generic parameter.
 
     Configuration is via class variables:
-        __routing_key__: Optional filter for routing key (default: None)
         __batch_size__: Max events to claim at once (default: 1)
         __batch_timeout__: Timeout for partial batches in seconds (default: 5.0)
         __poll_interval__: Seconds between polls when idle (default: 0.5)
@@ -206,7 +220,6 @@ class EventHandler(Generic[E], metaclass=_EventHandlerMeta):
 
     Example (batch processing):
         class VectorIndexHandler(EventHandler[IndexRecord]):
-            __routing_key__ = "vector"
             __batch_size__ = 100
             __batch_timeout__ = 5.0
 
@@ -218,7 +231,6 @@ class EventHandler(Generic[E], metaclass=_EventHandlerMeta):
     """
 
     __event_type__: ClassVar[type[Event]]
-    __routing_key__: ClassVar[str | None] = None
     __batch_size__: ClassVar[int] = 1
     __batch_timeout__: ClassVar[float] = 5.0
     __poll_interval__: ClassVar[float] = 0.5

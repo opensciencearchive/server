@@ -7,40 +7,19 @@ import pytest
 import sqlalchemy as sa
 
 from osa.domain.shared.error import ConflictError, ValidationError
-from osa.domain.shared.model.hook import (
-    ColumnDef,
-    FeatureSchema,
-    HookDefinition,
-    HookLimits,
-    HookManifest,
-)
+from osa.domain.shared.model.hook import ColumnDef
 from osa.infrastructure.persistence.feature_store import (
     FEATURES_SCHEMA,
     PostgresFeatureStore,
 )
 
 
-def _make_hook(
-    name: str = "pocket_detect",
-    columns: list[ColumnDef] | None = None,
-) -> HookDefinition:
-    if columns is None:
-        columns = [
-            ColumnDef(name="score", json_type="number", required=True),
-            ColumnDef(name="pocket_id", json_type="string", required=True),
-            ColumnDef(name="volume", json_type="number", required=False),
-        ]
-    return HookDefinition(
-        image="ghcr.io/example/hook:v1",
-        digest="sha256:abc123",
-        manifest=HookManifest(
-            name=name,
-            record_schema="Sample",
-            cardinality="many",
-            feature_schema=FeatureSchema(columns=columns),
-        ),
-        limits=HookLimits(),
-    )
+def _make_columns() -> list[ColumnDef]:
+    return [
+        ColumnDef(name="score", json_type="number", required=True),
+        ColumnDef(name="pocket_id", json_type="string", required=True),
+        ColumnDef(name="volume", json_type="number", required=False),
+    ]
 
 
 def _mock_engine():
@@ -93,7 +72,7 @@ class TestCreateTable:
         conn.execute.return_value = mock_result
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
 
-        await store.create_table("pocket_detect", _make_hook())
+        await store.create_table("pocket_detect", _make_columns())
 
         schema_call = conn.execute.call_args_list[0]
         sql_text = str(schema_call[0][0].text)
@@ -108,7 +87,7 @@ class TestCreateTable:
         conn.execute.return_value = mock_result
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
 
-        await store.create_table("pocket_detect", _make_hook())
+        await store.create_table("pocket_detect", _make_columns())
 
         conn.run_sync.assert_called_once()
 
@@ -120,7 +99,7 @@ class TestCreateTable:
         conn.execute.return_value = mock_result
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
 
-        await store.create_table("pocket_detect", _make_hook())
+        await store.create_table("pocket_detect", _make_columns())
 
         # Last execute call is the catalog insert
         catalog_call = conn.execute.call_args_list[-1]
@@ -136,7 +115,7 @@ class TestCreateTable:
         conn.execute.return_value = mock_result
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
 
-        await store.create_table("pocket_detect", _make_hook())
+        await store.create_table("pocket_detect", _make_columns())
 
         # Catalog insert is the last execute call
         catalog_call = conn.execute.call_args_list[-1]
@@ -157,7 +136,7 @@ class TestCreateTable:
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
 
         with pytest.raises(ConflictError, match="already exists"):
-            await store.create_table("pocket_detect", _make_hook())
+            await store.create_table("pocket_detect", _make_columns())
 
 
 class TestInsertFeatures:
@@ -234,7 +213,7 @@ class TestInsertFeatures:
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
 
         with pytest.raises(ValidationError, match="Invalid identifier"):
-            await store.create_table("'; DROP TABLE --", _make_hook())
+            await store.create_table("'; DROP TABLE --", _make_columns())
 
     @pytest.mark.asyncio
     async def test_reflects_table_before_insert(self):

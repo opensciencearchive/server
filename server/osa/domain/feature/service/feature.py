@@ -3,11 +3,10 @@
 import logging
 from typing import Any
 
-from osa.domain.deposition.port.convention_repository import ConventionRepository
-from osa.domain.deposition.port.repository import DepositionRepository
-from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.feature.port.feature_store import FeatureStore
+from osa.domain.feature.port.storage import FeatureStoragePort
 from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.model.hook_snapshot import HookSnapshot
 from osa.domain.shared.model.srn import DepositionSRN
 from osa.domain.shared.service import Service
 
@@ -18,13 +17,17 @@ class FeatureService(Service):
     """Wraps FeatureStore port with domain logic for feature management."""
 
     feature_store: FeatureStore
-    deposition_repo: DepositionRepository
-    convention_repo: ConventionRepository
-    file_storage: FileStoragePort
+    feature_storage: FeatureStoragePort
 
     async def create_table(self, hook: HookDefinition) -> None:
-        """Create a feature table for a hook."""
-        await self.feature_store.create_table(hook.manifest.name, hook)
+        """Create a feature table from a full HookDefinition."""
+        await self.feature_store.create_table(
+            hook.manifest.name, hook.manifest.feature_schema.columns
+        )
+
+    async def create_table_from_snapshot(self, snapshot: HookSnapshot) -> None:
+        """Create a feature table from a HookSnapshot (event payload)."""
+        await self.feature_store.create_table(snapshot.name, snapshot.features)
 
     async def insert_features(
         self,
@@ -36,25 +39,24 @@ class FeatureService(Service):
         return await self.feature_store.insert_features(hook_name, record_srn, rows)
 
     async def insert_features_for_record(
-        self, deposition_srn: DepositionSRN, record_srn: str
+        self,
+        deposition_srn: DepositionSRN,
+        record_srn: str,
+        hooks: list[HookSnapshot] | None = None,
     ) -> None:
-        """Look up deposition, convention, read hook features, and insert."""
-        dep = await self.deposition_repo.get(deposition_srn)
-        if dep is None:
-            logger.error(f"Deposition not found: {deposition_srn}")
+        """Read hook features and insert into feature tables.
+
+        If hooks are provided (from enriched event), iterate those.
+        """
+        if not hooks:
             return
 
-        convention = await self.convention_repo.get(dep.convention_srn)
-        if convention is None:
-            logger.error(f"Convention not found: {dep.convention_srn}")
-            return
-
-        for hook_def in convention.hooks:
-            hook_name = hook_def.manifest.name
-            if not await self.file_storage.hook_features_exist(deposition_srn, hook_name):
+        for hook_snapshot in hooks:
+            hook_name = hook_snapshot.name
+            if not await self.feature_storage.hook_features_exist(deposition_srn, hook_name):
                 continue
 
-            features = await self.file_storage.read_hook_features(deposition_srn, hook_name)
+            features = await self.feature_storage.read_hook_features(deposition_srn, hook_name)
             if features:
                 count = await self.insert_features(
                     hook_name=hook_name,

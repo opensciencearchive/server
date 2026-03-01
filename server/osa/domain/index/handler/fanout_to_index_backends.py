@@ -44,4 +44,4 @@ class FanOutToIndexBackends(EventHandler[RecordPublished]):
                 record_srn=event.record_srn,
                 metadata=event.metadata,
             )
-            await self.outbox.append(index_event, routing_key=backend_name)
+            await self.outbox.append(index_event)

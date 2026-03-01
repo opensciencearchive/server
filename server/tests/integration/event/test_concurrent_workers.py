@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 
-from osa.domain.shared.event import ClaimResult, Event, EventId
+from osa.domain.shared.event import ClaimResult, Delivery, Event, EventId
 
 
 class DummyEvent(Event):
@@ -30,12 +30,11 @@ class FakeConcurrentRepository:
         self._locks: dict[str, asyncio.Lock] = {}
         self._global_lock = asyncio.Lock()
 
-    async def save(self, event: Event, status: str = "pending", routing_key: str | None = None):
+    async def save(self, event: Event, status: str = "pending"):
         """Save an event."""
         self.events[str(event.id)] = {
             "event": event,
             "status": status,
-            "routing_key": routing_key,
         }
         self._locks[str(event.id)] = asyncio.Lock()
 
@@ -43,15 +42,14 @@ class FakeConcurrentRepository:
         self,
         event_types: list[str],
         limit: int,
-        routing_key: str | None = None,
     ) -> ClaimResult:
         """Claim events with SKIP LOCKED simulation."""
-        claimed = []
+        deliveries: list[Delivery] = []
         now = datetime.now(UTC)
 
         async with self._global_lock:
             for event_id, data in self.events.items():
-                if len(claimed) >= limit:
+                if len(deliveries) >= limit:
                     break
 
                 # Skip if locked (simulates SKIP LOCKED)
@@ -64,18 +62,15 @@ class FakeConcurrentRepository:
                 if type(data["event"]).__name__ not in event_types:
                     continue
 
-                if routing_key is not None and data["routing_key"] != routing_key:
-                    continue
-
                 # Try to acquire lock
                 if self._locks[event_id].locked():
                     continue
 
                 await self._locks[event_id].acquire()
                 data["status"] = "claimed"
-                claimed.append(data["event"])
+                deliveries.append(Delivery(id=f"del-{event_id}", event=data["event"]))
 
-        return ClaimResult(events=claimed, claimed_at=now)
+        return ClaimResult(deliveries=deliveries, claimed_at=now)
 
     async def release(self, event_id: str, new_status: str = "delivered"):
         """Release lock and update status."""
@@ -166,34 +161,6 @@ class TestConcurrentWorkerClaiming:
         successful_claims = sum(results)
         assert successful_claims == 1
         assert claim_count == 1
-
-    @pytest.mark.asyncio
-    async def test_routing_key_isolation(self):
-        """Workers with different routing keys should not interfere."""
-        # Arrange
-        repo = FakeConcurrentRepository()
-
-        # Create events for different routing keys
-        for i in range(5):
-            event = DummyEvent(id=EventId(uuid4()), data=f"vector-{i}")
-            await repo.save(event, routing_key="vector")
-
-        for i in range(5):
-            event = DummyEvent(id=EventId(uuid4()), data=f"keyword-{i}")
-            await repo.save(event, routing_key="keyword")
-
-        # Act - Two workers with different routing keys claim concurrently
-        vector_result = await repo.claim(event_types=["DummyEvent"], limit=10, routing_key="vector")
-        keyword_result = await repo.claim(
-            event_types=["DummyEvent"], limit=10, routing_key="keyword"
-        )
-
-        # Assert - Each worker only gets their routed events
-        assert len(vector_result.events) == 5
-        assert len(keyword_result.events) == 5
-
-        assert all("vector" in e.data for e in vector_result.events)
-        assert all("keyword" in e.data for e in keyword_result.events)
 
     @pytest.mark.asyncio
     async def test_high_concurrency_no_duplicates(self):

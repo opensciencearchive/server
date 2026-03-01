@@ -1,4 +1,4 @@
-"""SourceService - orchestrates running OCI source containers and creating depositions."""
+"""SourceService - orchestrates running OCI source containers."""
 
 import logging
 from dataclasses import dataclass
@@ -6,17 +6,16 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from osa.domain.auth.model.value import SYSTEM_USER_ID
-from osa.domain.deposition.port.convention_repository import ConventionRepository
-from osa.domain.deposition.port.storage import FileStoragePort
-from osa.domain.deposition.service.deposition import DepositionService
 from osa.domain.shared.event import EventId
+from osa.domain.shared.model.source import SourceDefinition
 from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
+from osa.domain.source.event.source_record_ready import SourceRecordReady
 from osa.domain.source.event.source_requested import SourceRequested
 from osa.domain.source.event.source_run_completed import SourceRunCompleted
 from osa.domain.source.port.source_runner import SourceInputs, SourceRunner
+from osa.domain.source.port.storage import SourceStoragePort
 
 logger = logging.getLogger(__name__)
 
@@ -32,38 +31,28 @@ class SourceResult:
 
 
 class SourceService(Service):
-    """Orchestrates running source containers and creating depositions.
+    """Orchestrates running source containers.
 
-    For each record produced by the source container:
-    1. Creates a Deposition via DepositionService
-    2. Sets metadata
-    3. Renames staged files into deposition directory
-    4. Submits the deposition for validation
+    For each record produced by the source container, emits a
+    SourceRecordReady event. The deposition domain handles creating
+    depositions from these events.
     """
 
     source_runner: SourceRunner
-    deposition_service: DepositionService
-    file_storage: FileStoragePort
-    convention_repo: ConventionRepository
+    source_storage: SourceStoragePort
     outbox: Outbox
 
     async def run_source(
         self,
         convention_srn: ConventionSRN,
+        source: SourceDefinition,
         since: datetime | None = None,
         limit: int | None = None,
         offset: int = 0,
         chunk_size: int = 1000,
         session: dict[str, Any] | None = None,
     ) -> SourceResult:
-        """Run a source container and create depositions from its output."""
-        convention = await self.convention_repo.get(convention_srn)
-        if convention is None:
-            raise ValueError(f"Convention not found: {convention_srn}")
-        if convention.source is None:
-            raise ValueError(f"Convention has no source defined: {convention_srn}")
-
-        source_def = convention.source
+        """Run a source container and emit events for each produced record."""
         started_at = datetime.now(UTC)
         run_id = str(uuid4())[:12]
 
@@ -77,12 +66,12 @@ class SourceService(Service):
         )
 
         # Prepare dirs
-        staging_dir = self.file_storage.get_source_staging_dir(convention_srn, run_id)
-        work_dir = self.file_storage.get_source_output_dir(convention_srn, run_id)
+        staging_dir = self.source_storage.get_source_staging_dir(convention_srn, run_id)
+        work_dir = self.source_storage.get_source_output_dir(convention_srn, run_id)
 
         # Build inputs
         inputs = SourceInputs(
-            config=source_def.config,
+            config=source.config,
             since=since,
             limit=limit,
             offset=offset,
@@ -91,39 +80,33 @@ class SourceService(Service):
 
         # Run container
         output = await self.source_runner.run(
-            source=source_def,
+            source=source,
             inputs=inputs,
             files_dir=staging_dir,
             work_dir=work_dir,
         )
 
-        # Process records
+        # Emit per-record events
         count = 0
         for record_data in output.records:
             source_id = record_data.get("source_id", "")
             metadata = record_data.get("metadata", {})
+            file_paths = record_data.get("file_paths", [])
 
-            dep = await self.deposition_service.create(
-                convention_srn=convention_srn,
-                owner_id=SYSTEM_USER_ID,
+            await self.outbox.append(
+                SourceRecordReady(
+                    id=EventId(uuid4()),
+                    convention_srn=convention_srn,
+                    metadata=metadata,
+                    file_paths=file_paths,
+                    source_id=source_id,
+                    staging_dir=str(staging_dir),
+                )
             )
-            await self.deposition_service.update_metadata(
-                srn=dep.srn,
-                metadata=metadata,
-            )
-
-            # Move staged files into deposition directory
-            self.file_storage.move_source_files_to_deposition(
-                staging_dir=staging_dir,
-                source_id=source_id,
-                deposition_srn=dep.srn,
-            )
-
-            await self.deposition_service.submit(srn=dep.srn)
             count += 1
 
             if count % 100 == 0:
-                logger.info("  Processed %d records so far...", count)
+                logger.info("  Emitted %d SourceRecordReady events so far...", count)
 
         completed_at = datetime.now(UTC)
         is_final_chunk = output.session is None or count == 0

@@ -13,7 +13,11 @@ from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
 
 
 class LocalFileStorageAdapter(FileStoragePort):
-    """Local filesystem implementation of FileStoragePort."""
+    """Local filesystem adapter satisfying all domain storage ports.
+
+    Implements FileStoragePort (deposition files), SourceStoragePort,
+    HookStoragePort, and FeatureStoragePort via structural subtyping.
+    """
 
     def __init__(self, base_path: str) -> None:
         self.base_path = Path(base_path)

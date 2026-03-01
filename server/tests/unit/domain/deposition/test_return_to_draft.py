@@ -1,15 +1,12 @@
 """Unit tests for ReturnToDraft event handler."""
 
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 
-from osa.domain.auth.model.value import UserId
 from osa.domain.deposition.handler.return_to_draft import ReturnToDraft
-from osa.domain.deposition.model.aggregate import Deposition
-from osa.domain.deposition.model.value import DepositionStatus
+from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
 from osa.domain.validation.event.validation_failed import ValidationFailed
@@ -26,37 +23,27 @@ def _make_conv_srn() -> ConventionSRN:
 
 class TestReturnToDraft:
     @pytest.mark.asyncio
-    async def test_returns_deposition_to_draft(self):
-        dep = Deposition(
-            srn=_make_dep_srn(),
-            convention_srn=_make_conv_srn(),
-            status=DepositionStatus.IN_VALIDATION,
-            owner_id=UserId(uuid4()),
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        )
-        dep_repo = AsyncMock()
-        dep_repo.get.return_value = dep
+    async def test_delegates_to_service(self):
+        service = AsyncMock()
+        handler = ReturnToDraft(deposition_service=service)
 
-        handler = ReturnToDraft(deposition_repo=dep_repo)
         event = ValidationFailed(
             id=EventId(uuid4()),
-            deposition_srn=dep.srn,
+            deposition_srn=_make_dep_srn(),
             convention_srn=_make_conv_srn(),
             status=RunStatus.FAILED,
             reasons=["Missing required field"],
         )
         await handler.handle(event)
 
-        assert dep.status == DepositionStatus.DRAFT
-        dep_repo.save.assert_called_once_with(dep)
+        service.return_to_draft.assert_called_once_with(_make_dep_srn())
 
     @pytest.mark.asyncio
     async def test_handles_missing_deposition(self):
-        dep_repo = AsyncMock()
-        dep_repo.get.return_value = None
+        service = AsyncMock()
+        service.return_to_draft.side_effect = NotFoundError("not found")
 
-        handler = ReturnToDraft(deposition_repo=dep_repo)
+        handler = ReturnToDraft(deposition_service=service)
         event = ValidationFailed(
             id=EventId(uuid4()),
             deposition_srn=_make_dep_srn(),
@@ -66,4 +53,4 @@ class TestReturnToDraft:
         )
         # Should not raise — workers must be resilient
         await handler.handle(event)
-        dep_repo.save.assert_not_called()
+        service.return_to_draft.assert_called_once()

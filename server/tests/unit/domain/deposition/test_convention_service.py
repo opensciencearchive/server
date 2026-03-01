@@ -67,7 +67,6 @@ def _make_hook_def(name: str = "pocket_detect") -> HookDefinition:
 def _make_service(
     conv_repo: AsyncMock | None = None,
     schema_service: AsyncMock | None = None,
-    feature_service: AsyncMock | None = None,
     outbox: AsyncMock | None = None,
 ) -> ConventionService:
     mock_schema_service = schema_service or AsyncMock()
@@ -79,7 +78,6 @@ def _make_service(
     return ConventionService(
         convention_repo=conv_repo or AsyncMock(),
         schema_service=mock_schema_service,
-        feature_service=feature_service or AsyncMock(),
         outbox=outbox or AsyncMock(),
         node_domain=Domain("localhost"),
     )
@@ -93,9 +91,8 @@ class TestConventionServiceCreate:
         mock_schema = AsyncMock()
         mock_schema.srn = _make_schema_srn()
         schema_service.create_schema.return_value = mock_schema
-        feature_service = AsyncMock()
 
-        service = _make_service(conv_repo, schema_service, feature_service)
+        service = _make_service(conv_repo, schema_service)
         result = await service.create_convention(
             title="Test Convention",
             version="1.0.0",
@@ -118,10 +115,9 @@ class TestConventionServiceCreate:
         assert str(result.srn).startswith("urn:osa:localhost:conv:")
 
     @pytest.mark.asyncio
-    async def test_create_convention_with_hooks_creates_feature_tables(self):
-        feature_service = AsyncMock()
-
-        service = _make_service(feature_service=feature_service)
+    async def test_create_convention_with_hooks_emits_hooks_in_event(self):
+        outbox = AsyncMock()
+        service = _make_service(outbox=outbox)
         hooks = [_make_hook_def()]
         result = await service.create_convention(
             title="With Hooks",
@@ -131,20 +127,23 @@ class TestConventionServiceCreate:
             hooks=hooks,
         )
         assert result.hooks == hooks
-        feature_service.create_table.assert_called_once()
+        # Verify the emitted event carries hook snapshots
+        emitted = outbox.append.call_args[0][0]
+        assert len(emitted.hooks) == 1
+        assert emitted.hooks[0].name == "pocket_detect"
 
     @pytest.mark.asyncio
-    async def test_create_convention_without_hooks_skips_feature_tables(self):
-        feature_service = AsyncMock()
-
-        service = _make_service(feature_service=feature_service)
+    async def test_create_convention_without_hooks_emits_empty_hooks(self):
+        outbox = AsyncMock()
+        service = _make_service(outbox=outbox)
         await service.create_convention(
             title="No Hooks",
             version="1.0.0",
             schema=_make_field_defs(),
             file_requirements=_make_file_reqs(),
         )
-        feature_service.create_table.assert_not_called()
+        emitted = outbox.append.call_args[0][0]
+        assert emitted.hooks == []
 
 
 class TestConventionServiceGet:

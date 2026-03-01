@@ -53,7 +53,7 @@ def make_mock_container(
     """Create a mock DI container."""
     if outbox is None:
         outbox = AsyncMock(spec=Outbox)
-        outbox.claim.return_value = ClaimResult(events=[], claimed_at=datetime.now(UTC))
+        outbox.claim.return_value = ClaimResult(deliveries=[], claimed_at=datetime.now(UTC))
         outbox.append = AsyncMock()
         outbox.reset_stale_claims = AsyncMock(return_value=0)
 
@@ -225,7 +225,7 @@ class TestWorkerPoolStaleClaims:
 
         # Arrange
         outbox = AsyncMock(spec=Outbox)
-        outbox.claim.return_value = ClaimResult(events=[], claimed_at=datetime.now(UTC))
+        outbox.claim.return_value = ClaimResult(deliveries=[], claimed_at=datetime.now(UTC))
         outbox.append = AsyncMock()
         outbox.reset_stale_claims = AsyncMock(return_value=2)
 

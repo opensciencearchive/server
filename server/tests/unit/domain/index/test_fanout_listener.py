@@ -32,7 +32,7 @@ class FakeOutbox:
         self.events: list[Any] = []
         self.append = AsyncMock(side_effect=self._append)
 
-    async def _append(self, event: Any, routing_key: str | None = None) -> None:
+    async def _append(self, event: Any) -> None:
         self.events.append(event)
 
 
