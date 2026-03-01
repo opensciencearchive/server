@@ -98,8 +98,13 @@ test-db-drop:
     PGPASSWORD={{PG_PASS}} psql -h {{PG_HOST}} -p {{PG_PORT}} -U {{PG_USER}} \
         -c "DROP DATABASE IF EXISTS {{TEST_DB}} WITH (FORCE)"
 
-# Run integration tests: wipe → create → migrate → test → wipe
+# Run integration tests (persistence tests skip if PG is not available)
 test-integration:
+    @TEST=1 uv run pytest tests/integration -v --tb=short -x
+
+# Run integration tests with PG: ensure DB running → wipe → create → migrate → test → wipe
+test-integration-pg:
+    just --justfile ../Justfile db-up
     @just test-db-drop
     @just test-db-create
     OSA_DATABASE__URL="{{TEST_DB_URL}}" \
@@ -107,7 +112,8 @@ test-integration:
         uv run alembic upgrade head
     OSA_DATABASE__URL="{{TEST_DB_URL}}" \
     OSA_AUTH__JWT__SECRET="test-secret-for-integration-tests-minimum-32-chars" \
-        uv run pytest tests/integration/persistence -v --tb=short -x; \
+    TEST=1 \
+        uv run pytest tests/integration -v --tb=short -x; \
     just test-db-drop
 
 # === Dependencies ===

@@ -44,7 +44,7 @@ async def pg_session(pg_engine: AsyncEngine):
         await conn.execute(
             text(
                 "TRUNCATE TABLE depositions, conventions, schemas, ontologies, "
-                "ontology_terms, events, records, validation_runs, "
+                "ontology_terms, events, deliveries, records, validation_runs, "
                 "feature_tables, users, identities, refresh_tokens, "
                 "role_assignments CASCADE"
             )

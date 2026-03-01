@@ -1,7 +1,7 @@
 """Integration tests for EventRepository against real PostgreSQL.
 
-Tests PG-specific behavior: FOR UPDATE SKIP LOCKED, window functions
-for fair round-robin, retry backoff with INTERVAL casts, partial indexes.
+Tests PG-specific behavior: FOR UPDATE SKIP LOCKED on deliveries,
+consumer-group delivery model, retry backoff, stale claim detection.
 """
 
 import asyncio
@@ -14,7 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from osa.domain.shared.event import Event, EventId
 from osa.infrastructure.persistence.repository.event import SQLAlchemyEventRepository
-from osa.infrastructure.persistence.tables import events_table
+from osa.infrastructure.persistence.tables import deliveries_table
+
+CONSUMER_GROUP = "test-group"
 
 
 class PingEvent(Event):
@@ -37,7 +39,7 @@ class TestEventRepoSaveAndGet:
         repo = SQLAlchemyEventRepository(pg_session)
         event = PingEvent(id=EventId(uuid4()), data="hello")
 
-        await repo.save(event)
+        await repo.save_with_deliveries(event, {CONSUMER_GROUP})
         await pg_session.commit()
 
         got = await repo.get(event.id)
@@ -53,68 +55,83 @@ class TestEventRepoSaveAndGet:
 
 
 @pytest.mark.asyncio
-class TestEventRepoClaim:
-    async def test_claim_returns_pending_events(self, pg_session: AsyncSession):
+class TestEventRepoClaimDelivery:
+    async def test_claim_returns_pending_deliveries(self, pg_session: AsyncSession):
         repo = SQLAlchemyEventRepository(pg_session)
 
         e1 = PingEvent(id=EventId(uuid4()), data="first")
         e2 = PingEvent(id=EventId(uuid4()), data="second")
-        await repo.save(e1)
-        await repo.save(e2)
+        await repo.save_with_deliveries(e1, {CONSUMER_GROUP})
+        await repo.save_with_deliveries(e2, {CONSUMER_GROUP})
         await pg_session.commit()
 
-        result = await repo.claim(event_types=["PingEvent"], limit=10)
+        result = await repo.claim_delivery(
+            consumer_group=CONSUMER_GROUP, event_types=["PingEvent"], limit=10
+        )
         await pg_session.commit()
 
-        assert len(result.events) == 2
-        data_values = {e.data for e in result.events}
+        assert len(result) == 2
+        data_values = {d.event.data for d in result.deliveries}
         assert data_values == {"first", "second"}
 
     async def test_claim_respects_limit(self, pg_session: AsyncSession):
         repo = SQLAlchemyEventRepository(pg_session)
 
         for i in range(5):
-            await repo.save(PingEvent(id=EventId(uuid4()), data=f"e{i}"))
+            await repo.save_with_deliveries(
+                PingEvent(id=EventId(uuid4()), data=f"e{i}"), {CONSUMER_GROUP}
+            )
         await pg_session.commit()
 
-        result = await repo.claim(event_types=["PingEvent"], limit=2)
-        assert len(result.events) == 2
+        result = await repo.claim_delivery(
+            consumer_group=CONSUMER_GROUP, event_types=["PingEvent"], limit=2
+        )
+        assert len(result) == 2
 
     async def test_claim_filters_by_event_type(self, pg_session: AsyncSession):
         repo = SQLAlchemyEventRepository(pg_session)
 
-        await repo.save(PingEvent(id=EventId(uuid4()), data="ping"))
-        await repo.save(PongEvent(id=EventId(uuid4()), data="pong"))
+        await repo.save_with_deliveries(
+            PingEvent(id=EventId(uuid4()), data="ping"), {CONSUMER_GROUP}
+        )
+        await repo.save_with_deliveries(
+            PongEvent(id=EventId(uuid4()), data="pong"), {CONSUMER_GROUP}
+        )
         await pg_session.commit()
 
-        result = await repo.claim(event_types=["PongEvent"], limit=10)
+        result = await repo.claim_delivery(
+            consumer_group=CONSUMER_GROUP, event_types=["PongEvent"], limit=10
+        )
         await pg_session.commit()
 
-        assert len(result.events) == 1
-        assert isinstance(result.events[0], PongEvent)
-        assert result.events[0].data == "pong"
+        assert len(result) == 1
+        assert isinstance(result.deliveries[0].event, PongEvent)
+        assert result.deliveries[0].event.data == "pong"
 
-    async def test_claim_concurrent_sessions_see_disjoint_events(self, pg_engine: AsyncEngine):
+    async def test_claim_concurrent_sessions_see_disjoint_deliveries(self, pg_engine: AsyncEngine):
         """Two concurrent sessions using FOR UPDATE SKIP LOCKED get disjoint sets."""
         factory = async_sessionmaker(pg_engine, expire_on_commit=False)
 
         # Seed events in a dedicated session
         async with factory() as seed_session:
             repo = SQLAlchemyEventRepository(seed_session)
-            ids = []
             for i in range(6):
-                eid = EventId(uuid4())
-                ids.append(eid)
-                await repo.save(PingEvent(id=eid, data=f"evt-{i}"))
+                await repo.save_with_deliveries(
+                    PingEvent(id=EventId(uuid4()), data=f"evt-{i}"), {CONSUMER_GROUP}
+                )
             await seed_session.commit()
 
         # Two sessions claim concurrently
-        async def claim_in_session(limit: int) -> list[EventId]:
+        async def claim_in_session(limit: int) -> list[str]:
             async with factory() as session:
                 repo = SQLAlchemyEventRepository(session)
-                result = await repo.claim(event_types=["PingEvent"], limit=limit)
+                result = await repo.claim_delivery(
+                    consumer_group=CONSUMER_GROUP,
+                    event_types=["PingEvent"],
+                    limit=limit,
+                )
                 await session.commit()
-                return [e.id for e in result.events]
+                return [d.id for d in result.deliveries]
 
         results = await asyncio.gather(
             claim_in_session(3),
@@ -126,43 +143,8 @@ class TestEventRepoClaim:
 
         # No overlap — FOR UPDATE SKIP LOCKED ensures disjoint
         assert set_a.isdisjoint(set_b)
-        # All 6 events claimed between the two
+        # All 6 deliveries claimed between the two
         assert len(set_a) + len(set_b) == 6
-
-
-@pytest.mark.asyncio
-class TestEventRepoFindPending:
-    async def test_find_pending_fair_round_robin(self, pg_session: AsyncSession):
-        """Fair mode interleaves event types."""
-        repo = SQLAlchemyEventRepository(pg_session)
-
-        # 3 PingEvents, 3 PongEvents
-        for i in range(3):
-            await repo.save(PingEvent(id=EventId(uuid4()), data=f"ping-{i}"))
-            await repo.save(PongEvent(id=EventId(uuid4()), data=f"pong-{i}"))
-        await pg_session.commit()
-
-        result = await repo.find_pending(limit=4, fair=True)
-        assert len(result) == 4
-
-        # With fair=True, we should get a mix of both types
-        types = [type(e).__name__ for e in result]
-        assert "PingEvent" in types
-        assert "PongEvent" in types
-
-    async def test_find_pending_strict_fifo(self, pg_session: AsyncSession):
-        """Strict FIFO returns events ordered by created_at regardless of type."""
-        repo = SQLAlchemyEventRepository(pg_session)
-
-        await repo.save(PingEvent(id=EventId(uuid4()), data="ping-0"))
-        await repo.save(PongEvent(id=EventId(uuid4()), data="pong-0"))
-        await pg_session.commit()
-
-        result = await repo.find_pending(limit=10, fair=False)
-        assert len(result) == 2
-        # Strict FIFO: ordered by created_at
-        assert result[0].data == "ping-0"
-        assert result[1].data == "pong-0"
 
 
 @pytest.mark.asyncio
@@ -170,81 +152,102 @@ class TestEventRepoRetry:
     async def test_mark_failed_with_retry_resets_to_pending(self, pg_session: AsyncSession):
         repo = SQLAlchemyEventRepository(pg_session)
         event = PingEvent(id=EventId(uuid4()), data="retry-me")
-        await repo.save(event)
+        await repo.save_with_deliveries(event, {CONSUMER_GROUP})
         await pg_session.commit()
 
         # Claim it
-        await repo.claim(event_types=["PingEvent"], limit=1)
+        result = await repo.claim_delivery(
+            consumer_group=CONSUMER_GROUP, event_types=["PingEvent"], limit=1
+        )
+        delivery_id = result.deliveries[0].id
         await pg_session.commit()
 
         # Fail with retries remaining
-        await repo.mark_failed_with_retry(event.id, "transient error", max_retries=3)
+        await repo.mark_failed_with_retry(delivery_id, "transient error", max_retries=3)
         await pg_session.commit()
 
         # Should be pending again with retry_count=1
         row = await pg_session.execute(
-            events_table.select().where(events_table.c.id == str(event.id))
+            deliveries_table.select().where(deliveries_table.c.id == delivery_id)
         )
         data = row.mappings().first()
         assert data is not None
-        assert data["delivery_status"] == "pending"
+        assert data["status"] == "pending"
         assert data["retry_count"] == 1
 
     async def test_mark_failed_after_max_retries_sets_failed(self, pg_session: AsyncSession):
         repo = SQLAlchemyEventRepository(pg_session)
         event = PingEvent(id=EventId(uuid4()), data="will-fail")
-        await repo.save(event)
+        await repo.save_with_deliveries(event, {CONSUMER_GROUP})
         await pg_session.commit()
 
-        # Exhaust retries
+        delivery_id: str | None = None
+
+        # Exhaust retries — backdate updated_at after each failure so the
+        # backoff window is satisfied and the delivery becomes claimable again.
+        past = datetime.now(UTC) - timedelta(seconds=60)
         for _ in range(3):
-            await repo.claim(event_types=["PingEvent"], limit=1)
+            if delivery_id is not None:
+                await pg_session.execute(
+                    update(deliveries_table)
+                    .where(deliveries_table.c.id == delivery_id)
+                    .values(updated_at=past)
+                )
+                await pg_session.commit()
+
+            result = await repo.claim_delivery(
+                consumer_group=CONSUMER_GROUP, event_types=["PingEvent"], limit=1
+            )
+            delivery_id = result.deliveries[0].id
             await pg_session.commit()
-            await repo.mark_failed_with_retry(event.id, "error", max_retries=3)
+            await repo.mark_failed_with_retry(delivery_id, "error", max_retries=3)
             await pg_session.commit()
 
         row = await pg_session.execute(
-            events_table.select().where(events_table.c.id == str(event.id))
+            deliveries_table.select().where(deliveries_table.c.id == delivery_id)
         )
         data = row.mappings().first()
         assert data is not None
-        assert data["delivery_status"] == "failed"
+        assert data["status"] == "failed"
         assert data["retry_count"] == 3
 
 
 @pytest.mark.asyncio
-class TestEventRepoStaleClaims:
-    async def test_reset_stale_claims(self, pg_session: AsyncSession):
+class TestEventRepoStaleDeliveries:
+    async def test_reset_stale_deliveries(self, pg_session: AsyncSession):
         repo = SQLAlchemyEventRepository(pg_session)
 
         event = PingEvent(id=EventId(uuid4()), data="stale")
-        await repo.save(event)
+        await repo.save_with_deliveries(event, {CONSUMER_GROUP})
         await pg_session.commit()
 
         # Claim it, then backdate claimed_at to simulate staleness
-        await repo.claim(event_types=["PingEvent"], limit=1)
+        result = await repo.claim_delivery(
+            consumer_group=CONSUMER_GROUP, event_types=["PingEvent"], limit=1
+        )
+        delivery_id = result.deliveries[0].id
         await pg_session.commit()
 
         stale_time = datetime.now(UTC) - timedelta(seconds=600)
         await pg_session.execute(
-            update(events_table)
-            .where(events_table.c.id == str(event.id))
+            update(deliveries_table)
+            .where(deliveries_table.c.id == delivery_id)
             .values(claimed_at=stale_time)
         )
         await pg_session.commit()
 
-        reset_count = await repo.reset_stale_claims(timeout_seconds=300)
+        reset_count = await repo.reset_stale_deliveries(timeout_seconds=300)
         await pg_session.commit()
 
         assert reset_count == 1
 
-        # Event should be pending again
+        # Delivery should be pending again
         row = await pg_session.execute(
-            events_table.select().where(events_table.c.id == str(event.id))
+            deliveries_table.select().where(deliveries_table.c.id == delivery_id)
         )
         data = row.mappings().first()
         assert data is not None
-        assert data["delivery_status"] == "pending"
+        assert data["status"] == "pending"
 
 
 @pytest.mark.asyncio
@@ -256,9 +259,9 @@ class TestEventRepoFindLatestByType:
         e2 = PingEvent(id=EventId(uuid4()), data="newer")
         e3 = PongEvent(id=EventId(uuid4()), data="different-type")
 
-        await repo.save(e1)
-        await repo.save(e2)
-        await repo.save(e3)
+        await repo.save_with_deliveries(e1, {CONSUMER_GROUP})
+        await repo.save_with_deliveries(e2, {CONSUMER_GROUP})
+        await repo.save_with_deliveries(e3, {CONSUMER_GROUP})
         await pg_session.commit()
 
         latest = await repo.find_latest_by_type(PingEvent)

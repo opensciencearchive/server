@@ -298,7 +298,7 @@ class TestDeployEndToEnd:
 
         # Mock docker build + inspect
         mock_run = MagicMock()
-        mock_run.return_value = MagicMock(stdout="sha256:fakedigest\n")
+        mock_run.return_value = MagicMock(returncode=0, stdout="sha256:fakedigest\n")
 
         # Mock httpx.post
         mock_response = MagicMock()
@@ -313,7 +313,7 @@ class TestDeployEndToEnd:
 
         with (
             patch("osa.cli.deploy.subprocess.run", mock_run),
-            patch.dict("sys.modules", {"httpx": mock_httpx}),
+            patch("osa.cli.deploy.httpx", mock_httpx),
             patch("osa.cli.deploy.Path.write_text"),
             patch("osa.cli.deploy.Path.unlink"),
         ):

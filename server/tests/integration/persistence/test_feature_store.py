@@ -77,14 +77,18 @@ class TestFeatureStoreCreateTable:
             assert "score" in cols
             assert "label" in cols
 
-    async def test_create_table_idempotent(self, pg_engine: AsyncEngine, pg_session: AsyncSession):
-        """Calling create_table twice should not error (checkfirst + ON CONFLICT)."""
-        store = PostgresFeatureStore(pg_engine, pg_session)
-        hook = _make_hook(name="idempotent_hook")
+    async def test_create_table_duplicate_raises_conflict(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession
+    ):
+        """Calling create_table twice raises ConflictError."""
+        from osa.domain.shared.error import ConflictError
 
-        await store.create_table("idempotent_hook", hook.feature.columns)
-        # Second call should not raise
-        await store.create_table("idempotent_hook", hook.feature.columns)
+        store = PostgresFeatureStore(pg_engine, pg_session)
+        hook = _make_hook(name="duplicate_hook")
+
+        await store.create_table("duplicate_hook", hook.feature.columns)
+        with pytest.raises(ConflictError, match="already exists"):
+            await store.create_table("duplicate_hook", hook.feature.columns)
 
     async def test_create_table_registers_in_catalog(
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
