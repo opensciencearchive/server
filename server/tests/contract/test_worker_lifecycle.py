@@ -44,7 +44,7 @@ def make_mock_container(handler_type: type, handler_instance: Any):
     from osa.domain.shared.outbox import Outbox
 
     outbox = AsyncMock()
-    outbox.claim.return_value = ClaimResult(events=[], claimed_at=datetime.now(UTC))
+    outbox.claim.return_value = ClaimResult(deliveries=[], claimed_at=datetime.now(UTC))
     outbox.reset_stale_claims.return_value = 0
 
     session = AsyncMock()
