@@ -1,7 +1,7 @@
 from typing import Any
 
 from osa.domain.shared.event import Event, EventId
-from osa.domain.shared.model.hook_snapshot import HookSnapshot
+from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
 
 
@@ -16,5 +16,5 @@ class DepositionSubmittedEvent(Event):
     deposition_id: DepositionSRN
     metadata: dict[str, Any]
     convention_srn: ConventionSRN
-    hooks: list[HookSnapshot] = []
+    hooks: list[HookDefinition] = []
     files_dir: str = ""

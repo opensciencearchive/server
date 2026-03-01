@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 
 from osa._registry import ConventionInfo, HookInfo, SourceInfo, _conventions, _hooks
-from osa.manifest import generate_feature_schema
+from osa.manifest import generate_columns
 
 logger = logging.getLogger(__name__)
 
@@ -197,27 +197,27 @@ def _hook_to_definition(
     digest: str,
 ) -> dict[str, Any]:
     """Build a HookDefinition dict from a HookInfo + image details."""
-    feature_schema: dict[str, Any] = {"columns": []}
+    columns: list[dict[str, Any]] = []
     if hook.output_type is not None and hasattr(hook.output_type, "model_fields"):
-        fs = generate_feature_schema(hook.output_type)
-        feature_schema = fs.model_dump()
+        columns = [c.model_dump() for c in generate_columns(hook.output_type)]
 
     return {
-        "image": image,
-        "digest": digest,
-        "runner": "oci",
-        "config": None,
-        "limits": {
-            "timeout_seconds": 300,
-            "memory": "2g",
-            "cpu": "2.0",
+        "name": hook.name,
+        "runtime": {
+            "type": "oci",
+            "image": image,
+            "digest": digest,
+            "config": {},
+            "limits": {
+                "timeout_seconds": 300,
+                "memory": "2g",
+                "cpu": "2.0",
+            },
         },
-        "manifest": {
-            "name": hook.name,
-            "record_schema": hook.schema_type.__name__ if hook.schema_type else "",
+        "feature": {
+            "kind": "table",
             "cardinality": hook.cardinality,
-            "feature_schema": feature_schema,
-            "runner": "oci",
+            "columns": columns,
         },
     }
 

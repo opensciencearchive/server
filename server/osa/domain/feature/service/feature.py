@@ -6,7 +6,6 @@ from typing import Any
 from osa.domain.feature.port.feature_store import FeatureStore
 from osa.domain.feature.port.storage import FeatureStoragePort
 from osa.domain.shared.model.hook import HookDefinition
-from osa.domain.shared.model.hook_snapshot import HookSnapshot
 from osa.domain.shared.model.srn import DepositionSRN
 from osa.domain.shared.service import Service
 
@@ -20,14 +19,8 @@ class FeatureService(Service):
     feature_storage: FeatureStoragePort
 
     async def create_table(self, hook: HookDefinition) -> None:
-        """Create a feature table from a full HookDefinition."""
-        await self.feature_store.create_table(
-            hook.manifest.name, hook.manifest.feature_schema.columns
-        )
-
-    async def create_table_from_snapshot(self, snapshot: HookSnapshot) -> None:
-        """Create a feature table from a HookSnapshot (event payload)."""
-        await self.feature_store.create_table(snapshot.name, snapshot.features)
+        """Create a feature table from a HookDefinition."""
+        await self.feature_store.create_table(hook.name, hook.feature.columns)
 
     async def insert_features(
         self,
@@ -42,7 +35,7 @@ class FeatureService(Service):
         self,
         deposition_srn: DepositionSRN,
         record_srn: str,
-        hooks: list[HookSnapshot] | None = None,
+        hooks: list[HookDefinition] | None = None,
     ) -> None:
         """Read hook features and insert into feature tables.
 
@@ -51,8 +44,8 @@ class FeatureService(Service):
         if not hooks:
             return
 
-        for hook_snapshot in hooks:
-            hook_name = hook_snapshot.name
+        for hook in hooks:
+            hook_name = hook.name
             if not await self.feature_storage.hook_features_exist(deposition_srn, hook_name):
                 continue
 

@@ -6,12 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from osa.domain.shared.model.hook import (
-    FeatureSchema,
-    HookDefinition,
-    HookManifest,
-)
-from osa.domain.shared.model.hook_snapshot import HookSnapshot
+from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.srn import (
     ConventionSRN,
     DepositionSRN,
@@ -30,21 +25,6 @@ from osa.domain.validation.port.repository import ValidationRunRepository
 from osa.domain.validation.port.storage import HookStoragePort
 
 logger = logging.getLogger(__name__)
-
-
-def _snapshot_to_hook_definition(snapshot: HookSnapshot) -> HookDefinition:
-    """Convert a HookSnapshot to a HookDefinition for the runner."""
-    return HookDefinition(
-        image=snapshot.image,
-        digest=snapshot.digest,
-        config=snapshot.config or None,
-        manifest=HookManifest(
-            name=snapshot.name,
-            record_schema="",
-            cardinality="one",
-            feature_schema=FeatureSchema(columns=snapshot.features),
-        ),
-    )
 
 
 class ValidationService(Service):
@@ -82,7 +62,7 @@ class ValidationService(Service):
         run: ValidationRun,
         deposition_srn: DepositionSRN,
         inputs: HookInputs,
-        hooks: list[HookSnapshot],
+        hooks: list[HookDefinition],
     ) -> tuple[ValidationRun, list[HookResult]]:
         """Execute hooks sequentially. Halt on reject/fail.
 
@@ -96,10 +76,9 @@ class ValidationService(Service):
         hook_results: list[HookResult] = []
         overall_status: RunStatus = RunStatus.COMPLETED
 
-        for hook_snapshot in hooks:
-            work_dir = self.hook_storage.get_hook_output_dir(deposition_srn, hook_snapshot.name)
-            hook_def = _snapshot_to_hook_definition(hook_snapshot)
-            result = await self.hook_runner.run(hook_def, inputs, work_dir)
+        for hook in hooks:
+            work_dir = self.hook_storage.get_hook_output_dir(deposition_srn, hook.name)
+            result = await self.hook_runner.run(hook, inputs, work_dir)
             hook_results.append(result)
 
             if result.status == HookStatus.FAILED:
@@ -121,7 +100,7 @@ class ValidationService(Service):
         deposition_srn: DepositionSRN,
         convention_srn: ConventionSRN,
         metadata: dict[str, Any],
-        hooks: list[HookSnapshot],
+        hooks: list[HookDefinition],
         files_dir: str,
     ) -> tuple[ValidationRun, list[HookResult]]:
         """Full validation workflow using enriched event data."""

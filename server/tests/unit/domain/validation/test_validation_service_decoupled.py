@@ -11,8 +11,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from osa.domain.shared.model.hook import ColumnDef
-from osa.domain.shared.model.hook_snapshot import HookSnapshot
+from osa.domain.shared.model.hook import (
+    ColumnDef,
+    HookDefinition,
+    OciConfig,
+    TableFeatureSpec,
+)
 from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, Domain
 from osa.domain.validation.model import RunStatus
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
@@ -27,13 +31,18 @@ def _make_conv_srn() -> ConventionSRN:
     return ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
 
 
-def _make_hook_snapshot() -> HookSnapshot:
-    return HookSnapshot(
+def _make_hook_definition() -> HookDefinition:
+    return HookDefinition(
         name="pocketeer",
-        image="osa-hooks/pocketeer:latest",
-        digest="sha256:abc123",
-        features=[ColumnDef(name="score", json_type="number", required=True)],
-        config={"threshold": 0.5},
+        runtime=OciConfig(
+            image="osa-hooks/pocketeer:latest",
+            digest="sha256:abc123",
+            config={"threshold": 0.5},
+        ),
+        feature=TableFeatureSpec(
+            cardinality="many",
+            columns=[ColumnDef(name="score", json_type="number", required=True)],
+        ),
     )
 
 
@@ -77,7 +86,7 @@ class TestDecoupledValidationService:
             node_domain=Domain("localhost"),
         )
 
-        hook = _make_hook_snapshot()
+        hook = _make_hook_definition()
         run, hook_results = await service.validate_deposition(
             deposition_srn=_make_dep_srn(),
             convention_srn=_make_conv_srn(),

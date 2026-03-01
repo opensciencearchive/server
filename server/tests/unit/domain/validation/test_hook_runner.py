@@ -4,9 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from osa.domain.shared.model.hook import (
-    HookDefinition,
-)
+from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 
@@ -71,7 +69,7 @@ class TestHookRunnerProtocol:
                 workspace_dir: Path,
             ) -> HookResult:
                 return HookResult(
-                    hook_name=hook.manifest.name,
+                    hook_name=hook.name,
                     status=HookStatus.PASSED,
                     features=[],
                     duration_seconds=0.1,

@@ -23,13 +23,13 @@ class CreateFeatureTables(EventHandler[ConventionRegistered]):
     outbox: Outbox
 
     async def handle(self, event: ConventionRegistered) -> None:
-        for hook_snapshot in event.hooks:
+        for hook in event.hooks:
             logger.info(
                 "Creating feature table: hook=%s convention=%s",
-                hook_snapshot.name,
+                hook.name,
                 event.convention_srn,
             )
-            await self.feature_service.create_table_from_snapshot(hook_snapshot)
+            await self.feature_service.create_table(hook)
 
         await self.outbox.append(
             ConventionReady(

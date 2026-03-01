@@ -9,10 +9,10 @@ from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    FeatureSchema,
     HookDefinition,
-    HookLimits,
-    HookManifest,
+    OciConfig,
+    OciLimits,
+    TableFeatureSpec,
 )
 from osa.domain.shared.model.source import (
     InitialRunConfig,
@@ -53,21 +53,19 @@ def _make_convention(
 
 def _make_hook() -> HookDefinition:
     return HookDefinition(
-        image="ghcr.io/example/validator:latest",
-        digest="sha256:abc123",
-        runner="oci",
-        config={"threshold": 0.95},
-        limits=HookLimits(timeout_seconds=600, memory="4g", cpu="2.0"),
-        manifest=HookManifest(
-            name="quality-check",
-            record_schema="urn:osa:localhost:schema:test-schema-001@1.0.0",
+        name="quality_check",
+        runtime=OciConfig(
+            image="ghcr.io/example/validator:latest",
+            digest="sha256:abc123",
+            config={"threshold": 0.95},
+            limits=OciLimits(timeout_seconds=600, memory="4g", cpu="2.0"),
+        ),
+        feature=TableFeatureSpec(
             cardinality="many",
-            feature_schema=FeatureSchema(
-                columns=[
-                    ColumnDef(name="score", json_type="number", required=True),
-                    ColumnDef(name="labels", json_type="array", required=False),
-                ]
-            ),
+            columns=[
+                ColumnDef(name="score", json_type="number", required=True),
+                ColumnDef(name="labels", json_type="array", required=False),
+            ],
         ),
     )
 
@@ -104,10 +102,10 @@ class TestConventionRepoRoundTrip:
         assert str(got.schema_srn) == str(conv.schema_srn)
         assert got.file_requirements == conv.file_requirements
         assert len(got.hooks) == 1
-        assert got.hooks[0].image == hook.image
-        assert got.hooks[0].digest == hook.digest
-        assert got.hooks[0].manifest.name == "quality-check"
-        assert got.hooks[0].manifest.feature_schema.columns[0].name == "score"
+        assert got.hooks[0].runtime.image == hook.runtime.image
+        assert got.hooks[0].runtime.digest == hook.runtime.digest
+        assert got.hooks[0].name == "quality_check"
+        assert got.hooks[0].feature.columns[0].name == "score"
         assert got.source is not None
         assert got.source.image == source.image
         assert got.source.schedule is not None

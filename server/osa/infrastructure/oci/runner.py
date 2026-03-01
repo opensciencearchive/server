@@ -42,7 +42,7 @@ class OciHookRunner(HookRunner):
         inputs: HookInputs,
         work_dir: Path,
     ) -> HookResult:
-        timeout = hook.limits.timeout_seconds
+        timeout = hook.runtime.limits.timeout_seconds
 
         # Create sibling input/ and output/ dirs under work_dir
         staging_dir = work_dir / "input"
@@ -54,8 +54,8 @@ class OciHookRunner(HookRunner):
             # Pre-create files mountpoint so nested bind works with ReadonlyRootfs
             (staging_dir / "files").mkdir(exist_ok=True)
 
-            if inputs.config or hook.config:
-                config = {**(hook.config or {}), **(inputs.config or {})}
+            if inputs.config or hook.runtime.config:
+                config = {**hook.runtime.config, **(inputs.config or {})}
                 (staging_dir / "config.json").write_text(json.dumps(config))
 
             start_time = time.monotonic()
@@ -63,7 +63,7 @@ class OciHookRunner(HookRunner):
             try:
 
                 async def _resolve_and_run():
-                    image_ref = await self._resolve_image(hook.image, hook.digest)
+                    image_ref = await self._resolve_image(hook.runtime.image, hook.runtime.digest)
                     return await self._run_container(
                         image_ref, staging_dir, inputs.files_dir, container_output, hook
                     )
@@ -74,7 +74,7 @@ class OciHookRunner(HookRunner):
                 )
                 result_duration = time.monotonic() - start_time
                 return HookResult(
-                    hook_name=hook.manifest.name,
+                    hook_name=hook.name,
                     status=result["status"],
                     rejection_reason=result.get("rejection_reason"),
                     error_message=result.get("error_message"),
@@ -83,9 +83,9 @@ class OciHookRunner(HookRunner):
                 )
             except asyncio.TimeoutError:
                 duration = time.monotonic() - start_time
-                logfire.error("Hook timed out", hook=hook.manifest.name, timeout=timeout)
+                logfire.error("Hook timed out", hook=hook.name, timeout=timeout)
                 return HookResult(
-                    hook_name=hook.manifest.name,
+                    hook_name=hook.name,
                     status=HookStatus.FAILED,
                     error_message=f"Hook timed out after {timeout}s",
                     duration_seconds=duration,
@@ -117,14 +117,14 @@ class OciHookRunner(HookRunner):
                 "Env": [
                     "OSA_IN=/osa/in",
                     "OSA_OUT=/osa/out",
-                    f"OSA_HOOK_NAME={hook.manifest.name}",
+                    f"OSA_HOOK_NAME={hook.name}",
                 ],
                 "User": "65534:65534",
                 "HostConfig": {
                     "Binds": binds,
-                    "Memory": self._parse_memory(hook.limits.memory),
-                    "MemorySwap": self._parse_memory(hook.limits.memory),
-                    "NanoCpus": int(float(hook.limits.cpu) * 1e9),
+                    "Memory": self._parse_memory(hook.runtime.limits.memory),
+                    "MemorySwap": self._parse_memory(hook.runtime.limits.memory),
+                    "NanoCpus": int(float(hook.runtime.limits.cpu) * 1e9),
                     "NetworkMode": "none",
                     "ReadonlyRootfs": True,
                     "CapDrop": ["ALL"],

@@ -15,7 +15,6 @@ from osa.domain.deposition.port.repository import DepositionRepository
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.error import NotFoundError, ValidationError
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.hook_snapshot import HookSnapshot
 from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, Domain, LocalId
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
@@ -195,7 +194,6 @@ class DepositionService(Service):
         dep.submit()
         await self.deposition_repo.save(dep)
 
-        hook_snapshots = HookSnapshot.from_definitions(convention.hooks)
         files_dir = self.file_storage.get_files_dir(dep.srn)
 
         event = DepositionSubmittedEvent(
@@ -203,7 +201,7 @@ class DepositionService(Service):
             deposition_id=srn,
             metadata=dep.metadata,
             convention_srn=dep.convention_srn,
-            hooks=hook_snapshots,
+            hooks=convention.hooks,
             files_dir=str(files_dir),
         )
         await self.outbox.append(event)

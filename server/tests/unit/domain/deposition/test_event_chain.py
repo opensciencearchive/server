@@ -17,8 +17,10 @@ from osa.domain.record.handler.convert_deposition_to_record import ConvertDeposi
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.hook import (
     ColumnDef,
+    HookDefinition,
+    OciConfig,
+    TableFeatureSpec,
 )
-from osa.domain.shared.model.hook_snapshot import HookSnapshot
 from osa.domain.shared.model.srn import (
     ConventionSRN,
     DepositionSRN,
@@ -53,19 +55,23 @@ def _make_deposition() -> Deposition:
     )
 
 
-def _make_hook_snapshot(name: str = "pocket_detect") -> HookSnapshot:
-    return HookSnapshot(
+def _make_hook_definition(name: str = "pocket_detect") -> HookDefinition:
+    return HookDefinition(
         name=name,
-        image="ghcr.io/example/hook",
-        digest="sha256:abc123",
-        features=[ColumnDef(name="score", json_type="number", required=True)],
-        config={},
+        runtime=OciConfig(
+            image="ghcr.io/example/hook",
+            digest="sha256:abc123",
+        ),
+        feature=TableFeatureSpec(
+            cardinality="many",
+            columns=[ColumnDef(name="score", json_type="number", required=True)],
+        ),
     )
 
 
 def _make_submitted_event(
     dep_srn: DepositionSRN | None = None,
-    hooks: list[HookSnapshot] | None = None,
+    hooks: list[HookDefinition] | None = None,
 ) -> DepositionSubmittedEvent:
     return DepositionSubmittedEvent(
         id=EventId(uuid4()),
@@ -121,7 +127,7 @@ class TestValidateDepositionPassesEventData:
         )
 
         dep = _make_deposition()
-        hooks = [_make_hook_snapshot()]
+        hooks = [_make_hook_definition()]
         event = _make_submitted_event(dep_srn=dep.srn, hooks=hooks)
         await handler.handle(event)
 
@@ -219,7 +225,7 @@ class TestConvertDepositionToRecord:
 
         from osa.domain.curation.event.deposition_approved import DepositionApproved
 
-        hooks = [_make_hook_snapshot()]
+        hooks = [_make_hook_definition()]
         event = DepositionApproved(
             id=EventId(uuid4()),
             deposition_srn=_make_dep_srn(),
@@ -249,7 +255,7 @@ class TestInsertRecordFeatures:
             feature_service=feature_service,
         )
 
-        hooks = [_make_hook_snapshot()]
+        hooks = [_make_hook_definition()]
         event = RecordPublished(
             id=EventId(uuid4()),
             record_srn=_make_record_srn(),
