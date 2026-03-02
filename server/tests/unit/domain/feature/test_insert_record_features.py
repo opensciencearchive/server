@@ -9,8 +9,12 @@ from osa.domain.feature.handler.insert_record_features import InsertRecordFeatur
 from osa.domain.feature.service.feature import FeatureService
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.hook import ColumnDef
-from osa.domain.shared.model.hook_snapshot import HookSnapshot
+from osa.domain.shared.model.hook import (
+    ColumnDef,
+    HookDefinition,
+    OciConfig,
+    TableFeatureSpec,
+)
 from osa.domain.shared.model.srn import (
     DepositionSRN,
     RecordSRN,
@@ -25,17 +29,21 @@ def _make_record_srn() -> RecordSRN:
     return RecordSRN.parse("urn:osa:localhost:rec:test-rec@1")
 
 
-def _make_hook_snapshot(name: str = "pocket_detect") -> HookSnapshot:
-    return HookSnapshot(
+def _make_hook_definition(name: str = "pocket_detect") -> HookDefinition:
+    return HookDefinition(
         name=name,
-        image="ghcr.io/example/hook",
-        digest="sha256:abc123",
-        features=[ColumnDef(name="score", json_type="number", required=True)],
-        config={},
+        runtime=OciConfig(
+            image="ghcr.io/example/hook",
+            digest="sha256:abc123",
+        ),
+        feature=TableFeatureSpec(
+            cardinality="many",
+            columns=[ColumnDef(name="score", json_type="number", required=True)],
+        ),
     )
 
 
-def _make_event(hooks: list[HookSnapshot] | None = None) -> RecordPublished:
+def _make_event(hooks: list[HookDefinition] | None = None) -> RecordPublished:
     return RecordPublished(
         id=EventId(uuid4()),
         record_srn=_make_record_srn(),
@@ -70,7 +78,7 @@ class TestInsertRecordFeaturesHandler:
         feature_service = AsyncMock()
         handler = _make_handler(feature_service=feature_service)
 
-        hooks = [_make_hook_snapshot()]
+        hooks = [_make_hook_definition()]
         event = _make_event(hooks=hooks)
         await handler.handle(event)
 
@@ -97,7 +105,7 @@ class TestFeatureServiceInsertFeaturesForRecord:
             feature_storage=feature_storage,
         )
 
-        hooks = [_make_hook_snapshot()]
+        hooks = [_make_hook_definition()]
         await service.insert_features_for_record(
             _make_dep_srn(), str(_make_record_srn()), hooks=hooks
         )
@@ -121,7 +129,7 @@ class TestFeatureServiceInsertFeaturesForRecord:
             feature_storage=feature_storage,
         )
 
-        hooks = [_make_hook_snapshot()]
+        hooks = [_make_hook_definition()]
         await service.insert_features_for_record(
             _make_dep_srn(), str(_make_record_srn()), hooks=hooks
         )
@@ -143,7 +151,7 @@ class TestFeatureServiceInsertFeaturesForRecord:
             feature_storage=feature_storage,
         )
 
-        hooks = [_make_hook_snapshot()]
+        hooks = [_make_hook_definition()]
         await service.insert_features_for_record(
             _make_dep_srn(), str(_make_record_srn()), hooks=hooks
         )
@@ -168,7 +176,7 @@ class TestFeatureServiceInsertFeaturesForRecord:
             feature_storage=feature_storage,
         )
 
-        hooks = [_make_hook_snapshot("hook_a"), _make_hook_snapshot("hook_b")]
+        hooks = [_make_hook_definition("hook_a"), _make_hook_definition("hook_b")]
         await service.insert_features_for_record(
             _make_dep_srn(), str(_make_record_srn()), hooks=hooks
         )

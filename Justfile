@@ -93,7 +93,7 @@ seed:
 
 # Start only the database (dev mode — exposes port to host)
 db-up:
-    docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d db
+    docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d db --wait
 
 # Stop the database
 db-down:

@@ -6,9 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    FeatureSchema,
     HookDefinition,
-    HookManifest,
+    OciConfig,
+    TableFeatureSpec,
 )
 from osa.infrastructure.persistence.feature_store import (
     FEATURES_SCHEMA,
@@ -17,7 +17,7 @@ from osa.infrastructure.persistence.feature_store import (
 
 
 def _make_hook(
-    name: str = "quality-check",
+    name: str = "quality_check",
     columns: list[ColumnDef] | None = None,
 ) -> HookDefinition:
     if columns is None:
@@ -26,13 +26,14 @@ def _make_hook(
             ColumnDef(name="label", json_type="string", required=False),
         ]
     return HookDefinition(
-        image="ghcr.io/example/validator:latest",
-        digest="sha256:abc123",
-        manifest=HookManifest(
-            name=name,
-            record_schema="urn:osa:localhost:schema:test@1.0.0",
+        name=name,
+        runtime=OciConfig(
+            image="ghcr.io/example/validator:latest",
+            digest="sha256:abc123",
+        ),
+        feature=TableFeatureSpec(
             cardinality="many",
-            feature_schema=FeatureSchema(columns=columns),
+            columns=columns,
         ),
     )
 
@@ -43,9 +44,9 @@ class TestFeatureStoreCreateTable:
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
     ):
         store = PostgresFeatureStore(pg_engine, pg_session)
-        hook = _make_hook(name="integration-test-hook")
+        hook = _make_hook(name="integration_test_hook")
 
-        await store.create_table("integration_test_hook", hook)
+        await store.create_table("integration_test_hook", hook.feature.columns)
 
         # Verify the table exists in the features schema
         async with pg_engine.begin() as conn:
@@ -76,22 +77,26 @@ class TestFeatureStoreCreateTable:
             assert "score" in cols
             assert "label" in cols
 
-    async def test_create_table_idempotent(self, pg_engine: AsyncEngine, pg_session: AsyncSession):
-        """Calling create_table twice should not error (checkfirst + ON CONFLICT)."""
-        store = PostgresFeatureStore(pg_engine, pg_session)
-        hook = _make_hook(name="idempotent-hook")
+    async def test_create_table_duplicate_raises_conflict(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession
+    ):
+        """Calling create_table twice raises ConflictError."""
+        from osa.domain.shared.error import ConflictError
 
-        await store.create_table("idempotent_hook", hook)
-        # Second call should not raise
-        await store.create_table("idempotent_hook", hook)
+        store = PostgresFeatureStore(pg_engine, pg_session)
+        hook = _make_hook(name="duplicate_hook")
+
+        await store.create_table("duplicate_hook", hook.feature.columns)
+        with pytest.raises(ConflictError, match="already exists"):
+            await store.create_table("duplicate_hook", hook.feature.columns)
 
     async def test_create_table_registers_in_catalog(
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
     ):
         store = PostgresFeatureStore(pg_engine, pg_session)
-        hook = _make_hook(name="catalog-hook")
+        hook = _make_hook(name="catalog_hook")
 
-        await store.create_table("catalog_hook", hook)
+        await store.create_table("catalog_hook", hook.feature.columns)
 
         # Check catalog
         async with pg_engine.begin() as conn:
@@ -109,8 +114,8 @@ class TestFeatureStoreCreateTable:
 class TestFeatureStoreInsert:
     async def test_insert_features(self, pg_engine: AsyncEngine, pg_session: AsyncSession):
         store = PostgresFeatureStore(pg_engine, pg_session)
-        hook = _make_hook(name="insert-hook")
-        await store.create_table("insert_hook", hook)
+        hook = _make_hook(name="insert_hook")
+        await store.create_table("insert_hook", hook.feature.columns)
 
         rows = [
             {"score": 0.95, "label": "good"},
@@ -149,9 +154,9 @@ class TestFeatureStoreJsonbColumns:
             ColumnDef(name="metadata", json_type="object", required=False),
             ColumnDef(name="count", json_type="integer", required=True),
         ]
-        hook = _make_hook(name="jsonb-hook", columns=columns)
+        hook = _make_hook(name="jsonb_hook", columns=columns)
         store = PostgresFeatureStore(pg_engine, pg_session)
-        await store.create_table("jsonb_hook", hook)
+        await store.create_table("jsonb_hook", hook.feature.columns)
 
         # Verify JSONB columns via information_schema
         async with pg_engine.begin() as conn:

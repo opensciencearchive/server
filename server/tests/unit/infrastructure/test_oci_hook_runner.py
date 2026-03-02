@@ -7,10 +7,10 @@ import pytest
 
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    FeatureSchema,
     HookDefinition,
-    HookLimits,
-    HookManifest,
+    OciConfig,
+    OciLimits,
+    TableFeatureSpec,
 )
 from osa.domain.validation.model.hook_result import HookStatus, ProgressEntry
 from osa.domain.validation.port.hook_runner import HookInputs
@@ -25,20 +25,19 @@ def _make_hook(
     config: dict | None = None,
 ) -> HookDefinition:
     return HookDefinition(
-        image="ghcr.io/example/hook:v1",
-        digest="sha256:abc123",
-        manifest=HookManifest(
-            name=name,
-            record_schema="Sample",
-            cardinality="many",
-            feature_schema=FeatureSchema(
-                columns=[
-                    ColumnDef(name="score", json_type="number", required=True),
-                ]
-            ),
+        name=name,
+        runtime=OciConfig(
+            image="ghcr.io/example/hook:v1",
+            digest="sha256:abc123",
+            config=config or {},
+            limits=OciLimits(timeout_seconds=timeout, memory=memory, cpu=cpu),
         ),
-        limits=HookLimits(timeout_seconds=timeout, memory=memory, cpu=cpu),
-        config=config,
+        feature=TableFeatureSpec(
+            cardinality="many",
+            columns=[
+                ColumnDef(name="score", json_type="number", required=True),
+            ],
+        ),
     )
 
 

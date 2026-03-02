@@ -4,11 +4,16 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from osa.domain.deposition.event.convention_registered import ConventionRegistered
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.semantics.model.value import Cardinality, FieldDefinition, FieldType
-from osa.domain.shared.model.hook import ColumnDef, FeatureSchema, HookDefinition, HookManifest
-from osa.domain.deposition.event.convention_registered import ConventionRegistered
+from osa.domain.shared.model.hook import (
+    ColumnDef,
+    HookDefinition,
+    OciConfig,
+    TableFeatureSpec,
+)
 from osa.domain.shared.model.source import SourceDefinition
 from osa.domain.shared.model.srn import Domain, SchemaSRN
 
@@ -41,17 +46,16 @@ def _make_file_reqs() -> FileRequirements:
 
 def _make_hook_def(name: str = "detect_pockets") -> HookDefinition:
     return HookDefinition(
-        image="ghcr.io/example/pocketeer",
-        digest="sha256:abc123",
-        manifest=HookManifest(
-            name=name,
-            record_schema="PDBStructure",
+        name=name,
+        runtime=OciConfig(
+            image="ghcr.io/example/pocketeer",
+            digest="sha256:abc123",
+        ),
+        feature=TableFeatureSpec(
             cardinality="many",
-            feature_schema=FeatureSchema(
-                columns=[
-                    ColumnDef(name="score", json_type="number", required=True),
-                ]
-            ),
+            columns=[
+                ColumnDef(name="score", json_type="number", required=True),
+            ],
         ),
     )
 

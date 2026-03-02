@@ -1,6 +1,6 @@
 """Feature table value object — represents a physical SQL table for hook features."""
 
-from osa.domain.shared.model.hook import FeatureSchema
+from osa.domain.shared.model.hook import ColumnDef
 from osa.domain.shared.model.value import ValueObject
 
 
@@ -15,4 +15,4 @@ class FeatureTable(ValueObject):
     hook_name: str  # possibly use a NewType?
     pg_schema: str  # possibly use a NewType?
     table_name: str  # possibly use a NewType?
-    feature_schema: FeatureSchema
+    columns: list[ColumnDef]

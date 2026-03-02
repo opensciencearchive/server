@@ -9,22 +9,31 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from osa.domain.shared.model.hook import ColumnDef
-from osa.domain.shared.model.hook_snapshot import HookSnapshot
-from osa.domain.shared.model.srn import DepositionSRN
 from osa.domain.feature.service.feature import FeatureService
+from osa.domain.shared.model.hook import (
+    ColumnDef,
+    HookDefinition,
+    OciConfig,
+    TableFeatureSpec,
+)
+from osa.domain.shared.model.srn import DepositionSRN
 
 
 def _make_dep_srn() -> DepositionSRN:
     return DepositionSRN.parse("urn:osa:localhost:dep:test-dep")
 
 
-def _make_hook_snapshot() -> HookSnapshot:
-    return HookSnapshot(
+def _make_hook_definition() -> HookDefinition:
+    return HookDefinition(
         name="pocketeer",
-        image="osa-hooks/pocketeer:latest",
-        digest="sha256:abc123",
-        features=[ColumnDef(name="score", json_type="number", required=True)],
+        runtime=OciConfig(
+            image="osa-hooks/pocketeer:latest",
+            digest="sha256:abc123",
+        ),
+        feature=TableFeatureSpec(
+            cardinality="many",
+            columns=[ColumnDef(name="score", json_type="number", required=True)],
+        ),
     )
 
 
@@ -65,7 +74,7 @@ class TestDecoupledFeatureService:
             feature_storage=feature_storage,
         )
 
-        hook = _make_hook_snapshot()
+        hook = _make_hook_definition()
         await service.insert_features_for_record(
             deposition_srn=_make_dep_srn(),
             record_srn="urn:osa:localhost:rec:test@1",

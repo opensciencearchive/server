@@ -6,12 +6,15 @@ Verifies the event carries convention_srn, hooks, and files_dir.
 
 from uuid import uuid4
 
-
-from osa.domain.shared.event import EventId
-from osa.domain.shared.model.hook import ColumnDef
-from osa.domain.shared.model.hook_snapshot import HookSnapshot
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
 from osa.domain.deposition.event.submitted import DepositionSubmittedEvent
+from osa.domain.shared.event import EventId
+from osa.domain.shared.model.hook import (
+    ColumnDef,
+    HookDefinition,
+    OciConfig,
+    TableFeatureSpec,
+)
+from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
 
 
 def _make_dep_srn() -> DepositionSRN:
@@ -22,13 +25,18 @@ def _make_conv_srn() -> ConventionSRN:
     return ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
 
 
-def _make_hook_snapshot() -> HookSnapshot:
-    return HookSnapshot(
+def _make_hook_definition() -> HookDefinition:
+    return HookDefinition(
         name="pocketeer",
-        image="osa-hooks/pocketeer:latest",
-        digest="sha256:abc123",
-        features=[ColumnDef(name="score", json_type="number", required=True)],
-        config={"threshold": 0.5},
+        runtime=OciConfig(
+            image="osa-hooks/pocketeer:latest",
+            digest="sha256:abc123",
+            config={"threshold": 0.5},
+        ),
+        feature=TableFeatureSpec(
+            cardinality="many",
+            columns=[ColumnDef(name="score", json_type="number", required=True)],
+        ),
     )
 
 
@@ -40,14 +48,14 @@ class TestDepositionSubmittedEnriched:
             deposition_id=_make_dep_srn(),
             metadata={"title": "Test"},
             convention_srn=_make_conv_srn(),
-            hooks=[_make_hook_snapshot()],
+            hooks=[_make_hook_definition()],
             files_dir="/data/files/test-dep",
         )
         assert event.convention_srn == _make_conv_srn()
 
     def test_carries_hooks(self):
-        """Event has hooks field with HookSnapshot list."""
-        hook = _make_hook_snapshot()
+        """Event has hooks field with HookDefinition list."""
+        hook = _make_hook_definition()
         event = DepositionSubmittedEvent(
             id=EventId(uuid4()),
             deposition_id=_make_dep_srn(),
@@ -58,7 +66,7 @@ class TestDepositionSubmittedEnriched:
         )
         assert len(event.hooks) == 1
         assert event.hooks[0].name == "pocketeer"
-        assert event.hooks[0].digest == "sha256:abc123"
+        assert event.hooks[0].runtime.digest == "sha256:abc123"
 
     def test_carries_files_dir(self):
         """Event has files_dir field."""

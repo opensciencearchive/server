@@ -10,7 +10,6 @@ from osa.domain.semantics.service.schema import SchemaService
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.hook import HookDefinition
-from osa.domain.shared.model.hook_snapshot import HookSnapshot
 from osa.domain.shared.model.source import SourceDefinition
 from osa.domain.shared.model.srn import ConventionSRN, Domain, LocalId, Semver
 from osa.domain.shared.outbox import Outbox
@@ -69,7 +68,7 @@ class ConventionService(Service):
             ConventionRegistered(
                 id=EventId(uuid4()),
                 convention_srn=srn,
-                hooks=HookSnapshot.from_definitions(convention.hooks),
+                hooks=convention.hooks,
             )
         )
         return convention

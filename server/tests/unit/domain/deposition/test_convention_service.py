@@ -12,9 +12,9 @@ from osa.domain.semantics.model.value import Cardinality, FieldDefinition, Field
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    FeatureSchema,
     HookDefinition,
-    HookManifest,
+    OciConfig,
+    TableFeatureSpec,
 )
 from osa.domain.shared.model.srn import ConventionSRN, Domain, SchemaSRN
 
@@ -49,17 +49,16 @@ def _make_file_reqs() -> FileRequirements:
 
 def _make_hook_def(name: str = "pocket_detect") -> HookDefinition:
     return HookDefinition(
-        image="ghcr.io/example/hook",
-        digest="sha256:abc123",
-        manifest=HookManifest(
-            name=name,
-            record_schema="SampleSchema",
+        name=name,
+        runtime=OciConfig(
+            image="ghcr.io/example/hook",
+            digest="sha256:abc123",
+        ),
+        feature=TableFeatureSpec(
             cardinality="one",
-            feature_schema=FeatureSchema(
-                columns=[
-                    ColumnDef(name="score", json_type="number", required=True),
-                ]
-            ),
+            columns=[
+                ColumnDef(name="score", json_type="number", required=True),
+            ],
         ),
     )
 
@@ -127,7 +126,7 @@ class TestConventionServiceCreate:
             hooks=hooks,
         )
         assert result.hooks == hooks
-        # Verify the emitted event carries hook snapshots
+        # Verify the emitted event carries hook definitions directly
         emitted = outbox.append.call_args[0][0]
         assert len(emitted.hooks) == 1
         assert emitted.hooks[0].name == "pocket_detect"

@@ -5,8 +5,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from osa.domain.shared.model.hook import ColumnDef
-from osa.domain.shared.model.hook_snapshot import HookSnapshot
+from osa.domain.shared.model.hook import (
+    ColumnDef,
+    HookDefinition,
+    OciConfig,
+    TableFeatureSpec,
+)
 from osa.domain.shared.model.srn import DepositionSRN, Domain
 from osa.domain.validation.model import RunStatus
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
@@ -14,13 +18,17 @@ from osa.domain.validation.port.hook_runner import HookInputs
 from osa.domain.validation.service.validation import ValidationService
 
 
-def _make_hook_snapshot(name: str = "pocket_detect") -> HookSnapshot:
-    return HookSnapshot(
+def _make_hook_definition(name: str = "pocket_detect") -> HookDefinition:
+    return HookDefinition(
         name=name,
-        image="ghcr.io/example/hook",
-        digest="sha256:abc123",
-        features=[ColumnDef(name="score", json_type="number", required=True)],
-        config={},
+        runtime=OciConfig(
+            image="ghcr.io/example/hook",
+            digest="sha256:abc123",
+        ),
+        feature=TableFeatureSpec(
+            cardinality="many",
+            columns=[ColumnDef(name="score", json_type="number", required=True)],
+        ),
     )
 
 
@@ -83,7 +91,7 @@ class TestValidationServiceRunHooks:
         service = _make_service(run_repo, hook_runner)
         run = await service.create_run(inputs=_make_inputs())
 
-        hook = _make_hook_snapshot()
+        hook = _make_hook_definition()
         run, results = await service.run_hooks(
             run=run,
             deposition_srn=_make_dep_srn(),
@@ -104,7 +112,7 @@ class TestValidationServiceRunHooks:
         service = _make_service(hook_runner=hook_runner)
         run = await service.create_run(inputs=_make_inputs())
 
-        hooks = [_make_hook_snapshot("hook1"), _make_hook_snapshot("hook2")]
+        hooks = [_make_hook_definition("hook1"), _make_hook_definition("hook2")]
         run, results = await service.run_hooks(
             run=run,
             deposition_srn=_make_dep_srn(),
@@ -128,7 +136,7 @@ class TestValidationServiceRunHooks:
             run=run,
             deposition_srn=_make_dep_srn(),
             inputs=_make_inputs(),
-            hooks=[_make_hook_snapshot()],
+            hooks=[_make_hook_definition()],
         )
 
         assert run.status == RunStatus.FAILED
@@ -149,7 +157,7 @@ class TestValidationServiceRunHooks:
             run=run,
             deposition_srn=dep_srn,
             inputs=_make_inputs(),
-            hooks=[_make_hook_snapshot()],
+            hooks=[_make_hook_definition()],
         )
 
         hook_storage.get_hook_output_dir.assert_called_once_with(dep_srn, "pocket_detect")
@@ -163,8 +171,8 @@ class TestValidationServiceRunHooks:
         call_order = []
 
         async def run_hook(hook, inputs, output_dir):
-            call_order.append(hook.manifest.name)
-            return _make_hook_result(name=hook.manifest.name)
+            call_order.append(hook.name)
+            return _make_hook_result(name=hook.name)
 
         hook_runner = AsyncMock()
         hook_runner.run.side_effect = run_hook
@@ -172,7 +180,7 @@ class TestValidationServiceRunHooks:
         service = _make_service(hook_runner=hook_runner)
         run = await service.create_run(inputs=_make_inputs())
 
-        hooks = [_make_hook_snapshot("hook_a"), _make_hook_snapshot("hook_b")]
+        hooks = [_make_hook_definition("hook_a"), _make_hook_definition("hook_b")]
         run, results = await service.run_hooks(
             run=run,
             deposition_srn=_make_dep_srn(),

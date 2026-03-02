@@ -18,6 +18,7 @@ jobs:
     outputs:
       server: ${{ steps.filter.outputs.server }}
       web: ${{ steps.filter.outputs.web }}
+      sdk: ${{ steps.filter.outputs.sdk }}
     steps:
       - uses: actions/checkout@v4
 
@@ -29,6 +30,8 @@ jobs:
               - 'server/**'
             web:
               - 'web/**'
+            sdk:
+              - 'sdk/**'
 
   # Server (Python backend) checks
   server-lint:
@@ -127,6 +130,106 @@ jobs:
         if: github.event_name == 'pull_request'
         with:
           path: code-coverage-results.md
+
+  server-contract:
+    name: Server - Contract Tests
+    needs: changes
+    if: needs.changes.outputs.server == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run contract tests
+        run: uv run pytest tests/contract -v --tb=short
+
+  server-integration:
+    name: Server - Integration Tests
+    needs: changes
+    if: needs.changes.outputs.server == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: osa
+          POSTGRES_DB: osa_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run migrations
+        run: uv run alembic upgrade head
+        env:
+          OSA_DATABASE__URL: postgresql+asyncpg://postgres:osa@localhost:5432/osa_test
+          OSA_AUTH__JWT__SECRET: test-secret-for-integration-tests-minimum-32-chars
+          TEST: "1"
+
+      - name: Run integration tests
+        run: uv run pytest tests/integration -v --tb=short -x
+        env:
+          OSA_DATABASE__URL: postgresql+asyncpg://postgres:osa@localhost:5432/osa_test
+          OSA_AUTH__JWT__SECRET: test-secret-for-integration-tests-minimum-32-chars
+          TEST: "1"
+
+  sdk-test:
+    name: SDK - Test
+    needs: changes
+    if: needs.changes.outputs.sdk == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/py
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run SDK tests
+        run: uv run pytest tests/ -v --tb=short
 
   # Web (Next.js frontend) checks
   web-lint:

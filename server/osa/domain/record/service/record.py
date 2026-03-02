@@ -8,8 +8,9 @@ from uuid import uuid4
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.record.model.aggregate import Record
 from osa.domain.record.port.repository import RecordRepository
+from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.hook_snapshot import HookSnapshot
+from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.srn import (
     ConventionSRN,
     DepositionSRN,
@@ -18,7 +19,6 @@ from osa.domain.shared.model.srn import (
     RecordSRN,
     RecordVersion,
 )
-from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
 
@@ -44,7 +44,7 @@ class RecordService(Service):
         deposition_srn: DepositionSRN,
         metadata: dict[str, Any],
         convention_srn: ConventionSRN | None = None,
-        hooks: list[HookSnapshot] | None = None,
+        hooks: list[HookDefinition] | None = None,
         files_dir: str = "",
     ) -> Record:
         """Create and persist a Record from an approved deposition."""

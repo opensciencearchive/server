@@ -1,6 +1,11 @@
-"""Shared hook domain models used across deposition and validation domains."""
+"""Shared hook domain models used across deposition and validation domains.
 
-from typing import Annotated, Literal
+A hook is conceptually two things — how it runs (RuntimeConfig) and what it
+produces (FeatureSpec).  Both use discriminated unions so new variants
+(NextflowConfig, TimeSeriesFeatureSpec, …) slot in without touching existing code.
+"""
+
+from typing import Annotated, Any, Literal
 
 from pydantic import Field
 
@@ -20,36 +25,56 @@ class ColumnDef(ValueObject):
     required: bool
 
 
-class FeatureSchema(ValueObject):
-    """Typed column definitions for features a hook produces."""
-
-    columns: list[ColumnDef]
+# ── Runtime variants ──
 
 
-class HookManifest(ValueObject):
-    """Manifest describing what a hook produces."""
-
-    name: PgIdentifier
-    record_schema: str
-    cardinality: Literal["one", "many"]
-    feature_schema: FeatureSchema
-    runner: str = "oci"
-
-
-class HookLimits(ValueObject):
-    """Resource limits for hook execution."""
+class OciLimits(ValueObject):
+    """Resource limits for OCI hook execution."""
 
     timeout_seconds: int = 300
     memory: str = "2g"
     cpu: str = "2.0"
 
 
-class HookDefinition(ValueObject):
-    """Complete specification for a hook: image reference + manifest + limits."""
+class RuntimeConfig(ValueObject):
+    """Base for runtime configuration.  Discriminated on ``type``."""
 
+    type: str
+
+
+class OciConfig(RuntimeConfig):
+    """OCI container runtime configuration."""
+
+    type: Literal["oci"] = "oci"
     image: str
     digest: str
-    runner: str = "oci"
-    config: dict | None = None
-    limits: HookLimits = Field(default_factory=HookLimits)
-    manifest: HookManifest
+    config: dict[str, Any] = Field(default_factory=dict)
+    limits: OciLimits = Field(default_factory=OciLimits)
+
+
+# ── Feature variants ──
+
+
+class FeatureSpec(ValueObject):
+    """Base for feature specifications.  Discriminated on ``kind``."""
+
+    kind: str
+
+
+class TableFeatureSpec(FeatureSpec):
+    """Table-shaped feature output with typed columns."""
+
+    kind: Literal["table"] = "table"
+    cardinality: Literal["one", "many"]
+    columns: list[ColumnDef]
+
+
+# ── Hook ──
+
+
+class HookDefinition(ValueObject):
+    """Complete specification for a hook: how it runs + what it produces."""
+
+    name: PgIdentifier
+    runtime: Annotated[OciConfig, Field(discriminator="type")]
+    feature: Annotated[TableFeatureSpec, Field(discriminator="kind")]

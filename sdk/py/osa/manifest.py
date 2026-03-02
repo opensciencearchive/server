@@ -25,19 +25,13 @@ class ColumnDef(BaseModel):
     required: bool
 
 
-class FeatureSchema(BaseModel):
-    """Typed column definitions for features a hook produces."""
-
-    columns: list[ColumnDef]
-
-
-class HookManifest(BaseModel):
-    """Manifest entry for a single hook."""
+class HookManifestEntry(BaseModel):
+    """Manifest entry for a single hook (display/introspection only)."""
 
     name: str
     record_schema: str
     cardinality: str
-    feature_schema: FeatureSchema
+    columns: list[ColumnDef]
     runner: str = "oci"
 
 
@@ -55,12 +49,12 @@ class ConventionManifest(BaseModel):
 class Manifest(BaseModel):
     """Full deployment manifest."""
 
-    hooks: list[HookManifest]
+    hooks: list[HookManifestEntry]
     conventions: list[ConventionManifest] = []
     schemas: dict[str, dict]
 
 
-# ---- Type mapping for FeatureSchema generation ----
+# ---- Type mapping for column generation ----
 
 _PYTHON_TYPE_TO_JSON: dict[type, tuple[str, str | None]] = {
     str: ("string", None),
@@ -104,8 +98,8 @@ def _is_required(field_info: Any) -> bool:
     return field_info.is_required()
 
 
-def generate_feature_schema(model_cls: type[BaseModel]) -> FeatureSchema:
-    """Generate a FeatureSchema from a Pydantic BaseModel."""
+def generate_columns(model_cls: type[BaseModel]) -> list[ColumnDef]:
+    """Generate column definitions from a Pydantic BaseModel."""
     columns: list[ColumnDef] = []
     for name, field_info in model_cls.model_fields.items():
         json_type, fmt = _resolve_json_type(field_info.annotation)
@@ -117,7 +111,7 @@ def generate_feature_schema(model_cls: type[BaseModel]) -> FeatureSchema:
                 required=_is_required(field_info),
             )
         )
-    return FeatureSchema(columns=columns)
+    return columns
 
 
 # ---- Manifest generation ----
@@ -130,17 +124,17 @@ def _json_schema(cls: type) -> dict:
     return {}
 
 
-def _build_hook(info: HookInfo) -> HookManifest:
-    """Build a HookManifest from introspected HookInfo."""
-    feature_schema = FeatureSchema(columns=[])
+def _build_hook(info: HookInfo) -> HookManifestEntry:
+    """Build a HookManifestEntry from introspected HookInfo."""
+    columns: list[ColumnDef] = []
     if info.output_type is not None and hasattr(info.output_type, "model_fields"):
-        feature_schema = generate_feature_schema(info.output_type)
+        columns = generate_columns(info.output_type)
 
-    return HookManifest(
+    return HookManifestEntry(
         name=info.name,
         record_schema=info.schema_type.__name__,
         cardinality=info.cardinality,
-        feature_schema=feature_schema,
+        columns=columns,
         runner="oci",
     )
 

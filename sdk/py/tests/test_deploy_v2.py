@@ -166,17 +166,18 @@ class TestConventionToPayload:
 
         hook_defs = [
             {
-                "image": "osa-hooks/detect_pockets:latest",
-                "digest": "sha256:abc123",
-                "runner": "oci",
-                "config": None,
-                "limits": {"timeout_seconds": 300, "memory": "2g", "cpu": "2.0"},
-                "manifest": {
-                    "name": "detect_pockets",
-                    "record_schema": "FakeSchema",
+                "name": "detect_pockets",
+                "runtime": {
+                    "type": "oci",
+                    "image": "osa-hooks/detect_pockets:latest",
+                    "digest": "sha256:abc123",
+                    "config": {},
+                    "limits": {"timeout_seconds": 300, "memory": "2g", "cpu": "2.0"},
+                },
+                "feature": {
+                    "kind": "table",
                     "cardinality": "many",
-                    "feature_schema": {"columns": []},
-                    "runner": "oci",
+                    "columns": [],
                 },
             }
         ]
@@ -197,7 +198,9 @@ class TestConventionToPayload:
 
         payload = _convention_to_payload(conv, hook_defs)
         assert len(payload["hooks"]) == 1
-        assert payload["hooks"][0]["image"] == "osa-hooks/detect_pockets:latest"
+        assert (
+            payload["hooks"][0]["runtime"]["image"] == "osa-hooks/detect_pockets:latest"
+        )
 
 
 class TestHookToDefinition:
@@ -222,13 +225,13 @@ class TestHookToDefinition:
         defn = _hook_to_definition(
             hook_info, "osa-hooks/detect_pockets:latest", "sha256:abc"
         )
-        assert defn["image"] == "osa-hooks/detect_pockets:latest"
-        assert defn["digest"] == "sha256:abc"
-        assert defn["manifest"]["name"] == "detect_pockets"
-        assert defn["manifest"]["cardinality"] == "many"
-        assert len(defn["manifest"]["feature_schema"]["columns"]) == 2
+        assert defn["runtime"]["image"] == "osa-hooks/detect_pockets:latest"
+        assert defn["runtime"]["digest"] == "sha256:abc"
+        assert defn["name"] == "detect_pockets"
+        assert defn["feature"]["cardinality"] == "many"
+        assert len(defn["feature"]["columns"]) == 2
 
-    def test_empty_feature_schema_when_no_output_type(self) -> None:
+    def test_empty_columns_when_no_output_type(self) -> None:
         from osa.cli.deploy import _hook_to_definition
 
         hook_info = HookInfo(
@@ -241,7 +244,7 @@ class TestHookToDefinition:
         )
 
         defn = _hook_to_definition(hook_info, "img:latest", "sha256:xyz")
-        assert defn["manifest"]["feature_schema"]["columns"] == []
+        assert defn["feature"]["columns"] == []
 
 
 class TestDeployRaisesWithoutConventions:
@@ -295,7 +298,7 @@ class TestDeployEndToEnd:
 
         # Mock docker build + inspect
         mock_run = MagicMock()
-        mock_run.return_value = MagicMock(stdout="sha256:fakedigest\n")
+        mock_run.return_value = MagicMock(returncode=0, stdout="sha256:fakedigest\n")
 
         # Mock httpx.post
         mock_response = MagicMock()
@@ -310,7 +313,7 @@ class TestDeployEndToEnd:
 
         with (
             patch("osa.cli.deploy.subprocess.run", mock_run),
-            patch.dict("sys.modules", {"httpx": mock_httpx}),
+            patch("osa.cli.deploy.httpx", mock_httpx),
             patch("osa.cli.deploy.Path.write_text"),
             patch("osa.cli.deploy.Path.unlink"),
         ):
