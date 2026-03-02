@@ -6,6 +6,7 @@ from uuid import uuid4
 from osa.domain.deposition.event.convention_registered import ConventionRegistered
 from osa.domain.feature.event.convention_ready import ConventionReady
 from osa.domain.feature.service.feature import FeatureService
+from osa.domain.shared.error import ConflictError
 from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.outbox import Outbox
 
@@ -29,7 +30,14 @@ class CreateFeatureTables(EventHandler[ConventionRegistered]):
                 hook.name,
                 event.convention_srn,
             )
-            await self.feature_service.create_table(hook)
+            try:
+                await self.feature_service.create_table(hook)
+            except ConflictError:
+                logger.warning(
+                    "Feature table already exists, skipping: hook=%s convention=%s",
+                    hook.name,
+                    event.convention_srn,
+                )
 
         await self.outbox.append(
             ConventionReady(

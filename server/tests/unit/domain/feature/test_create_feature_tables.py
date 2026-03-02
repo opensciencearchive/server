@@ -11,6 +11,7 @@ import pytest
 from osa.domain.deposition.event.convention_registered import ConventionRegistered
 from osa.domain.feature.event.convention_ready import ConventionReady
 from osa.domain.feature.handler.create_feature_tables import CreateFeatureTables
+from osa.domain.shared.error import ConflictError
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.hook import (
     ColumnDef,
@@ -125,3 +126,25 @@ class TestCreateFeatureTables:
             await handler.handle(event)
 
         outbox.append.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_existing_tables_on_redelivery(self):
+        """ConflictError (table already exists) is skipped; ConventionReady still emitted."""
+        hooks = [_make_hook_definition("hook_a"), _make_hook_definition("hook_b")]
+        event = _make_event(hooks=hooks)
+
+        feature_service = AsyncMock()
+        feature_service.create_table.side_effect = ConflictError("table already exists")
+        outbox = AsyncMock()
+
+        handler = CreateFeatureTables(
+            feature_service=feature_service,
+            outbox=outbox,
+        )
+        await handler.handle(event)
+
+        assert feature_service.create_table.call_count == 2
+        outbox.append.assert_called_once()
+        emitted = outbox.append.call_args[0][0]
+        assert isinstance(emitted, ConventionReady)
+        assert emitted.convention_srn == event.convention_srn
