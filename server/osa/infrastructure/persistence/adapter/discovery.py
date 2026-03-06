@@ -24,7 +24,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.elements import quoted_name
 
 from osa.domain.discovery.model.value import (
     ColumnInfo,
@@ -50,6 +49,11 @@ logger = logging.getLogger(__name__)
 def _escape_like(value: str) -> str:
     """Escape LIKE metacharacters so user input is matched literally."""
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _quote_ident(name: str) -> str:
+    """Double-quote a SQL identifier, escaping embedded double-quotes."""
+    return '"' + name.replace('"', '""') + '"'
 
 
 class PostgresFieldDefinitionReader:
@@ -185,7 +189,7 @@ class PostgresDiscoveryReadStore:
             select(
                 literal(row["hook_name"]).label("hook_name"),
                 func.count(func.distinct(text("record_srn"))).label("cnt"),
-            ).select_from(text(f"features.{quoted_name(row['pg_table'], quote=True)}"))
+            ).select_from(text(f"features.{_quote_ident(row['pg_table'])}"))
             for row in catalog_rows
         ]
         counts_result = await self.session.execute(union_all(*count_parts))

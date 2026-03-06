@@ -6,10 +6,14 @@ from typing import Any
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.elements import quoted_name
 
 from osa.domain.shared.model.srn import RecordSRN
 from osa.infrastructure.persistence.tables import feature_tables_table
+
+
+def _quote_ident(name: str) -> str:
+    """Double-quote a SQL identifier, escaping embedded double-quotes."""
+    return '"' + name.replace('"', '""') + '"'
 
 
 class PostgresFeatureReader:
@@ -39,12 +43,12 @@ class PostgresFeatureReader:
         parts: list[str] = []
         params: dict[str, Any] = {"srn": str(record_srn)}
         for i, row in enumerate(catalog_rows):
-            safe_table = quoted_name(row["pg_table"], quote=True)
+            quoted = _quote_ident(row["pg_table"])
             hook_param = f"hook_{i}"
             params[hook_param] = row["hook_name"]
             parts.append(  # noqa: S608
                 f"SELECT :{hook_param} AS hook_name, to_jsonb(t) AS row_data "
-                f"FROM features.{safe_table} t "
+                f"FROM features.{quoted} t "
                 f"WHERE t.record_srn = :srn"
             )
         combined = text(" UNION ALL ".join(parts))
