@@ -34,28 +34,31 @@ class PostgresFeatureReader:
         if not catalog_rows:
             return {}
 
-        features: dict[str, list[dict[str, Any]]] = {}
-        for row in catalog_rows:
-            hook_name = row["hook_name"]
-            pg_table = row["pg_table"]
-
-            # Query the dynamic feature table for this record
-            safe_table = quoted_name(pg_table, quote=True)
-            query = text(
-                f"SELECT * FROM features.{safe_table} WHERE record_srn = :srn"  # noqa: S608
+        # Build a single UNION ALL query across all feature tables (avoid N+1).
+        # to_jsonb serialises each heterogeneous row into a uniform shape.
+        parts: list[str] = []
+        params: dict[str, Any] = {"srn": str(record_srn)}
+        for i, row in enumerate(catalog_rows):
+            safe_table = quoted_name(row["pg_table"], quote=True)
+            hook_param = f"hook_{i}"
+            params[hook_param] = row["hook_name"]
+            parts.append(  # noqa: S608
+                f"SELECT :{hook_param} AS hook_name, to_jsonb(t) AS row_data "
+                f"FROM features.{safe_table} t "
+                f"WHERE t.record_srn = :srn"
             )
-            feat_result = await self.session.execute(query, {"srn": str(record_srn)})
-            feat_rows = feat_result.mappings().all()
+        combined = text(" UNION ALL ".join(parts))
+        feat_result = await self.session.execute(combined, params)
 
-            if feat_rows:
-                rows_list: list[dict[str, Any]] = []
-                for feat_row in feat_rows:
-                    row_dict = {
-                        k: v
-                        for k, v in dict(feat_row).items()
-                        if k not in self.AUTO_COLUMNS and k != "record_srn"
-                    }
-                    rows_list.append(row_dict)
-                features[hook_name] = rows_list
+        features: dict[str, list[dict[str, Any]]] = {}
+        for feat_row in feat_result.mappings():
+            hook_name: str = feat_row["hook_name"]
+            row_data: dict[str, Any] = feat_row["row_data"]
+            filtered = {
+                k: v
+                for k, v in row_data.items()
+                if k not in self.AUTO_COLUMNS and k != "record_srn"
+            }
+            features.setdefault(hook_name, []).append(filtered)
 
         return features

@@ -16,7 +16,6 @@ from osa.domain.discovery.model.value import (
 from osa.domain.discovery.query.search_features import (
     SearchFeatures,
     SearchFeaturesHandler,
-    SearchFeaturesResult,
 )
 from osa.domain.discovery.service.discovery import DiscoveryService
 from osa.domain.shared.error import NotFoundError, ValidationError
@@ -40,7 +39,7 @@ def _make_catalog_entry() -> FeatureCatalogEntry:
 def mock_read_store() -> AsyncMock:
     store = AsyncMock()
     store.get_feature_table_schema.return_value = _make_catalog_entry()
-    store.search_features.return_value = ([], 0)
+    store.search_features.return_value = []
     return store
 
 
@@ -65,13 +64,11 @@ class TestSearchFeaturesHandler:
     async def test_delegates_to_service(self) -> None:
         mock_service = AsyncMock()
         mock_service.search_features.return_value = FeatureSearchResult(
-            rows=[], total=0, cursor=None, has_more=False
+            rows=[], cursor=None, has_more=False
         )
 
         handler = SearchFeaturesHandler(discovery_service=mock_service)
-        result: SearchFeaturesResult = await handler.run(SearchFeatures(hook_name="detect_pockets"))
-
-        assert result.total == 0
+        await handler.run(SearchFeatures(hook_name="detect_pockets"))
         mock_service.search_features.assert_called_once()
 
     async def test_maps_rows_with_record_srn(self) -> None:
@@ -79,7 +76,6 @@ class TestSearchFeaturesHandler:
         mock_service = AsyncMock()
         mock_service.search_features.return_value = FeatureSearchResult(
             rows=[FeatureRow(row_id=1, record_srn=srn, data={"score": 7.66})],
-            total=1,
             cursor=None,
             has_more=False,
         )

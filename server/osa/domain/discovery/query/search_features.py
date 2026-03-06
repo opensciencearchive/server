@@ -23,7 +23,6 @@ class SearchFeatures(Query):
 
 class SearchFeaturesResult(Result):
     rows: list[dict]
-    total: int
     cursor: str | None
     has_more: bool
 
@@ -45,7 +44,6 @@ class SearchFeaturesHandler(QueryHandler[SearchFeatures, SearchFeaturesResult]):
         )
         return SearchFeaturesResult(
             rows=[{"record_srn": str(r.record_srn), **r.data} for r in result.rows],
-            total=result.total,
             cursor=result.cursor,
             has_more=result.has_more,
         )

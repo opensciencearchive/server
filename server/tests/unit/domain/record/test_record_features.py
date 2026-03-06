@@ -36,15 +36,18 @@ class TestPostgresFeatureReader:
             _make_catalog_row("detect_pockets", "detect_pockets_v1")
         ]
 
-        # Second call: feature table query
+        # Second call: UNION ALL query returning {hook_name, row_data} mappings
         feature_result = MagicMock()
-        feature_result.mappings.return_value.all.return_value = [
+        feature_result.mappings.return_value = [
             {
-                "id": 1,
-                "record_srn": str(srn),
-                "created_at": datetime.now(UTC),
-                "score": 7.66,
-                "volume": 1750.0,
+                "hook_name": "detect_pockets",
+                "row_data": {
+                    "id": 1,
+                    "record_srn": str(srn),
+                    "created_at": "2026-01-01T00:00:00",
+                    "score": 7.66,
+                    "volume": 1750.0,
+                },
             }
         ]
 
@@ -68,12 +71,15 @@ class TestPostgresFeatureReader:
         ]
 
         feature_result = MagicMock()
-        feature_result.mappings.return_value.all.return_value = [
+        feature_result.mappings.return_value = [
             {
-                "id": 42,
-                "record_srn": str(srn),
-                "created_at": datetime.now(UTC),
-                "metric": 3.14,
+                "hook_name": "test_hook",
+                "row_data": {
+                    "id": 42,
+                    "record_srn": str(srn),
+                    "created_at": "2026-01-01T00:00:00",
+                    "metric": 3.14,
+                },
             }
         ]
 
@@ -109,8 +115,9 @@ class TestPostgresFeatureReader:
             _make_catalog_row("detect_pockets", "detect_pockets_v1")
         ]
 
+        # UNION ALL returns no rows when record has no feature data
         feature_result = MagicMock()
-        feature_result.mappings.return_value.all.return_value = []
+        feature_result.mappings.return_value = []
 
         mock_session.execute.side_effect = [catalog_result, feature_result]
 
@@ -128,17 +135,30 @@ class TestPostgresFeatureReader:
             _make_catalog_row("hook_b", "hook_b_v1"),
         ]
 
-        feat_a = MagicMock()
-        feat_a.mappings.return_value.all.return_value = [
-            {"id": 1, "record_srn": str(srn), "created_at": datetime.now(UTC), "x": 1}
+        # Single UNION ALL result containing rows from both tables
+        feature_result = MagicMock()
+        feature_result.mappings.return_value = [
+            {
+                "hook_name": "hook_a",
+                "row_data": {
+                    "id": 1,
+                    "record_srn": str(srn),
+                    "created_at": "2026-01-01T00:00:00",
+                    "x": 1,
+                },
+            },
+            {
+                "hook_name": "hook_b",
+                "row_data": {
+                    "id": 2,
+                    "record_srn": str(srn),
+                    "created_at": "2026-01-01T00:00:00",
+                    "y": 2,
+                },
+            },
         ]
 
-        feat_b = MagicMock()
-        feat_b.mappings.return_value.all.return_value = [
-            {"id": 2, "record_srn": str(srn), "created_at": datetime.now(UTC), "y": 2}
-        ]
-
-        mock_session.execute.side_effect = [catalog_result, feat_a, feat_b]
+        mock_session.execute.side_effect = [catalog_result, feature_result]
 
         result = await reader.get_features_for_record(srn)
 

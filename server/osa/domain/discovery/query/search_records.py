@@ -21,7 +21,6 @@ class SearchRecords(Query):
 
 class SearchRecordsResult(Result):
     results: list[dict]
-    total: int
     cursor: str | None
     has_more: bool
 
@@ -48,7 +47,6 @@ class SearchRecordsHandler(QueryHandler[SearchRecords, SearchRecordsResult]):
                 }
                 for r in result.results
             ],
-            total=result.total,
             cursor=result.cursor,
             has_more=result.has_more,
         )

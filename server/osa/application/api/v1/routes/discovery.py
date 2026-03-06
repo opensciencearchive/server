@@ -47,7 +47,6 @@ class RecordSearchRequest(BaseModel):
 
 class RecordSearchResponse(BaseModel):
     results: list[dict[str, Any]]
-    total: int
     cursor: str | None
     has_more: bool
 
@@ -67,7 +66,6 @@ class FeatureSearchRequest(BaseModel):
 
 class FeatureSearchResponse(BaseModel):
     rows: list[dict[str, Any]]
-    total: int
     cursor: str | None
     has_more: bool
 
@@ -93,7 +91,6 @@ async def search_records(
     )
     return RecordSearchResponse(
         results=result.results,
-        total=result.total,
         cursor=result.cursor,
         has_more=result.has_more,
     )
@@ -128,7 +125,6 @@ async def search_features(
     )
     return FeatureSearchResponse(
         rows=result.rows,
-        total=result.total,
         cursor=result.cursor,
         has_more=result.has_more,
     )

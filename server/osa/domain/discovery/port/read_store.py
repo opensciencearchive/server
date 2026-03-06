@@ -27,8 +27,8 @@ class DiscoveryReadStore(Protocol):
         cursor: dict | None,
         limit: int,
         field_types: dict[str, FieldType] | None = None,
-    ) -> tuple[list[RecordSummary], int]:
-        """Search and filter published records. Returns (results, total_count)."""
+    ) -> list[RecordSummary]:
+        """Search and filter published records."""
         ...
 
     async def get_feature_catalog(self) -> list[FeatureCatalogEntry]:
@@ -51,6 +51,6 @@ class DiscoveryReadStore(Protocol):
         order: SortOrder,
         cursor: dict | None,
         limit: int,
-    ) -> tuple[list[FeatureRow], int]:
-        """Search and filter feature rows. Returns (rows, total_count)."""
+    ) -> list[FeatureRow]:
+        """Search and filter feature rows."""
         ...

@@ -81,8 +81,13 @@ class DiscoveryService(Service):
         text_fields = [
             name for name, ft in field_map.items() if ft in (FieldType.TEXT, FieldType.URL)
         ]
+        if q and not text_fields:
+            raise ValidationError(
+                "Free-text search is unavailable: no text or URL fields are registered",
+                field="q",
+            )
 
-        results, total = await self.read_store.search_records(
+        results = await self.read_store.search_records(
             filters=filters,
             text_fields=text_fields,
             q=q,
@@ -93,7 +98,7 @@ class DiscoveryService(Service):
             field_types=field_map,
         )
 
-        has_more = len(results) == limit and len(results) < total
+        has_more = len(results) == limit
         next_cursor = None
         if has_more and results:
             last = results[-1]
@@ -105,7 +110,6 @@ class DiscoveryService(Service):
 
         return RecordSearchResult(
             results=results,
-            total=total,
             cursor=next_cursor,
             has_more=has_more,
         )
@@ -178,7 +182,7 @@ class DiscoveryService(Service):
         except ValueError as exc:
             raise ValidationError(str(exc), field="cursor") from exc
 
-        rows, total = await self.read_store.search_features(
+        rows = await self.read_store.search_features(
             hook_name=hook_name,
             filters=filters,
             record_srn=record_srn,
@@ -188,7 +192,7 @@ class DiscoveryService(Service):
             limit=limit,
         )
 
-        has_more = len(rows) == limit and len(rows) < total
+        has_more = len(rows) == limit
         next_cursor = None
         if has_more and rows:
             last = rows[-1]
@@ -200,7 +204,6 @@ class DiscoveryService(Service):
 
         return FeatureSearchResult(
             rows=rows,
-            total=total,
             cursor=next_cursor,
             has_more=has_more,
         )

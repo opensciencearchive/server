@@ -68,7 +68,6 @@ class RecordSummary(BaseModel):
 
 class RecordSearchResult(BaseModel):
     results: list[RecordSummary]
-    total: int
     cursor: str | None
     has_more: bool
 
@@ -97,6 +96,5 @@ class FeatureRow(BaseModel):
 
 class FeatureSearchResult(BaseModel):
     rows: list[FeatureRow]
-    total: int
     cursor: str | None
     has_more: bool

@@ -34,7 +34,7 @@ class TestSearchRecordsHandler:
         self, handler: SearchRecordsHandler, mock_service: AsyncMock
     ) -> None:
         mock_service.search_records.return_value = RecordSearchResult(
-            results=[], total=0, cursor=None, has_more=False
+            results=[], cursor=None, has_more=False
         )
         cmd = SearchRecords()
         await handler.run(cmd)
@@ -55,14 +55,12 @@ class TestSearchRecordsHandler:
         ts = datetime(2026, 1, 1, tzinfo=UTC)
         mock_service.search_records.return_value = RecordSearchResult(
             results=[RecordSummary(srn=srn, published_at=ts, metadata={"title": "Test"})],
-            total=1,
             cursor="abc123",
             has_more=False,
         )
 
         result: SearchRecordsResult = await handler.run(SearchRecords())
 
-        assert result.total == 1
         assert result.cursor == "abc123"
         assert result.has_more is False
         assert result.results[0]["srn"] == str(srn)

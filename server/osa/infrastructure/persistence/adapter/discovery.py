@@ -16,9 +16,11 @@ from sqlalchemy import (
     and_,
     cast,
     func,
+    literal,
     or_,
     select,
     text,
+    union_all,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +45,11 @@ from osa.infrastructure.persistence.tables import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _escape_like(value: str) -> str:
+    """Escape LIKE metacharacters so user input is matched literally."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 class PostgresFieldDefinitionReader:
@@ -88,7 +95,7 @@ class PostgresDiscoveryReadStore:
         cursor: dict[str, Any] | None,
         limit: int,
         field_types: dict[str, FieldType] | None = None,
-    ) -> tuple[list[RecordSummary], int]:
+    ) -> list[RecordSummary]:
         """Build and execute a dynamic SQL query for record search."""
         t = records_table
         conditions: list[Any] = []
@@ -100,13 +107,19 @@ class PostgresDiscoveryReadStore:
 
         # Free-text search across text fields
         if q and text_fields:
-            pattern = f"%{q}%"
-            text_clauses = [t.c.metadata[field].astext.ilike(pattern) for field in text_fields]
+            pattern = f"%{_escape_like(q)}%"
+            text_clauses = [
+                t.c.metadata[field].astext.ilike(pattern, escape="\\") for field in text_fields
+            ]
             conditions.append(or_(*text_clauses))
 
-        # Determine sort expression
+        # Determine sort expression (cast to match field type for correct ordering)
         if sort == "published_at":
             sort_expr = t.c.published_at
+        elif ft.get(sort) == FieldType.NUMBER:
+            sort_expr = cast(t.c.metadata[sort].astext, Float)
+        elif ft.get(sort) == FieldType.DATE:
+            sort_expr = cast(t.c.metadata[sort].astext, Date)
         else:
             sort_expr = t.c.metadata[sort].astext
 
@@ -135,31 +148,24 @@ class PostgresDiscoveryReadStore:
                     )
                 )
 
-        # Build query with COUNT(*) OVER() for total
         where_clause = and_(*conditions) if conditions else text("TRUE")
-        total_col = func.count().over().label("_total")
 
         stmt = (
-            select(t.c.srn, t.c.published_at, t.c.metadata, total_col)
+            select(t.c.srn, t.c.published_at, t.c.metadata)
             .where(where_clause)
             .order_by(*order_clauses)
             .limit(limit)
         )
 
         result = await self.session.execute(stmt)
-        rows = result.mappings().all()
-
-        total = rows[0]["_total"] if rows else 0
-        results = [
+        return [
             RecordSummary(
                 srn=RecordSRN.parse(row["srn"]),
                 published_at=row["published_at"],
                 metadata=row["metadata"],
             )
-            for row in rows
+            for row in result.mappings()
         ]
-
-        return results, total
 
     async def get_feature_catalog(self) -> list[FeatureCatalogEntry]:
         """List all feature tables with column schemas and record counts."""
@@ -170,6 +176,20 @@ class PostgresDiscoveryReadStore:
         )
         result = await self.session.execute(stmt)
         catalog_rows = result.mappings().all()
+
+        if not catalog_rows:
+            return []
+
+        # Fetch all record counts in a single UNION ALL query (avoid N+1)
+        count_parts = [
+            select(
+                literal(row["hook_name"]).label("hook_name"),
+                func.count(func.distinct(text("record_srn"))).label("cnt"),
+            ).select_from(text(f"features.{quoted_name(row['pg_table'], quote=True)}"))
+            for row in catalog_rows
+        ]
+        counts_result = await self.session.execute(union_all(*count_parts))
+        counts_by_hook = {r["hook_name"]: r["cnt"] for r in counts_result.mappings()}
 
         entries: list[FeatureCatalogEntry] = []
         for row in catalog_rows:
@@ -184,19 +204,11 @@ class PostgresDiscoveryReadStore:
                 for col in columns_raw
             ]
 
-            pg_table = row["pg_table"]
-            safe_table = quoted_name(pg_table, quote=True)
-            count_stmt = select(func.count(func.distinct(text("record_srn")))).select_from(
-                text(f"features.{safe_table}")
-            )
-            count_result = await self.session.execute(count_stmt)
-            record_count = count_result.scalar() or 0
-
             entries.append(
                 FeatureCatalogEntry(
                     hook_name=row["hook_name"],
                     columns=columns,
-                    record_count=record_count,
+                    record_count=counts_by_hook.get(row["hook_name"], 0),
                 )
             )
 
@@ -239,7 +251,7 @@ class PostgresDiscoveryReadStore:
         order: SortOrder,
         cursor: dict[str, Any] | None,
         limit: int,
-    ) -> tuple[list[FeatureRow], int]:
+    ) -> list[FeatureRow]:
         """Build and execute a dynamic SQL query for feature row search."""
         # Look up pg_table and feature_schema from catalog
         pg_table_stmt = select(
@@ -249,7 +261,7 @@ class PostgresDiscoveryReadStore:
         pg_result = await self.session.execute(pg_table_stmt)
         pg_row = pg_result.mappings().first()
         if pg_row is None:
-            return [], 0
+            return []
         pg_table: str = pg_row["pg_table"]
         feature_schema: dict = pg_row["feature_schema"]
 
@@ -295,7 +307,9 @@ class PostgresDiscoveryReadStore:
             if f.operator == FilterOperator.EQ:
                 conditions.append(col == f.value)
             elif f.operator == FilterOperator.CONTAINS:
-                conditions.append(cast(col, String).ilike(f"%{f.value}%"))
+                conditions.append(
+                    cast(col, String).ilike(f"%{_escape_like(str(f.value))}%", escape="\\")
+                )
             elif f.operator == FilterOperator.GTE:
                 conditions.append(col >= f.value)
             elif f.operator == FilterOperator.LTE:
@@ -332,15 +346,12 @@ class PostgresDiscoveryReadStore:
                 )
 
         where_clause = and_(*conditions) if conditions else text("TRUE")
-        total_col = func.count().over().label("_total")
 
-        # Select all columns except auto ones, plus total
         auto_cols = {"id", "created_at"}
         stmt = (
             select(
                 ft.c.id,
                 ft.c.record_srn,
-                total_col,
                 *[
                     c
                     for c in ft.columns
@@ -353,19 +364,15 @@ class PostgresDiscoveryReadStore:
         )
 
         result = await self.session.execute(stmt)
-        rows = result.mappings().all()
-
-        total = rows[0]["_total"] if rows else 0
         feature_rows: list[FeatureRow] = []
-        for row in rows:
+        for row in result.mappings():
             row_dict = dict(row)
-            row_dict.pop("_total", None)
             row_id = row_dict.pop("id")
             rsrn = RecordSRN.parse(row_dict.pop("record_srn"))
             row_dict.pop("created_at", None)
             feature_rows.append(FeatureRow(row_id=row_id, record_srn=rsrn, data=row_dict))
 
-        return feature_rows, total
+        return feature_rows
 
     @staticmethod
     def _record_filter_clause(f: Filter, field_type: FieldType | None = None) -> Any:
@@ -375,7 +382,9 @@ class PostgresDiscoveryReadStore:
             # Use JSONB @> containment (GIN-indexed)
             return t.c.metadata.op("@>")(cast(func.json_build_object(f.field, f.value), JSONB))
         elif f.operator == FilterOperator.CONTAINS:
-            return t.c.metadata[f.field].astext.ilike(f"%{f.value}%")
+            return t.c.metadata[f.field].astext.ilike(
+                f"%{_escape_like(str(f.value))}%", escape="\\"
+            )
         elif f.operator in (FilterOperator.GTE, FilterOperator.LTE):
             # Use typed casts: numeric for NUMBER, date for DATE, string fallback
             if field_type == FieldType.NUMBER:

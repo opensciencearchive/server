@@ -23,7 +23,7 @@ from osa.domain.shared.model.srn import RecordSRN
 @pytest.fixture
 def mock_read_store() -> AsyncMock:
     store = AsyncMock()
-    store.search_records.return_value = ([], 0)
+    store.search_records.return_value = []
     return store
 
 
@@ -89,7 +89,7 @@ class TestSearchRecordsValidation:
             cursor=None,
             limit=20,
         )
-        assert result.total == 0
+        assert result.results == []
 
     async def test_accepts_metadata_field_sort(self, service: DiscoveryService) -> None:
         result = await service.search_records(
@@ -100,7 +100,7 @@ class TestSearchRecordsValidation:
             cursor=None,
             limit=20,
         )
-        assert result.total == 0
+        assert result.results == []
 
     async def test_rejects_limit_too_low(self, service: DiscoveryService) -> None:
         with pytest.raises(ValidationError, match="limit"):
@@ -122,6 +122,24 @@ class TestSearchRecordsValidation:
                 order=SortOrder.DESC,
                 cursor=None,
                 limit=101,
+            )
+
+    async def test_rejects_q_when_no_text_fields(self, mock_read_store: AsyncMock) -> None:
+        """q should raise when no TEXT/URL fields exist to search against."""
+        no_text_reader = AsyncMock()
+        no_text_reader.get_all_field_types.return_value = {
+            "resolution": FieldType.NUMBER,
+        }
+        svc = DiscoveryService(read_store=mock_read_store, field_reader=no_text_reader)
+
+        with pytest.raises(ValidationError, match="Free-text search is unavailable"):
+            await svc.search_records(
+                filters=[],
+                q="kinase",
+                sort="published_at",
+                order=SortOrder.DESC,
+                cursor=None,
+                limit=20,
             )
 
 
@@ -200,10 +218,9 @@ class TestSearchRecordsDelegation:
     ) -> None:
         srn = RecordSRN.parse("urn:osa:localhost:rec:abc@1")
         ts = datetime(2026, 1, 1, tzinfo=UTC)
-        mock_read_store.search_records.return_value = (
-            [RecordSummary(srn=srn, published_at=ts, metadata={"title": "Test"})],
-            5,
-        )
+        mock_read_store.search_records.return_value = [
+            RecordSummary(srn=srn, published_at=ts, metadata={"title": "Test"})
+        ]
 
         result = await service.search_records(
             filters=[],
@@ -225,7 +242,7 @@ class TestSearchRecordsDelegation:
     async def test_no_cursor_when_no_more_results(
         self, service: DiscoveryService, mock_read_store: AsyncMock
     ) -> None:
-        mock_read_store.search_records.return_value = ([], 0)
+        mock_read_store.search_records.return_value = []
 
         result = await service.search_records(
             filters=[],
@@ -271,10 +288,9 @@ class TestFeatureCursorEncoding:
             columns=[ColumnInfo(name="score", type="number", required=True)],
             record_count=0,
         )
-        mock_read_store.search_features.return_value = (
-            [FeatureRow(row_id=42, record_srn=srn, data={"score": 7.66})],
-            5,
-        )
+        mock_read_store.search_features.return_value = [
+            FeatureRow(row_id=42, record_srn=srn, data={"score": 7.66})
+        ]
 
         service = DiscoveryService(read_store=mock_read_store, field_reader=mock_field_reader)
         result = await service.search_features(
@@ -304,10 +320,9 @@ class TestFeatureCursorEncoding:
             columns=[ColumnInfo(name="score", type="number", required=True)],
             record_count=0,
         )
-        mock_read_store.search_features.return_value = (
-            [FeatureRow(row_id=99, record_srn=srn, data={"score": 5.0})],
-            3,
-        )
+        mock_read_store.search_features.return_value = [
+            FeatureRow(row_id=99, record_srn=srn, data={"score": 5.0})
+        ]
 
         service = DiscoveryService(read_store=mock_read_store, field_reader=mock_field_reader)
         result = await service.search_features(
