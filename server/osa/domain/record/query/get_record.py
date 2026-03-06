@@ -18,6 +18,7 @@ class RecordDetail(Result):
     deposition_srn: DepositionSRN
     metadata: dict[str, Any]
     published_at: datetime
+    features: dict[str, list[dict[str, Any]]] = {}
 
 
 class GetRecordHandler(QueryHandler[GetRecord, RecordDetail]):
@@ -26,9 +27,11 @@ class GetRecordHandler(QueryHandler[GetRecord, RecordDetail]):
 
     async def run(self, cmd: GetRecord) -> RecordDetail:
         record = await self.record_service.get(cmd.srn)
+        features = await self.record_service.get_features_for_record(cmd.srn)
         return RecordDetail(
             srn=record.srn,
             deposition_srn=record.deposition_srn,
             metadata=record.metadata,
             published_at=record.published_at,
+            features=features,
         )

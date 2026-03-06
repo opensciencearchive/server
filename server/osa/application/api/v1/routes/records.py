@@ -41,5 +41,6 @@ async def get_record(
             "deposition_srn": str(result.deposition_srn),
             "metadata": result.metadata,
             "published_at": result.published_at.isoformat(),
+            "features": result.features,
         }
     )

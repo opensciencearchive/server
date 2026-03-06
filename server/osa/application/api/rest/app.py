@@ -12,6 +12,7 @@ from osa.application.api.v1.routes import (
     auth,
     conventions,
     depositions,
+    discovery,
     events,
     health,
     ontologies,
@@ -89,6 +90,7 @@ def create_app() -> FastAPI:
     app_instance.include_router(conventions.router, prefix="/api/v1")
     app_instance.include_router(depositions.router, prefix="/api/v1")
     app_instance.include_router(validation.router, prefix="/api/v1")
+    app_instance.include_router(discovery.router, prefix="/api/v1")
 
     # Global OSA error handler - maps domain and infrastructure errors to HTTP responses
     @app_instance.exception_handler(OSAError)

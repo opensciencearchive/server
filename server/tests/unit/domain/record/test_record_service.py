@@ -71,6 +71,7 @@ class TestRecordService:
             record_repo=mock_record_repo,
             outbox=mock_outbox,
             node_domain=node_domain,
+            feature_reader=AsyncMock(),
         )
 
         # Act
@@ -100,6 +101,7 @@ class TestRecordService:
             record_repo=mock_record_repo,
             outbox=mock_outbox,
             node_domain=node_domain,
+            feature_reader=AsyncMock(),
         )
 
         # Act
@@ -131,6 +133,7 @@ class TestRecordService:
             record_repo=mock_record_repo,
             outbox=mock_outbox,
             node_domain=node_domain,
+            feature_reader=AsyncMock(),
         )
 
         # Act

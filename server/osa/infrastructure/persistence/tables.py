@@ -14,6 +14,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.types import JSON
 
 # Metadata object for all tables
@@ -65,13 +66,19 @@ records_table = Table(
     metadata,
     Column("srn", String, primary_key=True),
     Column("deposition_srn", String, nullable=False),
-    Column("metadata", JSON, nullable=False),
+    Column("metadata", JSONB, nullable=False),
     Column("indexes", JSON, nullable=False),
     Column("published_at", DateTime(timezone=True), nullable=False),
 )
 
 Index("idx_records_deposition_srn", records_table.c.deposition_srn)
 Index("idx_records_published_at", records_table.c.published_at)
+Index(
+    "idx_records_metadata_gin",
+    records_table.c.metadata,
+    postgresql_using="gin",
+    postgresql_ops={"metadata": "jsonb_path_ops"},
+)
 
 
 # ============================================================================
