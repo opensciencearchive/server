@@ -1,8 +1,10 @@
 """RecordService - orchestrates record creation from approved depositions."""
 
+from __future__ import annotations
+
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from osa.domain.record.event.record_published import RecordPublished
@@ -22,6 +24,9 @@ from osa.domain.shared.model.srn import (
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
 
+if TYPE_CHECKING:
+    from osa.domain.record.port.feature_reader import FeatureReader
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,6 +36,13 @@ class RecordService(Service):
     record_repo: RecordRepository
     outbox: Outbox
     node_domain: Domain
+    feature_reader: FeatureReader
+
+    async def get_features_for_record(
+        self, record_srn: RecordSRN
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Fetch feature data for a record."""
+        return await self.feature_reader.get_features_for_record(record_srn)
 
     async def get(self, srn: RecordSRN) -> Record:
         """Retrieve a published record by SRN."""

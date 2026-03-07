@@ -10,6 +10,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "0d9fbacf8e58"
@@ -53,13 +54,20 @@ def upgrade() -> None:
         "records",
         sa.Column("srn", sa.String(), nullable=False),
         sa.Column("deposition_srn", sa.String(), nullable=False),
-        sa.Column("metadata", sa.JSON(), nullable=False),
+        sa.Column("metadata", postgresql.JSONB(), nullable=False),
         sa.Column("indexes", sa.JSON(), nullable=False),
         sa.Column("published_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("srn"),
     )
     op.create_index("idx_records_deposition_srn", "records", ["deposition_srn"])
     op.create_index("idx_records_published_at", "records", ["published_at"])
+    op.create_index(
+        "idx_records_metadata_gin",
+        "records",
+        ["metadata"],
+        postgresql_using="gin",
+        postgresql_ops={"metadata": "jsonb_path_ops"},
+    )
 
     # EVENTS (Outbox)
     op.create_table(
@@ -89,6 +97,7 @@ def downgrade() -> None:
     op.drop_table("events")
 
     # RECORDS
+    op.drop_index("idx_records_metadata_gin", table_name="records")
     op.drop_index("idx_records_published_at", table_name="records")
     op.drop_index("idx_records_deposition_srn", table_name="records")
     op.drop_table("records")

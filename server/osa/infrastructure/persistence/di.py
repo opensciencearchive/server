@@ -10,9 +10,11 @@ from osa.domain.deposition.port.ontology_reader import OntologyReader
 from osa.domain.deposition.port.repository import DepositionRepository
 from osa.domain.deposition.port.schema_reader import SchemaReader
 from osa.domain.deposition.port.storage import FileStoragePort
+from osa.domain.record.port.feature_reader import FeatureReader
 from osa.domain.record.port.repository import RecordRepository
 from osa.domain.record.query.get_record import GetRecordHandler
 from osa.domain.record.service import RecordService
+from osa.infrastructure.persistence.adapter.feature_reader import PostgresFeatureReader
 from osa.domain.source.port.storage import SourceStoragePort
 from osa.domain.feature.port.storage import FeatureStoragePort
 from osa.domain.validation.port.storage import HookStoragePort
@@ -23,6 +25,12 @@ from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.event_repository import EventRepository
 from osa.domain.feature.port.feature_store import FeatureStore
 from osa.domain.validation.port.repository import ValidationRunRepository
+from osa.domain.discovery.port.field_definition_reader import FieldDefinitionReader
+from osa.domain.discovery.port.read_store import DiscoveryReadStore
+from osa.infrastructure.persistence.adapter.discovery import (
+    PostgresDiscoveryReadStore,
+    PostgresFieldDefinitionReader,
+)
 from osa.infrastructure.persistence.adapter.readers import (
     OntologyReaderAdapter,
     SchemaReaderAdapter,
@@ -126,12 +134,16 @@ class PersistenceProvider(Provider):
     def get_feature_storage(self, file_storage: FileStoragePort) -> FeatureStoragePort:
         return file_storage  # type: ignore[return-value]
 
+    # Feature reader
+    feature_reader = provide(PostgresFeatureReader, scope=Scope.UOW, provides=FeatureReader)
+
     @provide(scope=Scope.UOW)
     def get_record_service(
         self,
         record_repo: RecordRepository,
         outbox: Outbox,
         config: Config,
+        feature_reader: FeatureReader,
     ) -> RecordService:
         """Provide RecordService for UOW scope.
 
@@ -141,7 +153,16 @@ class PersistenceProvider(Provider):
             record_repo=record_repo,
             outbox=outbox,
             node_domain=Domain(config.server.domain),
+            feature_reader=feature_reader,
         )
+
+    # Discovery adapters
+    discovery_read_store = provide(
+        PostgresDiscoveryReadStore, scope=Scope.UOW, provides=DiscoveryReadStore
+    )
+    field_definition_reader = provide(
+        PostgresFieldDefinitionReader, scope=Scope.UOW, provides=FieldDefinitionReader
+    )
 
     # Record query handlers
     get_record_handler = provide(GetRecordHandler, scope=Scope.UOW)

@@ -3,6 +3,7 @@ from dishka import AsyncContainer, make_async_container
 from osa.cli.util.paths import OSAPaths
 from osa.config import Config
 from osa.domain.auth.util.di import AuthProvider
+from osa.domain.discovery.util.di import DiscoveryProvider
 from osa.domain.deposition.util.di import DepositionProvider
 from osa.domain.feature.util.di import FeatureProvider
 from osa.domain.semantics.util.di.provider import SemanticsProvider
@@ -37,6 +38,7 @@ def create_container() -> AsyncContainer:
         ValidationProvider(),
         AuthProvider(),
         AuthInfraProvider(),
+        DiscoveryProvider(),
         context={Config: config, OSAPaths: paths},
         scopes=Scope,  # type: ignore[arg-type]  # Custom scope class
     )

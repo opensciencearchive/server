@@ -35,6 +35,7 @@ class TestGetRecordHandler:
         record = _make_record()
         service = AsyncMock()
         service.get.return_value = record
+        service.get_features_for_record.return_value = {}
 
         handler = GetRecordHandler(record_service=service)
         result = await handler.run(GetRecord(srn=record.srn))
