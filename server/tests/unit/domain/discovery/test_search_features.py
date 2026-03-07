@@ -71,6 +71,16 @@ class TestSearchFeaturesHandler:
         await handler.run(SearchFeatures(hook_name="detect_pockets"))
         mock_service.search_features.assert_called_once()
 
+    async def test_invalid_record_srn_raises_validation_error(self) -> None:
+        mock_service = AsyncMock()
+        handler = SearchFeaturesHandler(discovery_service=mock_service)
+
+        with pytest.raises(ValidationError, match="not an OSA SRN") as exc_info:
+            await handler.run(SearchFeatures(hook_name="detect_pockets", record_srn="not-a-srn"))
+
+        assert exc_info.value.field == "record_srn"
+        mock_service.search_features.assert_not_called()
+
     async def test_maps_rows_with_record_srn(self) -> None:
         srn = RecordSRN.parse("urn:osa:localhost:rec:abc@1")
         mock_service = AsyncMock()

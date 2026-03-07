@@ -7,6 +7,7 @@ from osa.domain.discovery.model.value import (
 )
 from osa.domain.discovery.service.discovery import DiscoveryService
 from osa.domain.shared.authorization.gate import public
+from osa.domain.shared.error import ValidationError
 from osa.domain.shared.model.srn import RecordSRN
 from osa.domain.shared.query import Query, QueryHandler, Result
 
@@ -32,7 +33,12 @@ class SearchFeaturesHandler(QueryHandler[SearchFeatures, SearchFeaturesResult]):
     discovery_service: DiscoveryService
 
     async def run(self, cmd: SearchFeatures) -> SearchFeaturesResult:
-        record_srn = RecordSRN.parse(cmd.record_srn) if cmd.record_srn else None
+        record_srn: RecordSRN | None = None
+        if cmd.record_srn:
+            try:
+                record_srn = RecordSRN.parse(cmd.record_srn)
+            except ValueError as exc:
+                raise ValidationError(str(exc), field="record_srn") from exc
         result: FeatureSearchResult = await self.discovery_service.search_features(
             hook_name=cmd.hook_name,
             filters=cmd.filters,

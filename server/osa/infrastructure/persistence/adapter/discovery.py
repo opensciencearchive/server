@@ -38,6 +38,7 @@ from osa.infrastructure.persistence.feature_table import (
     build_feature_table,
     data_columns,
 )
+from osa.infrastructure.persistence.keyset import KeysetPage, SortKey
 from osa.infrastructure.persistence.tables import (
     feature_tables_table,
     records_table,
@@ -128,30 +129,18 @@ class PostgresDiscoveryReadStore:
         else:
             sort_expr = t.c.metadata[sort].astext
 
-        # Sort direction
-        if order == SortOrder.ASC:
-            order_clauses = [sort_expr.asc().nullslast(), t.c.srn.asc()]
-        else:
-            order_clauses = [sort_expr.desc().nullslast(), t.c.srn.desc()]
+        # Keyset pagination with correct NULL handling
+        is_desc = order == SortOrder.DESC
+        page = KeysetPage(
+            [
+                SortKey(sort_expr, descending=is_desc, nulls_last=True),
+                SortKey(t.c.srn, descending=is_desc),
+            ]
+        )
+        order_clauses = page.order_by()
 
-        # Keyset cursor
         if cursor is not None:
-            cursor_sort = cursor["s"]
-            cursor_id = cursor["id"]
-            if order == SortOrder.ASC:
-                conditions.append(
-                    or_(
-                        sort_expr > cursor_sort,
-                        and_(sort_expr == cursor_sort, t.c.srn > cursor_id),
-                    )
-                )
-            else:
-                conditions.append(
-                    or_(
-                        sort_expr < cursor_sort,
-                        and_(sort_expr == cursor_sort, t.c.srn < cursor_id),
-                    )
-                )
+            conditions.append(page.after((cursor["s"], cursor["id"])))
 
         where_clause = and_(*conditions) if conditions else true()
 
@@ -282,29 +271,18 @@ class PostgresDiscoveryReadStore:
         else:
             sort_expr = ft.c[sort]
 
-        if order == SortOrder.ASC:
-            order_clauses = [sort_expr.asc(), ft.c.id.asc()]
-        else:
-            order_clauses = [sort_expr.desc(), ft.c.id.desc()]
+        # Keyset pagination with correct NULL handling
+        is_desc = order == SortOrder.DESC
+        page = KeysetPage(
+            [
+                SortKey(sort_expr, descending=is_desc, nulls_last=True),
+                SortKey(ft.c.id, descending=is_desc),
+            ]
+        )
+        order_clauses = page.order_by()
 
-        # Keyset cursor
         if cursor is not None:
-            cursor_sort = cursor["s"]
-            cursor_id = cursor["id"]
-            if order == SortOrder.ASC:
-                conditions.append(
-                    or_(
-                        sort_expr > cursor_sort,
-                        and_(sort_expr == cursor_sort, ft.c.id > cursor_id),
-                    )
-                )
-            else:
-                conditions.append(
-                    or_(
-                        sort_expr < cursor_sort,
-                        and_(sort_expr == cursor_sort, ft.c.id < cursor_id),
-                    )
-                )
+            conditions.append(page.after((cursor["s"], cursor["id"])))
 
         where_clause = and_(*conditions) if conditions else true()
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import func, literal, select, union_all
+from sqlalchemy import String, func, literal, select, type_coerce, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.shared.model.srn import RecordSRN
@@ -49,7 +49,7 @@ class PostgresFeatureReader:
             # Build jsonb_build_object('col1', col1, 'col2', col2, ...)
             jsonb_args: list[Any] = []
             for col in dcols:
-                jsonb_args.extend([literal(col.key), col])
+                jsonb_args.extend([type_coerce(literal(col.key), String), col])
 
             row_data_expr = (
                 func.jsonb_build_object(*jsonb_args) if jsonb_args else func.jsonb_build_object()
