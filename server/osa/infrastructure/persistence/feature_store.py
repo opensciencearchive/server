@@ -12,10 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from osa.domain.feature.port.feature_store import FeatureStore
 from osa.domain.shared.error import ConflictError, ValidationError
 from osa.domain.shared.model.hook import ColumnDef
-from osa.infrastructure.persistence.column_mapper import map_column
+from osa.infrastructure.persistence.feature_table import (
+    FEATURES_SCHEMA,
+    FeatureSchema,
+    build_feature_table,
+)
 from osa.infrastructure.persistence.tables import feature_tables_table
-
-FEATURES_SCHEMA = "features"
 
 _PG_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 
@@ -58,34 +60,16 @@ class PostgresFeatureStore(FeatureStore):
                 raise ConflictError(f"Feature table already exists: {hook_name}")
 
             # Build dynamic table
-            metadata = sa.MetaData(schema=FEATURES_SCHEMA)
-            sa_columns: list[sa.Column] = [
-                sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
-                sa.Column("record_srn", sa.Text, nullable=False, index=True),
-                sa.Column(
-                    "created_at",
-                    sa.DateTime(timezone=True),
-                    nullable=False,
-                    server_default=sa.func.now(),
-                ),
-            ]
-
-            for col_def in columns:
-                sa_columns.append(map_column(col_def))
-
-            # sa.Table registers itself on the metadata object
-            sa.Table(hook_name, metadata, *sa_columns)
+            schema = FeatureSchema(columns=columns)
+            table = build_feature_table(hook_name, schema)
 
             # Create table
-            await conn.run_sync(metadata.create_all, checkfirst=False)
-
-            # Register in catalog
-            feature_schema = {"columns": [c.model_dump() for c in columns]}
+            await conn.run_sync(table.metadata.create_all, checkfirst=False)
             await conn.execute(
                 feature_tables_table.insert().values(
                     hook_name=hook_name,
                     pg_table=hook_name,
-                    feature_schema=feature_schema,
+                    feature_schema=schema.model_dump(),
                     schema_version=1,
                     created_at=datetime.now(UTC),
                 )

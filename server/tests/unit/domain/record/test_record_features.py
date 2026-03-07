@@ -12,8 +12,12 @@ from osa.domain.shared.model.srn import DepositionSRN, Domain, RecordSRN
 from osa.infrastructure.persistence.adapter.feature_reader import PostgresFeatureReader
 
 
-def _make_catalog_row(hook_name: str, pg_table: str) -> dict:
-    return {"hook_name": hook_name, "pg_table": pg_table}
+def _make_catalog_row(hook_name: str, pg_table: str, columns: list[dict] | None = None) -> dict:
+    return {
+        "hook_name": hook_name,
+        "pg_table": pg_table,
+        "feature_schema": {"columns": columns or []},
+    }
 
 
 class TestPostgresFeatureReader:
@@ -33,18 +37,23 @@ class TestPostgresFeatureReader:
         # First call: catalog query
         catalog_result = MagicMock()
         catalog_result.mappings.return_value.all.return_value = [
-            _make_catalog_row("detect_pockets", "detect_pockets_v1")
+            _make_catalog_row(
+                "detect_pockets",
+                "detect_pockets_v1",
+                [
+                    {"name": "score", "json_type": "number", "required": True},
+                    {"name": "volume", "json_type": "number", "required": False},
+                ],
+            )
         ]
 
         # Second call: UNION ALL query returning {hook_name, row_data} mappings
+        # row_data now excludes auto columns (jsonb_build_object only includes data cols)
         feature_result = MagicMock()
         feature_result.mappings.return_value = [
             {
                 "hook_name": "detect_pockets",
                 "row_data": {
-                    "id": 1,
-                    "record_srn": str(srn),
-                    "created_at": "2026-01-01T00:00:00",
                     "score": 7.66,
                     "volume": 1750.0,
                 },
@@ -67,7 +76,11 @@ class TestPostgresFeatureReader:
 
         catalog_result = MagicMock()
         catalog_result.mappings.return_value.all.return_value = [
-            _make_catalog_row("test_hook", "test_hook_v1")
+            _make_catalog_row(
+                "test_hook",
+                "test_hook_v1",
+                [{"name": "metric", "json_type": "number", "required": True}],
+            )
         ]
 
         feature_result = MagicMock()
@@ -75,9 +88,6 @@ class TestPostgresFeatureReader:
             {
                 "hook_name": "test_hook",
                 "row_data": {
-                    "id": 42,
-                    "record_srn": str(srn),
-                    "created_at": "2026-01-01T00:00:00",
                     "metric": 3.14,
                 },
             }
@@ -112,7 +122,11 @@ class TestPostgresFeatureReader:
 
         catalog_result = MagicMock()
         catalog_result.mappings.return_value.all.return_value = [
-            _make_catalog_row("detect_pockets", "detect_pockets_v1")
+            _make_catalog_row(
+                "detect_pockets",
+                "detect_pockets_v1",
+                [{"name": "score", "json_type": "number", "required": True}],
+            )
         ]
 
         # UNION ALL returns no rows when record has no feature data
@@ -131,30 +145,25 @@ class TestPostgresFeatureReader:
 
         catalog_result = MagicMock()
         catalog_result.mappings.return_value.all.return_value = [
-            _make_catalog_row("hook_a", "hook_a_v1"),
-            _make_catalog_row("hook_b", "hook_b_v1"),
+            _make_catalog_row(
+                "hook_a", "hook_a_v1", [{"name": "x", "json_type": "integer", "required": True}]
+            ),
+            _make_catalog_row(
+                "hook_b", "hook_b_v1", [{"name": "y", "json_type": "integer", "required": True}]
+            ),
         ]
 
         # Single UNION ALL result containing rows from both tables
+        # row_data now excludes auto columns
         feature_result = MagicMock()
         feature_result.mappings.return_value = [
             {
                 "hook_name": "hook_a",
-                "row_data": {
-                    "id": 1,
-                    "record_srn": str(srn),
-                    "created_at": "2026-01-01T00:00:00",
-                    "x": 1,
-                },
+                "row_data": {"x": 1},
             },
             {
                 "hook_name": "hook_b",
-                "row_data": {
-                    "id": 2,
-                    "record_srn": str(srn),
-                    "created_at": "2026-01-01T00:00:00",
-                    "y": 2,
-                },
+                "row_data": {"y": 2},
             },
         ]
 

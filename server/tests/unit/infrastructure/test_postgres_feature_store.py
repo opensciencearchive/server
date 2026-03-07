@@ -8,10 +8,8 @@ import sqlalchemy as sa
 
 from osa.domain.shared.error import ConflictError, ValidationError
 from osa.domain.shared.model.hook import ColumnDef
-from osa.infrastructure.persistence.feature_store import (
-    FEATURES_SCHEMA,
-    PostgresFeatureStore,
-)
+from osa.infrastructure.persistence.feature_store import PostgresFeatureStore
+from osa.infrastructure.persistence.feature_table import FEATURES_SCHEMA
 
 
 def _make_columns() -> list[ColumnDef]:

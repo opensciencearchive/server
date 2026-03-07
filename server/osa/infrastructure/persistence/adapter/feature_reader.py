@@ -4,22 +4,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import func, literal, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.shared.model.srn import RecordSRN
+from osa.infrastructure.persistence.feature_table import (
+    FeatureSchema,
+    build_feature_table,
+    data_columns,
+)
 from osa.infrastructure.persistence.tables import feature_tables_table
-
-
-def _quote_ident(name: str) -> str:
-    """Double-quote a SQL identifier, escaping embedded double-quotes."""
-    return '"' + name.replace('"', '""') + '"'
 
 
 class PostgresFeatureReader:
     """Queries feature_tables catalog and dynamic feature tables for a record."""
-
-    AUTO_COLUMNS = {"id", "created_at"}
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -31,6 +29,7 @@ class PostgresFeatureReader:
         stmt = select(
             feature_tables_table.c.hook_name,
             feature_tables_table.c.pg_table,
+            feature_tables_table.c.feature_schema,
         )
         result = await self.session.execute(stmt)
         catalog_rows = result.mappings().all()
@@ -39,30 +38,39 @@ class PostgresFeatureReader:
             return {}
 
         # Build a single UNION ALL query across all feature tables (avoid N+1).
-        # to_jsonb serialises each heterogeneous row into a uniform shape.
-        parts: list[str] = []
-        params: dict[str, Any] = {"srn": str(record_srn)}
-        for i, row in enumerate(catalog_rows):
-            quoted = _quote_ident(row["pg_table"])
-            hook_param = f"hook_{i}"
-            params[hook_param] = row["hook_name"]
-            parts.append(  # noqa: S608
-                f"SELECT :{hook_param} AS hook_name, to_jsonb(t) AS row_data "
-                f"FROM features.{quoted} t "
-                f"WHERE t.record_srn = :srn"
+        # Use jsonb_build_object with explicit data columns to exclude auto columns
+        # at the SQL level.
+        parts = []
+        for row in catalog_rows:
+            schema = FeatureSchema.model_validate(row["feature_schema"])
+            ft = build_feature_table(row["pg_table"], schema)
+            dcols = data_columns(ft)
+
+            # Build jsonb_build_object('col1', col1, 'col2', col2, ...)
+            jsonb_args: list[Any] = []
+            for col in dcols:
+                jsonb_args.extend([literal(col.key), col])
+
+            row_data_expr = (
+                func.jsonb_build_object(*jsonb_args) if jsonb_args else func.jsonb_build_object()
             )
-        combined = text(" UNION ALL ".join(parts))
-        feat_result = await self.session.execute(combined, params)
+
+            parts.append(
+                select(
+                    literal(row["hook_name"]).label("hook_name"),
+                    row_data_expr.label("row_data"),
+                )
+                .select_from(ft)
+                .where(ft.c.record_srn == str(record_srn))
+            )
+
+        combined = union_all(*parts)
+        feat_result = await self.session.execute(combined)
 
         features: dict[str, list[dict[str, Any]]] = {}
         for feat_row in feat_result.mappings():
             hook_name: str = feat_row["hook_name"]
             row_data: dict[str, Any] = feat_row["row_data"]
-            filtered = {
-                k: v
-                for k, v in row_data.items()
-                if k not in self.AUTO_COLUMNS and k != "record_srn"
-            }
-            features.setdefault(hook_name, []).append(filtered)
+            features.setdefault(hook_name, []).append(row_data)
 
         return features

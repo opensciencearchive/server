@@ -6,20 +6,16 @@ import logging
 from typing import Any
 
 from sqlalchemy import (
-    Column,
     Date,
     Float,
-    Integer,
-    MetaData,
     String,
-    Table,
     and_,
     cast,
     func,
     literal,
     or_,
     select,
-    text,
+    true,
     union_all,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -37,6 +33,11 @@ from osa.domain.discovery.model.value import (
 from osa.domain.semantics.model.value import FieldType
 from osa.domain.shared.error import ValidationError
 from osa.domain.shared.model.srn import RecordSRN
+from osa.infrastructure.persistence.feature_table import (
+    FeatureSchema,
+    build_feature_table,
+    data_columns,
+)
 from osa.infrastructure.persistence.tables import (
     feature_tables_table,
     records_table,
@@ -51,9 +52,9 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _quote_ident(name: str) -> str:
-    """Double-quote a SQL identifier, escaping embedded double-quotes."""
-    return '"' + name.replace('"', '""') + '"'
+def _to_column_info(schema: FeatureSchema) -> list[ColumnInfo]:
+    """Map typed FeatureSchema columns to API-facing ColumnInfo list."""
+    return [ColumnInfo(name=c.name, type=c.json_type, required=c.required) for c in schema.columns]
 
 
 class PostgresFieldDefinitionReader:
@@ -152,7 +153,7 @@ class PostgresDiscoveryReadStore:
                     )
                 )
 
-        where_clause = and_(*conditions) if conditions else text("TRUE")
+        where_clause = and_(*conditions) if conditions else true()
 
         stmt = (
             select(t.c.srn, t.c.published_at, t.c.metadata)
@@ -184,39 +185,33 @@ class PostgresDiscoveryReadStore:
         if not catalog_rows:
             return []
 
-        # Fetch all record counts in a single UNION ALL query (avoid N+1)
-        count_parts = [
-            select(
-                literal(row["hook_name"]).label("hook_name"),
-                func.count(func.distinct(text("record_srn"))).label("cnt"),
-            ).select_from(text(f"features.{_quote_ident(row['pg_table'])}"))
+        # Parse schemas at the boundary
+        parsed = [
+            (row["hook_name"], FeatureSchema.model_validate(row["feature_schema"]), row["pg_table"])
             for row in catalog_rows
         ]
+
+        # Fetch all record counts in a single UNION ALL query (avoid N+1)
+        count_parts = []
+        for hook_name, schema, pg_table in parsed:
+            ft = build_feature_table(pg_table, schema)
+            count_parts.append(
+                select(
+                    literal(hook_name).label("hook_name"),
+                    func.count(func.distinct(ft.c.record_srn)).label("cnt"),
+                ).select_from(ft)
+            )
         counts_result = await self.session.execute(union_all(*count_parts))
         counts_by_hook = {r["hook_name"]: r["cnt"] for r in counts_result.mappings()}
 
-        entries: list[FeatureCatalogEntry] = []
-        for row in catalog_rows:
-            schema_data = row["feature_schema"]
-            columns_raw = schema_data.get("columns", []) if isinstance(schema_data, dict) else []
-            columns = [
-                ColumnInfo(
-                    name=col["name"],
-                    type=col.get("json_type", "string"),
-                    required=col.get("required", False),
-                )
-                for col in columns_raw
-            ]
-
-            entries.append(
-                FeatureCatalogEntry(
-                    hook_name=row["hook_name"],
-                    columns=columns,
-                    record_count=counts_by_hook.get(row["hook_name"], 0),
-                )
+        return [
+            FeatureCatalogEntry(
+                hook_name=hook_name,
+                columns=_to_column_info(schema),
+                record_count=counts_by_hook.get(hook_name, 0),
             )
-
-        return entries
+            for hook_name, schema, _pg_table in parsed
+        ]
 
     async def get_feature_table_schema(self, hook_name: str) -> FeatureCatalogEntry | None:
         """Look up a single feature table's schema by hook name."""
@@ -229,20 +224,10 @@ class PostgresDiscoveryReadStore:
         if row is None:
             return None
 
-        schema_data = row["feature_schema"]
-        columns_raw = schema_data.get("columns", []) if isinstance(schema_data, dict) else []
-        columns = [
-            ColumnInfo(
-                name=col["name"],
-                type=col.get("json_type", "string"),
-                required=col.get("required", False),
-            )
-            for col in columns_raw
-        ]
-
+        schema = FeatureSchema.model_validate(row["feature_schema"])
         return FeatureCatalogEntry(
             hook_name=row["hook_name"],
-            columns=columns,
+            columns=_to_column_info(schema),
             record_count=0,
         )
 
@@ -267,37 +252,9 @@ class PostgresDiscoveryReadStore:
         if pg_row is None:
             return []
         pg_table: str = pg_row["pg_table"]
-        feature_schema: dict = pg_row["feature_schema"]
+        schema = FeatureSchema.model_validate(pg_row["feature_schema"])
 
-        # Build Table with full column list from schema using local MetaData
-        from osa.domain.shared.model.hook import ColumnDef
-        from osa.infrastructure.persistence.column_mapper import map_column
-
-        schema_columns = (
-            feature_schema.get("columns", []) if isinstance(feature_schema, dict) else []
-        )
-        data_columns = [
-            map_column(
-                ColumnDef(
-                    name=col["name"],
-                    json_type=col.get("json_type", "string"),
-                    format=col.get("format"),
-                    required=col.get("required", False),
-                )
-            )
-            for col in schema_columns
-        ]
-
-        local_meta = MetaData()
-        ft = Table(
-            pg_table,
-            local_meta,
-            Column("id", Integer, primary_key=True),
-            Column("record_srn", String),
-            Column("created_at", String),
-            *data_columns,
-            schema="features",
-        )
+        ft = build_feature_table(pg_table, schema)
 
         conditions: list[Any] = []
 
@@ -349,19 +306,10 @@ class PostgresDiscoveryReadStore:
                     )
                 )
 
-        where_clause = and_(*conditions) if conditions else text("TRUE")
+        where_clause = and_(*conditions) if conditions else true()
 
-        auto_cols = {"id", "created_at"}
         stmt = (
-            select(
-                ft.c.id,
-                ft.c.record_srn,
-                *[
-                    c
-                    for c in ft.columns
-                    if c.key not in auto_cols and c.key not in ("id", "record_srn")
-                ],
-            )
+            select(ft.c.id, ft.c.record_srn, *data_columns(ft))
             .where(where_clause)
             .order_by(*order_clauses)
             .limit(limit)
@@ -373,7 +321,6 @@ class PostgresDiscoveryReadStore:
             row_dict = dict(row)
             row_id = row_dict.pop("id")
             rsrn = RecordSRN.parse(row_dict.pop("record_srn"))
-            row_dict.pop("created_at", None)
             feature_rows.append(FeatureRow(row_id=row_id, record_srn=rsrn, data=row_dict))
 
         return feature_rows

@@ -10,10 +10,8 @@ from osa.domain.shared.model.hook import (
     OciConfig,
     TableFeatureSpec,
 )
-from osa.infrastructure.persistence.feature_store import (
-    FEATURES_SCHEMA,
-    PostgresFeatureStore,
-)
+from osa.infrastructure.persistence.feature_store import PostgresFeatureStore
+from osa.infrastructure.persistence.feature_table import FEATURES_SCHEMA
 
 
 def _make_hook(
