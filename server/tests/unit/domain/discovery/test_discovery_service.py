@@ -161,7 +161,7 @@ class TestSearchRecordsDelegation:
         assert len(call_kwargs.kwargs["filters"]) == 1
         assert call_kwargs.kwargs["q"] is None
         assert call_kwargs.kwargs["sort"] == "published_at"
-        assert call_kwargs.kwargs["limit"] == 20
+        assert call_kwargs.kwargs["limit"] == 21  # N+1 trick
 
     async def test_extracts_text_fields_for_q(
         self, service: DiscoveryService, mock_read_store: AsyncMock
@@ -218,8 +218,9 @@ class TestSearchRecordsDelegation:
     ) -> None:
         srn = RecordSRN.parse("urn:osa:localhost:rec:abc@1")
         ts = datetime(2026, 1, 1, tzinfo=UTC)
+        # Return limit+1 rows so the service detects has_more=True
         mock_read_store.search_records.return_value = [
-            RecordSummary(srn=srn, published_at=ts, metadata={"title": "Test"})
+            RecordSummary(srn=srn, published_at=ts, metadata={"title": f"r{i}"}) for i in range(2)
         ]
 
         result = await service.search_records(
@@ -233,6 +234,7 @@ class TestSearchRecordsDelegation:
 
         assert result.has_more is True
         assert result.cursor is not None
+        assert len(result.results) == 1  # trimmed back to limit
 
         from osa.domain.discovery.model.value import decode_cursor
 
@@ -255,6 +257,70 @@ class TestSearchRecordsDelegation:
 
         assert result.cursor is None
         assert result.has_more is False
+
+
+class TestSearchRecordsPagination:
+    async def test_has_more_false_when_exactly_limit_rows(
+        self, service: DiscoveryService, mock_read_store: AsyncMock
+    ) -> None:
+        """Exactly limit rows should NOT report has_more (no false positive)."""
+        srn = RecordSRN.parse("urn:osa:localhost:rec:abc@1")
+        ts = datetime(2026, 1, 1, tzinfo=UTC)
+        mock_read_store.search_records.return_value = [
+            RecordSummary(srn=srn, published_at=ts, metadata={"title": f"r{i}"}) for i in range(3)
+        ]
+
+        result = await service.search_records(
+            filters=[],
+            q=None,
+            sort="published_at",
+            order=SortOrder.DESC,
+            cursor=None,
+            limit=3,
+        )
+
+        assert result.has_more is False
+        assert result.cursor is None
+        assert len(result.results) == 3
+
+    async def test_has_more_true_when_more_than_limit_rows(
+        self, service: DiscoveryService, mock_read_store: AsyncMock
+    ) -> None:
+        """Adapter returning limit+1 rows signals more pages exist."""
+        srn = RecordSRN.parse("urn:osa:localhost:rec:abc@1")
+        ts = datetime(2026, 1, 1, tzinfo=UTC)
+        mock_read_store.search_records.return_value = [
+            RecordSummary(srn=srn, published_at=ts, metadata={"title": f"r{i}"}) for i in range(4)
+        ]
+
+        result = await service.search_records(
+            filters=[],
+            q=None,
+            sort="published_at",
+            order=SortOrder.DESC,
+            cursor=None,
+            limit=3,
+        )
+
+        assert result.has_more is True
+        assert result.cursor is not None
+        assert len(result.results) == 3  # trimmed back to limit
+
+    async def test_passes_limit_plus_one_to_read_store(
+        self, service: DiscoveryService, mock_read_store: AsyncMock
+    ) -> None:
+        """Service should fetch one extra row to detect more pages."""
+        await service.search_records(
+            filters=[],
+            q=None,
+            sort="published_at",
+            order=SortOrder.DESC,
+            cursor=None,
+            limit=20,
+        )
+
+        call_kwargs = mock_read_store.search_records.call_args
+        assert call_kwargs.kwargs["limit"] == 21
 
 
 class TestSearchRecordsFieldTypes:
@@ -288,8 +354,10 @@ class TestFeatureCursorEncoding:
             columns=[ColumnInfo(name="score", type="number", required=True)],
             record_count=0,
         )
+        # Return limit+1 rows so the service detects has_more=True
         mock_read_store.search_features.return_value = [
-            FeatureRow(row_id=42, record_srn=srn, data={"score": 7.66})
+            FeatureRow(row_id=42, record_srn=srn, data={"score": 7.66}),
+            FeatureRow(row_id=43, record_srn=srn, data={"score": 6.0}),
         ]
 
         service = DiscoveryService(read_store=mock_read_store, field_reader=mock_field_reader)
@@ -305,6 +373,7 @@ class TestFeatureCursorEncoding:
 
         assert result.has_more is True
         assert result.cursor is not None
+        assert len(result.rows) == 1
         decoded = decode_cursor(result.cursor)
         assert decoded["id"] == 42
         assert decoded["s"] == 7.66
@@ -320,8 +389,10 @@ class TestFeatureCursorEncoding:
             columns=[ColumnInfo(name="score", type="number", required=True)],
             record_count=0,
         )
+        # Return limit+1 rows so the service detects has_more=True
         mock_read_store.search_features.return_value = [
-            FeatureRow(row_id=99, record_srn=srn, data={"score": 5.0})
+            FeatureRow(row_id=99, record_srn=srn, data={"score": 5.0}),
+            FeatureRow(row_id=98, record_srn=srn, data={"score": 4.0}),
         ]
 
         service = DiscoveryService(read_store=mock_read_store, field_reader=mock_field_reader)
@@ -337,6 +408,7 @@ class TestFeatureCursorEncoding:
 
         assert result.has_more is True
         assert result.cursor is not None
+        assert len(result.rows) == 1
         decoded = decode_cursor(result.cursor)
         # When sort is "id", sort_val should be the row_id itself
         assert decoded["s"] == 99

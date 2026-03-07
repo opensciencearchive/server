@@ -94,11 +94,12 @@ class DiscoveryService(Service):
             sort=sort,
             order=order,
             cursor=decoded_cursor,
-            limit=limit,
+            limit=limit + 1,
             field_types=field_map,
         )
 
-        has_more = len(results) == limit
+        has_more = len(results) > limit
+        results = results[:limit]
         next_cursor = None
         if has_more and results:
             last = results[-1]
@@ -189,10 +190,11 @@ class DiscoveryService(Service):
             sort=sort,
             order=order,
             cursor=decoded_cursor,
-            limit=limit,
+            limit=limit + 1,
         )
 
-        has_more = len(rows) == limit
+        has_more = len(rows) > limit
+        rows = rows[:limit]
         next_cursor = None
         if has_more and rows:
             last = rows[-1]

@@ -216,3 +216,68 @@ class TestDiscoveryServiceSearchFeatures:
         call_kwargs = mock_read_store.search_features.call_args
         assert call_kwargs.kwargs["hook_name"] == "detect_pockets"
         assert len(call_kwargs.kwargs["filters"]) == 1
+
+
+class TestSearchFeaturesPagination:
+    async def test_has_more_false_when_exactly_limit_rows(
+        self, service: DiscoveryService, mock_read_store: AsyncMock
+    ) -> None:
+        """Exactly limit rows should NOT report has_more (no false positive)."""
+        srn = RecordSRN.parse("urn:osa:localhost:rec:abc@1")
+        mock_read_store.search_features.return_value = [
+            FeatureRow(row_id=i, record_srn=srn, data={"score": float(i)}) for i in range(3)
+        ]
+
+        result = await service.search_features(
+            hook_name="detect_pockets",
+            filters=[],
+            record_srn=None,
+            sort="score",
+            order=SortOrder.DESC,
+            cursor=None,
+            limit=3,
+        )
+
+        assert result.has_more is False
+        assert result.cursor is None
+        assert len(result.rows) == 3
+
+    async def test_has_more_true_when_more_than_limit_rows(
+        self, service: DiscoveryService, mock_read_store: AsyncMock
+    ) -> None:
+        """Adapter returning limit+1 rows signals more pages exist."""
+        srn = RecordSRN.parse("urn:osa:localhost:rec:abc@1")
+        mock_read_store.search_features.return_value = [
+            FeatureRow(row_id=i, record_srn=srn, data={"score": float(i)}) for i in range(4)
+        ]
+
+        result = await service.search_features(
+            hook_name="detect_pockets",
+            filters=[],
+            record_srn=None,
+            sort="score",
+            order=SortOrder.DESC,
+            cursor=None,
+            limit=3,
+        )
+
+        assert result.has_more is True
+        assert result.cursor is not None
+        assert len(result.rows) == 3
+
+    async def test_passes_limit_plus_one_to_read_store(
+        self, service: DiscoveryService, mock_read_store: AsyncMock
+    ) -> None:
+        """Service should fetch one extra row to detect more pages."""
+        await service.search_features(
+            hook_name="detect_pockets",
+            filters=[],
+            record_srn=None,
+            sort="score",
+            order=SortOrder.DESC,
+            cursor=None,
+            limit=50,
+        )
+
+        call_kwargs = mock_read_store.search_features.call_args
+        assert call_kwargs.kwargs["limit"] == 51
