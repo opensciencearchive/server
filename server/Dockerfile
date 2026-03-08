@@ -26,8 +26,6 @@ COPY migrations/ ./migrations/
 COPY alembic.ini ./
 COPY entrypoint.sh ./
 COPY README.md ./
-COPY osa.yaml ./config.yaml
-
 # Install the project
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
@@ -56,7 +54,6 @@ COPY --from=builder --chown=appuser:appuser /app/osa /app/osa
 COPY --from=builder --chown=appuser:appuser /app/sources /app/sources
 COPY --from=builder --chown=appuser:appuser /app/migrations /app/migrations
 COPY --from=builder --chown=appuser:appuser /app/alembic.ini /app/alembic.ini
-COPY --from=builder --chown=appuser:appuser /app/config.yaml /app/config.yaml
 
 # Ensure the virtualenv is used
 ENV PATH="/app/.venv/bin:$PATH"
@@ -64,7 +61,6 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Create data directory
 RUN mkdir -p /data && chown appuser:appuser /data
 ENV OSA_DATA_DIR=/data
-ENV OSA_CONFIG_FILE=/app/config.yaml
 
 COPY --from=builder --chown=appuser:appuser /app/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
