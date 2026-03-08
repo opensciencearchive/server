@@ -1,6 +1,6 @@
 # OSA Server
 
-Python backend for Open Science Archive, built with FastAPI.
+Backend for Open Science Archive.
 
 ## Development
 
