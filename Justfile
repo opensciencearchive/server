@@ -103,6 +103,12 @@ db-down:
 db-connect:
     docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml exec db psql -U postgres -d osa
 
+# === Image ===
+
+# Print the current image tag (based on git sha)
+image-tag:
+    @echo "ghcr.io/$(gh repo view --json owner,name -q '.owner.login')/osa:sha-$(git rev-parse --short=7 HEAD)"
+
 # === Maintenance ===
 
 # Clean up Docker resources (volumes, images, etc.)
