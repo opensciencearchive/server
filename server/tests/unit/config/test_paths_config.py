@@ -48,6 +48,34 @@ class TestDatabaseUrlDerivation:
         # Should use explicit URL, not derived
         assert config.database.url == "postgresql+asyncpg://user:pass@db:5432/osa"
 
+    @pytest.mark.parametrize(
+        "input_url",
+        [
+            "postgresql://user:pass@db:5432/osa",
+            "postgres://user:pass@db:5432/osa",
+            "postgresql+psycopg2://user:pass@db:5432/osa",
+            "postgresql+psycopg://user:pass@db:5432/osa",
+            "postgresql+pg8000://user:pass@db:5432/osa",
+        ],
+    )
+    def test_pg_url_normalized_to_asyncpg(
+        self, monkeypatch: pytest.MonkeyPatch, input_url: str
+    ) -> None:
+        """Any PostgreSQL URL variant should be normalized to asyncpg."""
+        monkeypatch.setenv("OSA_DATABASE__URL", input_url)
+
+        config = Config()
+
+        assert config.database.url == "postgresql+asyncpg://user:pass@db:5432/osa"
+
+    def test_asyncpg_url_unchanged(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A URL already using asyncpg should not be modified."""
+        monkeypatch.setenv("OSA_DATABASE__URL", "postgresql+asyncpg://user:pass@db:5432/osa")
+
+        config = Config()
+
+        assert config.database.url == "postgresql+asyncpg://user:pass@db:5432/osa"
+
     def test_database_url_preserves_other_settings(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Database URL derivation should preserve echo and auto_migrate settings."""
         monkeypatch.setenv("OSA_DATA_DIR", "/data")

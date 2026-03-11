@@ -14,8 +14,19 @@ config = context.config
 # Convert async driver (asyncpg/aiosqlite) to sync driver for alembic
 database_url = os.environ.get("OSA_DATABASE__URL")
 if database_url:
-    # Alembic runs synchronously, so convert async drivers to sync
-    sync_url = database_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+    # Normalize any PostgreSQL variant to sync psycopg2 for Alembic
+    sync_url = database_url
+    for prefix in (
+        "postgresql+asyncpg://",
+        "postgresql+psycopg://",
+        "postgresql+pg8000://",
+        "postgresql://",
+        "postgres://",
+    ):
+        if sync_url.startswith(prefix):
+            sync_url = "postgresql+psycopg2://" + sync_url[len(prefix) :]
+            break
+    # Handle SQLite async driver
     sync_url = sync_url.replace("sqlite+aiosqlite://", "sqlite://")
     config.set_main_option("sqlalchemy.url", sync_url)
 else:

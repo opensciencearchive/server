@@ -157,6 +157,29 @@ class AuthConfig(BaseModel):
     base_role: str | None = None  # Implicit role for all authenticated users (e.g., "DEPOSITOR")
 
 
+_PG_PREFIXES = (
+    "postgresql://",
+    "postgres://",
+    "postgresql+psycopg2://",
+    "postgresql+psycopg://",
+    "postgresql+pg8000://",
+)
+
+
+def _normalize_pg_url(url: str) -> str:
+    """Normalize any PostgreSQL URL to use the asyncpg driver.
+
+    Cloud providers (CloudNativePG, Supabase, etc.) emit standard
+    ``postgresql://`` URIs. SQLAlchemy's async engine requires the
+    ``postgresql+asyncpg://`` scheme. This converts any recognized
+    PostgreSQL scheme to the async variant.
+    """
+    for prefix in _PG_PREFIXES:
+        if url.startswith(prefix):
+            return "postgresql+asyncpg://" + url[len(prefix) :]
+    return url
+
+
 class Config(BaseSettings):
     # These are BaseModel, so env_nested_delimiter handles their env vars
     server: Server = Server()
@@ -183,6 +206,10 @@ class Config(BaseSettings):
         OSAPaths reads OSA_DATA_DIR directly from environment.
         This allows OSA_DATA_DIR to control the database location while still
         allowing explicit OSA_DATABASE__URL override.
+
+        When a PostgreSQL URL is provided, normalizes the driver to asyncpg
+        since the app uses async SQLAlchemy throughout. This handles URLs from
+        providers like CloudNativePG that emit standard postgresql:// URIs.
         """
         if not self.database.url:
             # URL is sentinel (empty), derive from OSAPaths
@@ -192,6 +219,14 @@ class Config(BaseSettings):
                 echo=self.database.echo,
                 auto_migrate=self.database.auto_migrate,
             )
+        else:
+            normalized = _normalize_pg_url(self.database.url)
+            if normalized != self.database.url:
+                self.database = DatabaseConfig(
+                    url=normalized,
+                    echo=self.database.echo,
+                    auto_migrate=self.database.auto_migrate,
+                )
         return self
 
     @classmethod
