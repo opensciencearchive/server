@@ -51,12 +51,20 @@ def reject_command(*, reason: str) -> None:
         f.write(json.dumps(entry) + "\n")
 
 
+def _parse_flag(args: list[str], flag: str) -> str | None:
+    """Extract the value of a --flag from args, or None if absent."""
+    for i, arg in enumerate(args):
+        if arg == flag and i + 1 < len(args):
+            return args[i + 1]
+    return None
+
+
 def app() -> None:
     """CLI entry point for the `osa` command."""
     args = sys.argv[1:]
     if not args:
         print("Usage: osa <command> [options]")
-        print("Commands: meta, emit, progress, reject, deploy")
+        print("Commands: meta, emit, progress, reject, deploy, login, logout, link")
         sys.exit(1)
 
     command = args[0]
@@ -94,12 +102,47 @@ def app() -> None:
         reason = " ".join(args[1:])
         reject_command(reason=reason)
 
+    elif command == "link":
+        from osa.cli.link import write_link
+
+        server_url = _parse_flag(args, "--server")
+        if not server_url:
+            print("Usage: osa link --server <url>", file=sys.stderr)
+            sys.exit(1)
+
+        config_path = write_link(server_url)
+        print(f"Linked to {server_url.rstrip('/')}")
+        print(f"Config written to {config_path}")
+
+    elif command == "login":
+        import logging
+
+        from osa.cli.link import resolve_server
+        from osa.cli.login import login
+
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+        server_url = resolve_server(flag=_parse_flag(args, "--server"))
+        success = login(server_url)
+        if not success:
+            sys.exit(1)
+
+    elif command == "logout":
+        from osa.cli.link import resolve_server
+        from osa.cli.logout import logout
+
+        server_url = resolve_server(flag=_parse_flag(args, "--server"))
+        logout(server_url)
+
     elif command == "deploy":
         import importlib
         import importlib.metadata
         import logging
 
         from osa.cli.deploy import deploy
+        from osa.cli.link import resolve_server
 
         logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -107,31 +150,20 @@ def app() -> None:
         for ep in importlib.metadata.entry_points(group="osa.conventions"):
             importlib.import_module(ep.value)
 
-        # Parse --server and --token flags
-        server_url: str | None = None
-        token: str | None = None
-        i = 1
-        while i < len(args):
-            if args[i] == "--server" and i + 1 < len(args):
-                server_url = args[i + 1]
-                i += 2
-            elif args[i] == "--token" and i + 1 < len(args):
-                token = args[i + 1]
-                i += 2
-            else:
-                i += 1
+        server_url = resolve_server(flag=_parse_flag(args, "--server"))
+        token = _parse_flag(args, "--token")
 
-        if not server_url:
-            server_url = os.environ.get("OSA_SERVER")
+        # Resolve token: --token flag → OSA_TOKEN env → stored credentials
         if not token:
-            token = os.environ.get("OSA_TOKEN")
+            from osa.cli.credentials import resolve_token
 
-        if not server_url:
-            print(
-                "Usage: osa deploy --server <url> [--token <jwt>]",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+            token = resolve_token(server_url)
+            if token is None:
+                print(
+                    "Error: Not authenticated. Run `osa login` first.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
         result = deploy(server=server_url, token=token)
         print(json.dumps(result, indent=2, default=str))

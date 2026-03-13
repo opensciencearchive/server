@@ -10,6 +10,10 @@ from starlette.requests import Request
 
 from osa.config import Config
 from osa.domain.auth.command.assign_role import AssignRoleHandler
+from osa.domain.auth.command.device import (
+    InitiateDeviceAuthHandler,
+    PollDeviceTokenHandler,
+)
 from osa.domain.auth.command.login import (
     CompleteOAuthHandler,
     InitiateLoginHandler,
@@ -21,6 +25,7 @@ from osa.domain.auth.model.principal import Principal
 from osa.domain.auth.model.role import Role
 from osa.domain.auth.model.value import CurrentUser, ProviderIdentity, UserId
 from osa.domain.auth.port.repository import (
+    DeviceAuthorizationRepository,
     LinkedAccountRepository,
     RefreshTokenRepository,
     UserRepository,
@@ -49,6 +54,8 @@ class AuthProvider(Provider):
     logout_handler = provide(LogoutHandler, scope=Scope.UOW)
     assign_role_handler = provide(AssignRoleHandler, scope=Scope.UOW)
     revoke_role_handler = provide(RevokeRoleHandler, scope=Scope.UOW)
+    initiate_device_auth_handler = provide(InitiateDeviceAuthHandler, scope=Scope.UOW)
+    poll_device_token_handler = provide(PollDeviceTokenHandler, scope=Scope.UOW)
 
     # Query Handlers
     get_user_roles_handler = provide(GetUserRolesHandler, scope=Scope.UOW)
@@ -69,6 +76,7 @@ class AuthProvider(Provider):
         linked_account_repo: LinkedAccountRepository,
         refresh_token_repo: RefreshTokenRepository,
         role_repo: RoleAssignmentRepository,
+        device_auth_repo: DeviceAuthorizationRepository,
         token_service: TokenService,
         outbox: Outbox,
     ) -> AuthService:
@@ -80,6 +88,7 @@ class AuthProvider(Provider):
             _linked_account_repo=linked_account_repo,
             _refresh_token_repo=refresh_token_repo,
             _role_repo=role_repo,
+            _device_auth_repo=device_auth_repo,
             _token_service=token_service,
             _outbox=outbox,
             _base_role=base_role,

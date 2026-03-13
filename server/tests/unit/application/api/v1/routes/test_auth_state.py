@@ -79,7 +79,9 @@ class TestSignedStateVerification:
         result = token_service.verify_oauth_state(state)
 
         assert result is not None
-        assert result == (redirect_uri, provider)
+        assert result.redirect_uri == redirect_uri
+        assert result.provider == provider
+        assert result.device_code is None
 
     def test_rejects_tampered_payload(self, token_service: TokenService):
         """Should reject state with tampered payload."""
@@ -154,4 +156,5 @@ class TestSignedStateVerification:
         result = token_service.verify_oauth_state(state)
 
         assert result is not None
-        assert result == (redirect_uri, provider)
+        assert result.redirect_uri == redirect_uri
+        assert result.provider == provider

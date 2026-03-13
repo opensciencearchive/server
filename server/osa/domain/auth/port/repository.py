@@ -1,8 +1,10 @@
 """Repository ports for the auth domain."""
 
 from abc import abstractmethod
+from datetime import datetime
 from typing import Protocol
 
+from osa.domain.auth.model.device_authorization import DeviceAuthorization
 from osa.domain.auth.model.linked_account import LinkedAccount
 from osa.domain.auth.model.token import RefreshToken
 from osa.domain.auth.model.user import User
@@ -10,6 +12,7 @@ from osa.domain.auth.model.value import (
     IdentityId,
     RefreshTokenId,
     TokenFamilyId,
+    UserCode,
     UserId,
 )
 from osa.domain.shared.port import Port
@@ -85,4 +88,28 @@ class RefreshTokenRepository(Port, Protocol):
     @abstractmethod
     async def revoke_family(self, family_id: TokenFamilyId) -> int:
         """Revoke all tokens in a family. Returns count of revoked tokens."""
+        ...
+
+
+class DeviceAuthorizationRepository(Port, Protocol):
+    """Repository for DeviceAuthorization entity persistence."""
+
+    @abstractmethod
+    async def save(self, auth: DeviceAuthorization) -> None:
+        """Persist a device authorization (create or update)."""
+        ...
+
+    @abstractmethod
+    async def get_by_device_code(self, device_code: str) -> DeviceAuthorization | None:
+        """Look up a device authorization by device code."""
+        ...
+
+    @abstractmethod
+    async def get_by_user_code(self, user_code: UserCode) -> DeviceAuthorization | None:
+        """Look up a device authorization by normalized user code."""
+        ...
+
+    @abstractmethod
+    async def delete_expired_before(self, cutoff: datetime) -> int:
+        """Remove expired authorizations before cutoff, return count deleted."""
         ...

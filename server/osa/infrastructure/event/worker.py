@@ -219,6 +219,7 @@ class WorkerPool:
         self._workers: list[Worker] = []
         self._stale_claim_interval = stale_claim_interval
         self._stale_claim_task: asyncio.Task | None = None
+        self._device_auth_cleanup_task: asyncio.Task | None = None
         self._shutdown = False
         self._scheduler: AsyncScheduler | None = None
         self._exit_stack: AsyncExitStack | None = None
@@ -299,6 +300,11 @@ class WorkerPool:
                 self._run_stale_claim_cleanup(), name="stale-claim-cleanup"
             )
 
+        # Start device authorization cleanup task (every 5 minutes)
+        self._device_auth_cleanup_task = asyncio.create_task(
+            self._run_device_auth_cleanup(), name="device-auth-cleanup"
+        )
+
         logger.info(
             f"WorkerPool started with {len(self._workers)} workers, {len(schedules)} schedules"
         )
@@ -347,6 +353,13 @@ class WorkerPool:
             self._stale_claim_task.cancel()
             try:
                 await self._stale_claim_task
+            except asyncio.CancelledError:
+                pass
+
+        if self._device_auth_cleanup_task and not self._device_auth_cleanup_task.done():
+            self._device_auth_cleanup_task.cancel()
+            try:
+                await self._device_auth_cleanup_task
             except asyncio.CancelledError:
                 pass
 
@@ -417,3 +430,28 @@ class WorkerPool:
                 break
             except Exception as e:
                 logger.error(f"Stale claim cleanup failed: {e}")
+
+    async def _run_device_auth_cleanup(self) -> None:
+        """Periodically delete expired device authorizations."""
+        from datetime import UTC, datetime
+
+        from osa.domain.auth.port.repository import DeviceAuthorizationRepository
+
+        interval = 300.0  # 5 minutes
+        while not self._shutdown:
+            try:
+                await asyncio.sleep(interval)
+
+                if self._shutdown or self._container is None:
+                    break
+
+                async with self._container(scope=Scope.UOW, context={Identity: System()}) as scope:
+                    repo = await scope.get(DeviceAuthorizationRepository)
+                    count = await repo.delete_expired_before(datetime.now(UTC))
+                    if count > 0:
+                        logger.info(f"Cleaned up {count} expired device authorizations")
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Device auth cleanup failed: {e}")

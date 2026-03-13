@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
-from pydantic import RootModel, field_validator
+from pydantic import BaseModel, RootModel, field_validator, model_validator
 
 
 class UserId(RootModel[UUID]):
@@ -92,6 +92,60 @@ class CurrentUser:
 
     user_id: "UserId"
     identity: ProviderIdentity
+
+
+class DeviceAuthorizationId(RootModel[UUID]):
+    """Unique identifier for a DeviceAuthorization."""
+
+    @classmethod
+    def generate(cls) -> "DeviceAuthorizationId":
+        return cls(uuid4())
+
+    def __str__(self) -> str:
+        return str(self.root)
+
+    def __hash__(self) -> int:
+        return hash(self.root)
+
+
+# Characters that avoid vowels (no profanity) and ambiguous chars (0/O, 1/I/L, 5/S)
+SAFE_CHARS = "BCDFGHJKLMNPQRSTVWXZ2346789"
+
+
+class UserCode(RootModel[str]):
+    """Normalized 8-character user code for device flow verification.
+
+    Stored/compared as 8 uppercase chars without hyphen. Displayed as XXXX-XXXX.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize(cls, v: str) -> str:
+        if isinstance(v, cls):
+            return v.root
+        cleaned = v.replace("-", "").replace(" ", "").upper()
+        if len(cleaned) != 8 or not all(c in SAFE_CHARS for c in cleaned):
+            raise ValueError("Invalid user code format")
+        return cleaned
+
+    @property
+    def display(self) -> str:
+        """Formatted for humans: XXXX-XXXX."""
+        return f"{self.root[:4]}-{self.root[4:]}"
+
+    def __str__(self) -> str:
+        return self.root
+
+    def __hash__(self) -> int:
+        return hash(self.root)
+
+
+class OAuthStateData(BaseModel):
+    """Structured data extracted from a verified OAuth state token."""
+
+    redirect_uri: str
+    provider: str
+    device_code: str | None = None
 
 
 class OrcidId(RootModel[str]):

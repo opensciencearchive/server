@@ -3,24 +3,33 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import delete, insert, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from osa.domain.auth.model.device_authorization import (
+    DeviceAuthorization,
+    DeviceAuthorizationStatus,
+)
 from osa.domain.auth.model.linked_account import LinkedAccount
 from osa.domain.auth.model.token import RefreshToken
 from osa.domain.auth.model.user import User
 from osa.domain.auth.model.value import (
+    DeviceAuthorizationId,
     IdentityId,
     RefreshTokenId,
     TokenFamilyId,
+    UserCode,
     UserId,
 )
 from osa.domain.auth.port.repository import (
+    DeviceAuthorizationRepository,
     LinkedAccountRepository,
     RefreshTokenRepository,
     UserRepository,
 )
 from osa.infrastructure.persistence.tables import (
+    device_authorizations_table,
     identities_table,
     refresh_tokens_table,
     users_table,
@@ -216,6 +225,98 @@ class PostgresRefreshTokenRepository(RefreshTokenRepository):
                 refresh_tokens_table.c.revoked_at.is_(None),
             )
             .values(revoked_at=now)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount
+
+
+# ============================================================================
+# DeviceAuthorization repository
+# ============================================================================
+
+
+def _row_to_device_auth(row: dict) -> DeviceAuthorization:
+    """Convert a database row to a DeviceAuthorization model."""
+    user_id = UserId(UUID(row["user_id"])) if row["user_id"] else None
+    return DeviceAuthorization(
+        id=DeviceAuthorizationId(UUID(row["id"])),
+        device_code=row["device_code"],
+        user_code=UserCode(row["user_code"]),
+        status=DeviceAuthorizationStatus(row["status"]),
+        user_id=user_id,
+        expires_at=row["expires_at"],
+        created_at=row["created_at"],
+    )
+
+
+def _device_auth_to_dict(auth: DeviceAuthorization) -> dict:
+    """Convert a DeviceAuthorization model to a database row dict."""
+    return {
+        "id": str(auth.id),
+        "device_code": auth.device_code,
+        "user_code": str(auth.user_code),
+        "status": auth.status.value,
+        "user_id": str(auth.user_id) if auth.user_id else None,
+        "expires_at": auth.expires_at,
+        "created_at": auth.created_at,
+    }
+
+
+class PostgresDeviceAuthorizationRepository(DeviceAuthorizationRepository):
+    """PostgreSQL implementation of DeviceAuthorizationRepository."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def save(self, auth: DeviceAuthorization) -> None:
+        from osa.domain.shared.error import ConflictError
+
+        auth_dict = _device_auth_to_dict(auth)
+        # Check if exists
+        stmt = select(device_authorizations_table).where(
+            device_authorizations_table.c.id == str(auth.id)
+        )
+        result = await self.session.execute(stmt)
+        existing = result.mappings().first()
+
+        if existing:
+            stmt = (
+                update(device_authorizations_table)
+                .where(device_authorizations_table.c.id == str(auth.id))
+                .values(**auth_dict)
+            )
+        else:
+            stmt = insert(device_authorizations_table).values(**auth_dict)
+
+        try:
+            async with self.session.begin_nested():
+                await self.session.execute(stmt)
+        except IntegrityError as e:
+            raise ConflictError(
+                "Device authorization conflicts with existing entry",
+                code="device_auth_conflict",
+            ) from e
+
+    async def get_by_device_code(self, device_code: str) -> DeviceAuthorization | None:
+        stmt = select(device_authorizations_table).where(
+            device_authorizations_table.c.device_code == device_code
+        )
+        result = await self.session.execute(stmt)
+        row = result.mappings().first()
+        return _row_to_device_auth(dict(row)) if row else None
+
+    async def get_by_user_code(self, user_code: UserCode) -> DeviceAuthorization | None:
+        stmt = select(device_authorizations_table).where(
+            device_authorizations_table.c.user_code == str(user_code)
+        )
+        result = await self.session.execute(stmt)
+        row = result.mappings().first()
+        return _row_to_device_auth(dict(row)) if row else None
+
+    async def delete_expired_before(self, cutoff: datetime) -> int:
+        stmt = delete(device_authorizations_table).where(
+            device_authorizations_table.c.expires_at < cutoff,
         )
         result = await self.session.execute(stmt)
         await self.session.flush()

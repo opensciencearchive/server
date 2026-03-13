@@ -7,6 +7,7 @@ from osa.config import Config
 from osa.domain.auth.port.identity_provider import IdentityProvider
 from osa.domain.auth.port.provider_registry import ProviderRegistry
 from osa.domain.auth.port.repository import (
+    DeviceAuthorizationRepository,
     LinkedAccountRepository,
     RefreshTokenRepository,
     UserRepository,
@@ -16,6 +17,7 @@ from osa.infrastructure.auth.orcid import OrcidIdentityProvider
 from osa.infrastructure.auth.provider_registry import InMemoryProviderRegistry
 from osa.infrastructure.auth.role_repository import PostgresRoleAssignmentRepository
 from osa.infrastructure.persistence.repository.auth import (
+    PostgresDeviceAuthorizationRepository,
     PostgresLinkedAccountRepository,
     PostgresRefreshTokenRepository,
     PostgresUserRepository,
@@ -55,6 +57,11 @@ class AuthInfraProvider(Provider):
         PostgresRoleAssignmentRepository,
         scope=Scope.UOW,
         provides=RoleAssignmentRepository,
+    )
+    device_auth_repo = provide(
+        PostgresDeviceAuthorizationRepository,
+        scope=Scope.UOW,
+        provides=DeviceAuthorizationRepository,
     )
 
     @provide(scope=Scope.APP)

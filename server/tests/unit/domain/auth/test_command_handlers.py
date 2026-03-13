@@ -111,9 +111,8 @@ class TestInitiateLoginHandler:
         # Verify state can be decoded to get back the redirect URI and provider
         result = token_service.verify_oauth_state(state)
         assert result is not None
-        redirect_uri, provider = result
-        assert redirect_uri == "http://localhost/dashboard"
-        assert provider == "orcid"
+        assert result.redirect_uri == "http://localhost/dashboard"
+        assert result.provider == "orcid"
 
 
 class TestCompleteOAuthHandler:

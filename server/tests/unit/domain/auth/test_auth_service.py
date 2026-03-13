@@ -26,6 +26,7 @@ def make_auth_service(
     token_service: TokenService | None = None,
     outbox: AsyncMock | None = None,
     base_role: Role | None = None,
+    device_auth_repo: AsyncMock | None = None,
 ) -> AuthService:
     """Create an AuthService with mocked dependencies."""
     if user_repo is None:
@@ -46,12 +47,15 @@ def make_auth_service(
         token_service = TokenService(_config=config)
     if outbox is None:
         outbox = AsyncMock()
+    if device_auth_repo is None:
+        device_auth_repo = AsyncMock()
 
     return AuthService(
         _user_repo=user_repo,
         _linked_account_repo=linked_account_repo,
         _refresh_token_repo=refresh_token_repo,
         _role_repo=role_repo,
+        _device_auth_repo=device_auth_repo,
         _token_service=token_service,
         _outbox=outbox,
         _base_role=base_role,

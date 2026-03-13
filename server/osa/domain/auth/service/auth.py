@@ -1,15 +1,24 @@
 """Auth service for orchestrating authentication flows."""
 
 import logging
+import secrets
 
+from osa.domain.auth.model.device_authorization import DeviceAuthorization
 from osa.domain.auth.model.linked_account import LinkedAccount
 from osa.domain.auth.model.role import Role
 from osa.domain.auth.model.role_assignment import RoleAssignment
 from osa.domain.auth.model.token import RefreshToken
 from osa.domain.auth.model.user import User
-from osa.domain.auth.model.value import ProviderIdentity, TokenFamilyId, UserId
+from osa.domain.auth.model.value import (
+    SAFE_CHARS,
+    ProviderIdentity,
+    TokenFamilyId,
+    UserCode,
+    UserId,
+)
 from osa.domain.auth.port.identity_provider import IdentityInfo, IdentityProvider
 from osa.domain.auth.port.repository import (
+    DeviceAuthorizationRepository,
     LinkedAccountRepository,
     RefreshTokenRepository,
     UserRepository,
@@ -35,6 +44,7 @@ class AuthService(Service):
     _linked_account_repo: LinkedAccountRepository
     _refresh_token_repo: RefreshTokenRepository
     _role_repo: RoleAssignmentRepository
+    _device_auth_repo: DeviceAuthorizationRepository
     _token_service: TokenService
     _outbox: Outbox
     _base_role: Role | None
@@ -77,7 +87,7 @@ class AuthService(Service):
         identity_info = await provider.exchange_code(code, redirect_uri)
 
         # Find or create user and linked account
-        user, linked_account = await self._find_or_create_user(identity_info)
+        user, linked_account = await self.find_or_create_user(identity_info)
 
         # Create tokens
         access_token, refresh_token = await self._create_tokens(user, linked_account)
@@ -221,7 +231,171 @@ class AuthService(Service):
         stored = await self._refresh_token_repo.get_by_token_hash(token_hash)
         return stored.user_id if stored else None
 
-    async def _find_or_create_user(self, identity_info: IdentityInfo) -> tuple[User, LinkedAccount]:
+    # ========================================================================
+    # Device Flow Methods
+    # ========================================================================
+
+    async def create_device_authorization(self) -> DeviceAuthorization:
+        """Create a new device authorization with generated codes.
+
+        Retries on user_code collision (unique constraint violation at DB level).
+
+        Returns:
+            The created DeviceAuthorization entity
+        """
+        from osa.domain.shared.error import ConflictError
+
+        max_retries = 5
+        for attempt in range(max_retries):
+            user_code = UserCode(self._generate_user_code())
+            device_auth = DeviceAuthorization.create(user_code=user_code)
+
+            try:
+                await self._device_auth_repo.save(device_auth)
+            except ConflictError:
+                logger.info(
+                    "User code collision on attempt %d, retrying",
+                    attempt + 1,
+                )
+                continue
+
+            logger.info(
+                "Device authorization created: id=%s, user_code=%s",
+                device_auth.id,
+                user_code.display,
+            )
+            return device_auth
+
+        raise RuntimeError(f"Failed to generate unique user code after {max_retries} attempts")
+
+    async def verify_user_code(self, user_code: UserCode) -> DeviceAuthorization | None:
+        """Look up a pending device authorization by user code.
+
+        Returns None if not found or not in pending status.
+        """
+        device_auth = await self._device_auth_repo.get_by_user_code(user_code)
+        if device_auth is None:
+            return None
+        if not device_auth.is_pending:
+            return None
+        if device_auth.is_expired:
+            return None
+        return device_auth
+
+    async def authorize_device(self, device_code: str, user_id: UserId) -> None:
+        """Mark a device authorization as authorized with the given user.
+
+        Args:
+            device_code: The device code to authorize
+            user_id: The user who completed authentication
+
+        Raises:
+            InvalidStateError: If device code not found or in wrong state
+        """
+        from osa.domain.shared.error import InvalidStateError
+
+        device_auth = await self._device_auth_repo.get_by_device_code(device_code)
+        if device_auth is None:
+            raise InvalidStateError(
+                "Device authorization not found",
+                code="device_not_found",
+            )
+
+        if device_auth.is_expired:
+            raise InvalidStateError(
+                "Device authorization has expired",
+                code="expired_token",
+            )
+
+        device_auth.authorize(user_id)
+        await self._device_auth_repo.save(device_auth)
+
+        logger.info(
+            "Device authorized: device_code=%s..., user_id=%s",
+            device_code[:8],
+            user_id,
+        )
+
+    async def exchange_device_code(self, device_code: str) -> tuple[User, str, str] | None:
+        """Exchange a device code for tokens.
+
+        Mints a fresh access token and refresh token (new token family).
+        Marks the device authorization as consumed.
+
+        Returns:
+            Tuple of (user, access_token, refresh_token) if authorized,
+            None if still pending.
+
+        Raises:
+            InvalidStateError: If device code is expired, consumed, or not found
+        """
+        from osa.domain.shared.error import InvalidStateError
+
+        device_auth = await self._device_auth_repo.get_by_device_code(device_code)
+        if device_auth is None:
+            raise InvalidStateError(
+                "Device authorization not found",
+                code="device_not_found",
+            )
+
+        if device_auth.is_expired:
+            raise InvalidStateError(
+                "The device code has expired. Please start a new authorization.",
+                code="expired_token",
+            )
+
+        if device_auth.is_consumed:
+            raise InvalidStateError(
+                "Device authorization already consumed",
+                code="device_consumed",
+            )
+
+        if device_auth.is_pending:
+            return None  # Not yet authorized — CLI should keep polling
+
+        # Status is AUTHORIZED — mint tokens
+        if device_auth.user_id is None:
+            raise InvalidStateError(
+                "Authorized device has no user_id",
+                code="invalid_device_state",
+            )
+
+        user = await self._user_repo.get(device_auth.user_id)
+        if user is None:
+            raise InvalidStateError("User not found", code="user_not_found")
+
+        primary_identity = await self.get_primary_identity(user.id)
+        if primary_identity is None:
+            raise InvalidStateError("User has no identity", code="no_identity")
+
+        # Create fresh token family for CLI session
+        raw_token, token_hash = self._token_service.create_refresh_token()
+        refresh_token = RefreshToken.create(
+            user_id=user.id,
+            token_hash=token_hash,
+            family_id=TokenFamilyId.generate(),
+            expires_in_days=self._token_service.refresh_token_expire_days,
+        )
+        await self._refresh_token_repo.save(refresh_token)
+
+        access_token = self._token_service.create_access_token(
+            user_id=user.id,
+            identity=primary_identity,
+        )
+
+        # Mark as consumed to prevent replay
+        device_auth.consume()
+        await self._device_auth_repo.save(device_auth)
+
+        logger.info("Device code exchanged for tokens: user_id=%s", user.id)
+        return user, access_token, raw_token
+
+    @staticmethod
+    def _generate_user_code() -> str:
+        """Generate a random 8-character user code from the safe character set."""
+        return "".join(secrets.choice(SAFE_CHARS) for _ in range(8))
+
+    async def find_or_create_user(self, identity_info: IdentityInfo) -> tuple[User, LinkedAccount]:
         """Find existing user by identity or create new one."""
         # Check if linked account already exists
         existing = await self._linked_account_repo.get_by_provider_and_external_id(
