@@ -237,10 +237,11 @@ class TestExchangeDeviceCode:
 
     @pytest.mark.asyncio
     async def test_returns_tokens_for_authorized(self):
-        """exchange_device_code should return tokens when authorized."""
+        """exchange_device_code should return tokens via atomic consume."""
         user_id = UserId.generate()
+        # consume_if_authorized returns the entity already in CONSUMED status
         device_auth = make_device_auth(
-            status=DeviceAuthorizationStatus.AUTHORIZED,
+            status=DeviceAuthorizationStatus.CONSUMED,
             user_id=user_id,
         )
         user = User(
@@ -259,7 +260,7 @@ class TestExchangeDeviceCode:
         )
 
         device_auth_repo = AsyncMock()
-        device_auth_repo.get_by_device_code.return_value = device_auth
+        device_auth_repo.consume_if_authorized.return_value = device_auth
         user_repo = AsyncMock()
         user_repo.get.return_value = user
         linked_account_repo = AsyncMock()
@@ -280,8 +281,7 @@ class TestExchangeDeviceCode:
         assert returned_user.id == user_id
         assert isinstance(access_token, str)
         assert isinstance(refresh_token, str)
-        assert device_auth.is_consumed
-        device_auth_repo.save.assert_called_once()
+        device_auth_repo.consume_if_authorized.assert_called_once_with(device_auth.device_code)
         refresh_token_repo.save.assert_called_once()
 
     @pytest.mark.asyncio
@@ -289,6 +289,7 @@ class TestExchangeDeviceCode:
         """exchange_device_code should return None when still pending."""
         device_auth = make_device_auth()
         device_auth_repo = AsyncMock()
+        device_auth_repo.consume_if_authorized.return_value = None
         device_auth_repo.get_by_device_code.return_value = device_auth
 
         service = make_auth_service(device_auth_repo=device_auth_repo)
@@ -301,6 +302,7 @@ class TestExchangeDeviceCode:
         """exchange_device_code should raise for expired device code."""
         device_auth = make_device_auth(expired=True)
         device_auth_repo = AsyncMock()
+        device_auth_repo.consume_if_authorized.return_value = None
         device_auth_repo.get_by_device_code.return_value = device_auth
 
         service = make_auth_service(device_auth_repo=device_auth_repo)
@@ -317,6 +319,7 @@ class TestExchangeDeviceCode:
             user_id=UserId.generate(),
         )
         device_auth_repo = AsyncMock()
+        device_auth_repo.consume_if_authorized.return_value = None
         device_auth_repo.get_by_device_code.return_value = device_auth
 
         service = make_auth_service(device_auth_repo=device_auth_repo)
@@ -328,9 +331,63 @@ class TestExchangeDeviceCode:
     async def test_raises_for_unknown(self):
         """exchange_device_code should raise for unknown device code."""
         device_auth_repo = AsyncMock()
+        device_auth_repo.consume_if_authorized.return_value = None
         device_auth_repo.get_by_device_code.return_value = None
 
         service = make_auth_service(device_auth_repo=device_auth_repo)
 
         with pytest.raises(InvalidStateError, match="not found"):
             await service.exchange_device_code("unknown")
+
+    @pytest.mark.asyncio
+    async def test_concurrent_consume_only_one_wins(self):
+        """When two callers race, only the one that gets consume_if_authorized succeeds."""
+        user_id = UserId.generate()
+        device_auth = make_device_auth(
+            status=DeviceAuthorizationStatus.CONSUMED,
+            user_id=user_id,
+        )
+        user = User(
+            id=user_id,
+            display_name="Test User",
+            created_at=datetime.now(UTC),
+            updated_at=None,
+        )
+        linked_account = LinkedAccount(
+            id=IdentityId.generate(),
+            user_id=user_id,
+            provider="orcid",
+            external_id="0000-0001-2345-6789",
+            metadata=None,
+            created_at=datetime.now(UTC),
+        )
+
+        # First caller wins, second gets None (already consumed)
+        device_auth_repo = AsyncMock()
+        device_auth_repo.consume_if_authorized.side_effect = [device_auth, None]
+        # Second caller falls back to get_by_device_code and sees CONSUMED
+        consumed_auth = make_device_auth(
+            status=DeviceAuthorizationStatus.CONSUMED,
+            user_id=user_id,
+        )
+        device_auth_repo.get_by_device_code.return_value = consumed_auth
+        user_repo = AsyncMock()
+        user_repo.get.return_value = user
+        linked_account_repo = AsyncMock()
+        linked_account_repo.get_by_user_id.return_value = [linked_account]
+        refresh_token_repo = AsyncMock()
+
+        service = make_auth_service(
+            device_auth_repo=device_auth_repo,
+            user_repo=user_repo,
+            linked_account_repo=linked_account_repo,
+            refresh_token_repo=refresh_token_repo,
+        )
+
+        # First call succeeds
+        result1 = await service.exchange_device_code(device_auth.device_code)
+        assert result1 is not None
+
+        # Second call raises "consumed"
+        with pytest.raises(InvalidStateError, match="consumed"):
+            await service.exchange_device_code(device_auth.device_code)

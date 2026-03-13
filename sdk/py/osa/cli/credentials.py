@@ -30,10 +30,18 @@ def _read_file(path: Path) -> dict[str, Any]:
 
 
 def _write_file(path: Path, data: dict[str, Any]) -> None:
-    """Write data to credentials file with 0600 permissions."""
+    """Write data to credentials file with 0600 permissions.
+
+    Uses os.open with O_CREAT to create the file with 0600 from the start,
+    avoiding a TOCTOU window where the file is briefly world-readable.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2))
-    path.chmod(0o600)
+    content = json.dumps(data, indent=2).encode()
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, content)
+    finally:
+        os.close(fd)
 
 
 def write_credentials(
@@ -139,7 +147,7 @@ def resolve_token(
 
     Resolution chain:
     1. OSA_TOKEN environment variable (for CI/CD)
-    2. Stored credentials file
+    2. Stored credentials — refresh first so we return a fresh access token
     3. None (not authenticated)
     """
     env_token = os.environ.get("OSA_TOKEN")
@@ -148,6 +156,12 @@ def resolve_token(
 
     creds = read_credentials(server, path=path)
     if creds:
+        # Attempt refresh to get a fresh access token.
+        # The refresh endpoint is cheap and idempotent.
+        refreshed = refresh_access_token(server, path=path)
+        if refreshed is not None:
+            return refreshed
+        # Refresh failed — return stored token (server will reject if expired)
         return creds["access_token"]
 
     return None

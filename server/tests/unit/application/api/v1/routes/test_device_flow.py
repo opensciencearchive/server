@@ -505,8 +505,15 @@ class TestCallbackDeviceFlow:
         )
 
         device_auth = make_device_auth()
+        # After authorize_device mutates to AUTHORIZED, consume_if_authorized
+        # should return a consumed copy (simulating the atomic DB operation)
+        consumed_auth = make_device_auth(
+            status=DeviceAuthorizationStatus.CONSUMED,
+            user_id=user_id,
+        )
         device_auth_repo = AsyncMock()
         device_auth_repo.get_by_device_code.return_value = device_auth
+        device_auth_repo.consume_if_authorized.return_value = consumed_auth
         user_repo = AsyncMock()
         user_repo.get.return_value = user
         linked_account_repo = AsyncMock()
@@ -525,11 +532,11 @@ class TestCallbackDeviceFlow:
         assert device_auth.is_authorized
         refresh_token_repo.save.assert_not_called()
 
-        # Step 2: exchange (poll) — tokens minted, marked consumed
+        # Step 2: exchange (poll) — tokens minted via atomic consume
         result = await service.exchange_device_code(device_auth.device_code)
         assert result is not None
         _, access_token, refresh_token = result
         assert isinstance(access_token, str)
         assert isinstance(refresh_token, str)
-        assert device_auth.is_consumed
+        device_auth_repo.consume_if_authorized.assert_called_once()
         refresh_token_repo.save.assert_called_once()

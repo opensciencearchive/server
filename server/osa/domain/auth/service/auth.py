@@ -320,7 +320,7 @@ class AuthService(Service):
         """Exchange a device code for tokens.
 
         Mints a fresh access token and refresh token (new token family).
-        Marks the device authorization as consumed.
+        Uses an atomic consume to prevent concurrent token issuance.
 
         Returns:
             Tuple of (user, access_token, refresh_token) if authorized,
@@ -331,6 +331,45 @@ class AuthService(Service):
         """
         from osa.domain.shared.error import InvalidStateError
 
+        # Attempt atomic AUTHORIZED → CONSUMED transition.
+        # Only one concurrent caller can succeed.
+        device_auth = await self._device_auth_repo.consume_if_authorized(device_code)
+
+        if device_auth is not None:
+            # Successfully consumed — mint tokens
+            if device_auth.user_id is None:
+                raise InvalidStateError(
+                    "Authorized device has no user_id",
+                    code="invalid_device_state",
+                )
+
+            user = await self._user_repo.get(device_auth.user_id)
+            if user is None:
+                raise InvalidStateError("User not found", code="user_not_found")
+
+            primary_identity = await self.get_primary_identity(user.id)
+            if primary_identity is None:
+                raise InvalidStateError("User has no identity", code="no_identity")
+
+            # Create fresh token family for CLI session
+            raw_token, token_hash = self._token_service.create_refresh_token()
+            refresh_token = RefreshToken.create(
+                user_id=user.id,
+                token_hash=token_hash,
+                family_id=TokenFamilyId.generate(),
+                expires_in_days=self._token_service.refresh_token_expire_days,
+            )
+            await self._refresh_token_repo.save(refresh_token)
+
+            access_token = self._token_service.create_access_token(
+                user_id=user.id,
+                identity=primary_identity,
+            )
+
+            logger.info("Device code exchanged for tokens: user_id=%s", user.id)
+            return user, access_token, raw_token
+
+        # Atomic consume returned None — determine the specific error
         device_auth = await self._device_auth_repo.get_by_device_code(device_code)
         if device_auth is None:
             raise InvalidStateError(
@@ -353,42 +392,11 @@ class AuthService(Service):
         if device_auth.is_pending:
             return None  # Not yet authorized — CLI should keep polling
 
-        # Status is AUTHORIZED — mint tokens
-        if device_auth.user_id is None:
-            raise InvalidStateError(
-                "Authorized device has no user_id",
-                code="invalid_device_state",
-            )
-
-        user = await self._user_repo.get(device_auth.user_id)
-        if user is None:
-            raise InvalidStateError("User not found", code="user_not_found")
-
-        primary_identity = await self.get_primary_identity(user.id)
-        if primary_identity is None:
-            raise InvalidStateError("User has no identity", code="no_identity")
-
-        # Create fresh token family for CLI session
-        raw_token, token_hash = self._token_service.create_refresh_token()
-        refresh_token = RefreshToken.create(
-            user_id=user.id,
-            token_hash=token_hash,
-            family_id=TokenFamilyId.generate(),
-            expires_in_days=self._token_service.refresh_token_expire_days,
+        # Shouldn't reach here, but handle gracefully
+        raise InvalidStateError(
+            "Device authorization in unexpected state",
+            code="invalid_device_state",
         )
-        await self._refresh_token_repo.save(refresh_token)
-
-        access_token = self._token_service.create_access_token(
-            user_id=user.id,
-            identity=primary_identity,
-        )
-
-        # Mark as consumed to prevent replay
-        device_auth.consume()
-        await self._device_auth_repo.save(device_auth)
-
-        logger.info("Device code exchanged for tokens: user_id=%s", user.id)
-        return user, access_token, raw_token
 
     @staticmethod
     def _generate_user_code() -> str:

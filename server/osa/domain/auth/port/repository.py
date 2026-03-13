@@ -110,6 +110,17 @@ class DeviceAuthorizationRepository(Port, Protocol):
         ...
 
     @abstractmethod
+    async def consume_if_authorized(self, device_code: str) -> DeviceAuthorization | None:
+        """Atomically consume a device authorization if it is in AUTHORIZED status.
+
+        Transitions the row from AUTHORIZED → CONSUMED in a single UPDATE
+        and returns the (now-consumed) entity. Returns None if the row does
+        not exist or is not in AUTHORIZED status (e.g. already consumed,
+        still pending, or expired).
+        """
+        ...
+
+    @abstractmethod
     async def delete_expired_before(self, cutoff: datetime) -> int:
         """Remove expired authorizations before cutoff, return count deleted."""
         ...

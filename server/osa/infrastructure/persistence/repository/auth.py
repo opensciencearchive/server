@@ -314,6 +314,28 @@ class PostgresDeviceAuthorizationRepository(DeviceAuthorizationRepository):
         row = result.mappings().first()
         return _row_to_device_auth(dict(row)) if row else None
 
+    async def consume_if_authorized(self, device_code: str) -> DeviceAuthorization | None:
+        """Atomically consume a device authorization if it is AUTHORIZED.
+
+        Uses UPDATE ... WHERE status='authorized' RETURNING * so that
+        exactly one concurrent caller can succeed.
+        """
+        t = device_authorizations_table
+        stmt = (
+            update(t)
+            .where(
+                t.c.device_code == device_code,
+                t.c.status == DeviceAuthorizationStatus.AUTHORIZED.value,
+            )
+            .values(status=DeviceAuthorizationStatus.CONSUMED.value)
+            .returning(*t.columns)
+        )
+        result = await self.session.execute(stmt)
+        row = result.mappings().first()
+        if row is None:
+            return None
+        return _row_to_device_auth(dict(row))
+
     async def delete_expired_before(self, cutoff: datetime) -> int:
         stmt = delete(device_authorizations_table).where(
             device_authorizations_table.c.expires_at < cutoff,

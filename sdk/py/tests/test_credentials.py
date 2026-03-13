@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from unittest.mock import patch
+
 from osa.cli.credentials import (
     read_credentials,
     remove_credentials,
@@ -217,3 +219,40 @@ class TestResolveToken:
         monkeypatch.delenv("OSA_TOKEN", raising=False)
         token = resolve_token("https://example.com", path=cred_file)
         assert token is None
+
+    def test_attempts_refresh_when_stored_creds_exist(
+        self, cred_file: Path, monkeypatch
+    ):
+        """resolve_token should call refresh_access_token and return refreshed token."""
+        monkeypatch.delenv("OSA_TOKEN", raising=False)
+        write_credentials(
+            "https://example.com",
+            access_token="old-at",
+            refresh_token="rt",
+            path=cred_file,
+        )
+
+        with patch(
+            "osa.cli.credentials.refresh_access_token", return_value="fresh-at"
+        ) as mock_refresh:
+            token = resolve_token("https://example.com", path=cred_file)
+
+        assert token == "fresh-at"
+        mock_refresh.assert_called_once_with("https://example.com", path=cred_file)
+
+    def test_falls_back_to_stored_token_when_refresh_fails(
+        self, cred_file: Path, monkeypatch
+    ):
+        """resolve_token should return stored token if refresh fails."""
+        monkeypatch.delenv("OSA_TOKEN", raising=False)
+        write_credentials(
+            "https://example.com",
+            access_token="stored-at",
+            refresh_token="rt",
+            path=cred_file,
+        )
+
+        with patch("osa.cli.credentials.refresh_access_token", return_value=None):
+            token = resolve_token("https://example.com", path=cred_file)
+
+        assert token == "stored-at"
