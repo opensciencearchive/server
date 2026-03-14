@@ -13,7 +13,7 @@ from typing import Any
 import jwt
 
 from osa.config import JwtConfig
-from osa.domain.auth.model.value import ProviderIdentity, UserId
+from osa.domain.auth.model.value import OAuthStateData, ProviderIdentity, UserId
 from osa.domain.shared.service import Service
 
 logger = logging.getLogger(__name__)
@@ -123,25 +123,34 @@ class TokenService(Service):
         """Get refresh token expiry in days."""
         return self._config.refresh_token_expire_days
 
-    def create_oauth_state(self, redirect_uri: str, provider: str) -> str:
+    def create_oauth_state(
+        self,
+        redirect_uri: str,
+        provider: str,
+        *,
+        device_code: str | None = None,
+    ) -> str:
         """Create a signed, self-verifying OAuth state token.
 
-        The state contains: nonce, redirect_uri, provider, expiry timestamp.
-        Signed with HMAC-SHA256 using the JWT secret.
+        The state contains: nonce, redirect_uri, provider, expiry timestamp,
+        and optionally a device_code for the device authorization flow.
 
         Args:
             redirect_uri: The URI to redirect to after OAuth completes
             provider: The identity provider name (e.g., "orcid")
+            device_code: Optional device code to embed (for device flow)
 
         Returns:
             URL-safe signed state token in format: payload.signature
         """
-        payload = {
+        payload: dict[str, Any] = {
             "nonce": secrets.token_urlsafe(16),
             "redirect_uri": redirect_uri,
             "provider": provider,
             "exp": int(time.time()) + STATE_EXPIRY_SECONDS,
         }
+        if device_code is not None:
+            payload["device_code"] = device_code
         payload_bytes = json.dumps(payload, separators=(",", ":")).encode()
         payload_b64 = urlsafe_b64encode(payload_bytes).rstrip(b"=").decode()
 
@@ -150,14 +159,14 @@ class TokenService(Service):
 
         return f"{payload_b64}.{signature_b64}"
 
-    def verify_oauth_state(self, state: str) -> tuple[str, str] | None:
-        """Verify a signed state token and return the redirect_uri and provider if valid.
+    def verify_oauth_state(self, state: str) -> OAuthStateData | None:
+        """Verify a signed state token and return structured state data if valid.
 
         Args:
             state: The signed state token to verify
 
         Returns:
-            Tuple of (redirect_uri, provider) if valid, None if invalid or expired
+            OAuthStateData if valid, None if invalid or expired
         """
         try:
             parts = state.split(".")
@@ -190,7 +199,11 @@ class TokenService(Service):
                 logger.warning("OAuth state missing redirect_uri or provider")
                 return None
 
-            return redirect_uri, provider
+            return OAuthStateData(
+                redirect_uri=redirect_uri,
+                provider=provider,
+                device_code=payload.get("device_code"),
+            )
 
         except Exception as e:
             logger.warning("OAuth state verification error: %s", e)

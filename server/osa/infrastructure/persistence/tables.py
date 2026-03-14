@@ -296,3 +296,27 @@ role_assignments_table = Table(
 )
 
 Index("ix_role_assignments_user_id", role_assignments_table.c.user_id)
+
+
+# ============================================================================
+# DEVICE AUTHORIZATIONS TABLE (Authentication - OAuth Device Flow)
+# ============================================================================
+device_authorizations_table = Table(
+    "device_authorizations",
+    metadata,
+    Column("id", String, primary_key=True),  # UUID as string
+    Column("device_code", String(64), nullable=False),
+    Column("user_code", String(8), nullable=False),  # Normalized, no hyphen
+    Column("status", String(20), nullable=False, server_default=text("'pending'")),
+    Column("user_id", String, ForeignKey("users.id"), nullable=True),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("device_code", name="uq_device_auth_device_code"),
+    UniqueConstraint("user_code", name="uq_device_auth_user_code"),
+)
+
+Index(
+    "ix_device_auth_status_expires",
+    device_authorizations_table.c.status,
+    device_authorizations_table.c.expires_at,
+)
