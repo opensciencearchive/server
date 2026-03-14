@@ -343,6 +343,7 @@ class PostgresDeviceAuthorizationRepository(DeviceAuthorizationRepository):
                 [
                     DeviceAuthorizationStatus.PENDING.value,
                     DeviceAuthorizationStatus.EXPIRED.value,
+                    DeviceAuthorizationStatus.CONSUMED.value,
                 ]
             ),
         )
