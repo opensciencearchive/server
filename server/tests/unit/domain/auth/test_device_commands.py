@@ -22,6 +22,7 @@ from osa.domain.auth.model.device_authorization import (
 )
 from osa.domain.auth.model.user import User
 from osa.domain.auth.model.value import DeviceAuthorizationId, UserCode, UserId
+from osa.domain.auth.service.auth import DeviceTokenResult
 from osa.domain.auth.service.token import TokenService
 from osa.domain.shared.error import InvalidStateError
 
@@ -123,10 +124,10 @@ class TestPollDeviceTokenHandler:
         )
 
         auth_service = AsyncMock()
-        auth_service.exchange_device_code.return_value = (
-            user,
-            "access-token-123",
-            "refresh-token-456",
+        auth_service.exchange_device_code.return_value = DeviceTokenResult(
+            user=user,
+            access_token="access-token-123",
+            refresh_token="refresh-token-456",
         )
         token_service = make_token_service()
 

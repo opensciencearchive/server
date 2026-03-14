@@ -32,7 +32,7 @@ from osa.domain.auth.model.value import (
     UserCode,
     UserId,
 )
-from osa.domain.auth.service.auth import AuthService
+from osa.domain.auth.service.auth import AuthService, DeviceTokenResult
 from osa.domain.auth.service.token import TokenService
 from osa.domain.shared.error import InvalidStateError
 
@@ -306,10 +306,10 @@ class TestPollDeviceToken:
             updated_at=None,
         )
         auth_service = AsyncMock()
-        auth_service.exchange_device_code.return_value = (
-            user,
-            "at-123",
-            "rt-456",
+        auth_service.exchange_device_code.return_value = DeviceTokenResult(
+            user=user,
+            access_token="at-123",
+            refresh_token="rt-456",
         )
         token_service = make_token_service()
 
@@ -430,22 +430,25 @@ class TestCallbackDeviceFlow:
             linked_account_repo=linked_account_repo,
         )
 
-        # Simulate what the callback route does for device flow:
-        # 1. find_or_create_user (no tokens)
+        # Simulate what complete_device_oauth does:
+        # find_or_create_user + authorize_device (no tokens minted)
         from osa.domain.auth.port.identity_provider import IdentityInfo
 
-        identity_info = IdentityInfo(
+        identity_provider = AsyncMock()
+        identity_provider.exchange_code.return_value = IdentityInfo(
             provider="orcid",
             external_id="0000-0001-2345-6789",
             display_name="Researcher",
             email=None,
             raw_data={},
         )
-        found_user, _ = await service.find_or_create_user(identity_info)
-        assert found_user.id == user_id
 
-        # 2. authorize_device
-        await service.authorize_device(device_auth.device_code, found_user.id)
+        await service.complete_device_oauth(
+            provider=identity_provider,
+            code="auth-code",
+            redirect_uri="https://example.com/callback",
+            device_code=device_auth.device_code,
+        )
 
         assert device_auth.is_authorized
         assert device_auth.user_id == user_id
@@ -535,8 +538,8 @@ class TestCallbackDeviceFlow:
         # Step 2: exchange (poll) — tokens minted via atomic consume
         result = await service.exchange_device_code(device_auth.device_code)
         assert result is not None
-        _, access_token, refresh_token = result
-        assert isinstance(access_token, str)
-        assert isinstance(refresh_token, str)
+        assert isinstance(result, DeviceTokenResult)
+        assert isinstance(result.access_token, str)
+        assert isinstance(result.refresh_token, str)
         device_auth_repo.consume_if_authorized.assert_called_once()
         refresh_token_repo.save.assert_called_once()

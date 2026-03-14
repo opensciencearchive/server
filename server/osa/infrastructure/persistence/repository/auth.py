@@ -339,6 +339,12 @@ class PostgresDeviceAuthorizationRepository(DeviceAuthorizationRepository):
     async def delete_expired_before(self, cutoff: datetime) -> int:
         stmt = delete(device_authorizations_table).where(
             device_authorizations_table.c.expires_at < cutoff,
+            device_authorizations_table.c.status.in_(
+                [
+                    DeviceAuthorizationStatus.PENDING.value,
+                    DeviceAuthorizationStatus.EXPIRED.value,
+                ]
+            ),
         )
         result = await self.session.execute(stmt)
         await self.session.flush()

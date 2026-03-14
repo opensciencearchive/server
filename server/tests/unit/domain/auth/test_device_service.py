@@ -18,7 +18,7 @@ from osa.domain.auth.model.value import (
     UserCode,
     UserId,
 )
-from osa.domain.auth.service.auth import AuthService
+from osa.domain.auth.service.auth import AuthService, DeviceTokenResult
 from osa.domain.auth.service.token import TokenService
 from osa.domain.shared.error import InvalidStateError
 
@@ -277,10 +277,10 @@ class TestExchangeDeviceCode:
         result = await service.exchange_device_code(device_auth.device_code)
 
         assert result is not None
-        returned_user, access_token, refresh_token = result
-        assert returned_user.id == user_id
-        assert isinstance(access_token, str)
-        assert isinstance(refresh_token, str)
+        assert isinstance(result, DeviceTokenResult)
+        assert result.user.id == user_id
+        assert isinstance(result.access_token, str)
+        assert isinstance(result.refresh_token, str)
         device_auth_repo.consume_if_authorized.assert_called_once_with(device_auth.device_code)
         refresh_token_repo.save.assert_called_once()
 
@@ -387,6 +387,7 @@ class TestExchangeDeviceCode:
         # First call succeeds
         result1 = await service.exchange_device_code(device_auth.device_code)
         assert result1 is not None
+        assert isinstance(result1, DeviceTokenResult)
 
         # Second call raises "consumed"
         with pytest.raises(InvalidStateError, match="consumed"):

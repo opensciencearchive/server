@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 from osa.domain.auth.model.value import DeviceAuthorizationId, UserCode, UserId
+from osa.domain.shared.error import InvalidStateError
 from osa.domain.shared.model.entity import Entity
 
 # Default device code expiry: 15 minutes
@@ -70,12 +71,18 @@ class DeviceAuthorization(Entity):
         """Mark this device authorization as authorized by a user.
 
         Raises:
-            ValueError: If not in pending status or expired
+            InvalidStateError: If not in pending status or expired
         """
         if self.status != DeviceAuthorizationStatus.PENDING:
-            raise ValueError(f"Cannot authorize from status {self.status}")
+            raise InvalidStateError(
+                f"Cannot authorize from status {self.status}",
+                code="invalid_device_state",
+            )
         if self.is_expired:
-            raise ValueError("Device authorization has expired")
+            raise InvalidStateError(
+                "Device authorization has expired",
+                code="expired_token",
+            )
         self.status = DeviceAuthorizationStatus.AUTHORIZED
         self.user_id = user_id
 
@@ -83,20 +90,26 @@ class DeviceAuthorization(Entity):
         """Mark this device authorization as consumed (tokens issued).
 
         Raises:
-            ValueError: If not in authorized status
+            InvalidStateError: If not in authorized status
         """
         if self.status != DeviceAuthorizationStatus.AUTHORIZED:
-            raise ValueError(f"Cannot consume from status {self.status}")
+            raise InvalidStateError(
+                f"Cannot consume from status {self.status}",
+                code="invalid_device_state",
+            )
         self.status = DeviceAuthorizationStatus.CONSUMED
 
     def mark_expired(self) -> None:
         """Mark this device authorization as expired.
 
         Raises:
-            ValueError: If already consumed
+            InvalidStateError: If already consumed
         """
         if self.status == DeviceAuthorizationStatus.CONSUMED:
-            raise ValueError("Cannot expire a consumed authorization")
+            raise InvalidStateError(
+                "Cannot expire a consumed authorization",
+                code="invalid_device_state",
+            )
         self.status = DeviceAuthorizationStatus.EXPIRED
 
     @classmethod

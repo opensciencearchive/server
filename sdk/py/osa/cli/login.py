@@ -72,6 +72,7 @@ def _poll_for_token(
 
         if error == "slow_down":
             interval = interval + 5  # RFC 8628: increase interval
+            backoff = interval  # Sync backoff with new interval
             time.sleep(interval)
             continue
 

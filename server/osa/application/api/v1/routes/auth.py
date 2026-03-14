@@ -14,10 +14,14 @@ from pydantic import BaseModel
 
 from osa.config import Config
 from osa.domain.auth.command.device import (
+    CompleteDeviceOAuth,
+    CompleteDeviceOAuthHandler,
     InitiateDeviceAuth,
     InitiateDeviceAuthHandler,
     PollDeviceToken,
     PollDeviceTokenHandler,
+    VerifyDeviceCode,
+    VerifyDeviceCodeHandler,
 )
 from osa.domain.auth.command.login import (
     CompleteOAuth,
@@ -31,7 +35,7 @@ from osa.domain.auth.command.token import (
     RefreshTokens,
     RefreshTokensHandler,
 )
-from osa.domain.auth.model.value import CurrentUser, UserCode
+from osa.domain.auth.model.value import CurrentUser
 from osa.domain.auth.port.provider_registry import ProviderRegistry
 from osa.domain.auth.port.role_repository import RoleAssignmentRepository
 from osa.domain.auth.service.auth import AuthService
@@ -164,9 +168,8 @@ async def handle_oauth_callback(
     request: Request,
     config: FromDishka[Config],
     handler: FromDishka[CompleteOAuthHandler],
-    auth_service: FromDishka[AuthService],
+    device_handler: FromDishka[CompleteDeviceOAuthHandler],
     token_service: FromDishka[TokenService],
-    registry: FromDishka[ProviderRegistry],
     code: Annotated[str | None, Query()] = None,
     state: Annotated[str | None, Query()] = None,
     error: Annotated[str | None, Query()] = None,
@@ -232,18 +235,13 @@ async def handle_oauth_callback(
             if device_code is None:
                 return RedirectResponse(url=_device_error_redirect("Missing device code in state"))
 
-            identity_provider = registry.get(provider)
-            if identity_provider is None:
-                return RedirectResponse(url=_device_error_redirect(f"Unknown provider: {provider}"))
-
-            identity_info = await identity_provider.exchange_code(code, callback_url)
-            user, _linked_account = await auth_service.find_or_create_user(identity_info)
-            await auth_service.authorize_device(device_code, user.id)
-
-            logger.info(
-                "Device flow callback complete: user_id=%s, device_code=%s...",
-                user.id,
-                device_code[:8],
+            await device_handler.run(
+                CompleteDeviceOAuth(
+                    code=code,
+                    callback_url=callback_url,
+                    provider=provider,
+                    device_code=device_code,
+                )
             )
             return RedirectResponse(url="/api/v1/auth/device/complete", status_code=302)
 
@@ -400,64 +398,38 @@ async def show_device_verification_page(
 @router.post("/device/verify")
 async def submit_device_code(
     request: Request,
-    auth_service: FromDishka[AuthService],
-    token_service: FromDishka[TokenService],
-    registry: FromDishka[ProviderRegistry],
     config: FromDishka[Config],
+    handler: FromDishka[VerifyDeviceCodeHandler],
     user_code: Annotated[str, Form()],
 ) -> Response:
     """Submit the user code from the verification page.
 
     Validates the code and redirects to ORCID OAuth flow if valid.
     """
-    # Validate user code
     verify_url = str(request.url_for("show_device_verification_page"))
-    try:
-        normalized_code = UserCode(user_code)
-    except ValueError:
-        params = urlencode(
-            {
-                "code": user_code,
-                "error_message": "Invalid code. Check your terminal and try again.",
-            }
-        )
-        return RedirectResponse(url=f"{verify_url}?{params}", status_code=302)
 
-    device_auth = await auth_service.verify_user_code(normalized_code)
-    if device_auth is None:
-        params = urlencode(
-            {
-                "code": user_code,
-                "error_message": "Invalid or expired code. Run osa login again to get a new code.",
-            }
-        )
-        return RedirectResponse(url=f"{verify_url}?{params}", status_code=302)
-
-    # Create OAuth state with device_code embedded
     callback_url = config.auth.callback_url
     if not callback_url:
         callback_url = str(request.url_for("handle_oauth_callback"))
 
-    state = token_service.create_oauth_state(
-        redirect_uri=callback_url,
-        provider="orcid",
-        device_code=device_auth.device_code,
-    )
-
-    # TODO: make provider configurable instead of hardcoding "orcid"
-    identity_provider = registry.get("orcid")
-    if identity_provider is None:
-        params = urlencode({"error_message": "ORCID provider not configured."})
-        return RedirectResponse(
-            url=f"{verify_url}?{params}",
-            status_code=302,
+    try:
+        # TODO: make provider configurable instead of hardcoding "orcid"
+        result = await handler.run(
+            VerifyDeviceCode(
+                user_code=user_code,
+                callback_url=callback_url,
+                provider="orcid",
+            )
         )
-
-    authorization_url = identity_provider.get_authorization_url(
-        state=state,
-        redirect_uri=callback_url,
-    )
-    return RedirectResponse(url=authorization_url, status_code=302)
+        return RedirectResponse(url=result.authorization_url, status_code=302)
+    except InvalidStateError:
+        params = urlencode(
+            {
+                "code": user_code,
+                "error_message": "Invalid or expired code. Check your terminal and try again.",
+            }
+        )
+        return RedirectResponse(url=f"{verify_url}?{params}", status_code=302)
 
 
 @router.post("/device/token")

@@ -9,6 +9,7 @@ from osa.domain.auth.model.device_authorization import (
     DeviceAuthorizationStatus,
 )
 from osa.domain.auth.model.value import DeviceAuthorizationId, UserCode, UserId
+from osa.domain.shared.error import InvalidStateError
 
 
 def make_device_auth(
@@ -85,13 +86,13 @@ class TestDeviceAuthorizationStatusTransitions:
             status=DeviceAuthorizationStatus.AUTHORIZED,
             user_id=UserId.generate(),
         )
-        with pytest.raises(ValueError, match="Cannot authorize from status"):
+        with pytest.raises(InvalidStateError, match="Cannot authorize from status"):
             auth.authorize(UserId.generate())
 
     def test_authorize_rejects_expired(self):
         """authorize() should raise if expired."""
         auth = make_device_auth(expired=True)
-        with pytest.raises(ValueError, match="expired"):
+        with pytest.raises(InvalidStateError, match="expired"):
             auth.authorize(UserId.generate())
 
     def test_consume_from_authorized(self):
@@ -106,7 +107,7 @@ class TestDeviceAuthorizationStatusTransitions:
     def test_consume_rejects_pending(self):
         """consume() should raise if not authorized."""
         auth = make_device_auth()
-        with pytest.raises(ValueError, match="Cannot consume from status"):
+        with pytest.raises(InvalidStateError, match="Cannot consume from status"):
             auth.consume()
 
     def test_mark_expired_from_pending(self):
@@ -121,7 +122,7 @@ class TestDeviceAuthorizationStatusTransitions:
             status=DeviceAuthorizationStatus.CONSUMED,
             user_id=UserId.generate(),
         )
-        with pytest.raises(ValueError, match="Cannot expire a consumed"):
+        with pytest.raises(InvalidStateError, match="Cannot expire a consumed"):
             auth.mark_expired()
 
 

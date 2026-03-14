@@ -212,7 +212,8 @@ class TestResolveToken:
             path=cred_file,
         )
 
-        token = resolve_token("https://example.com", path=cred_file)
+        with patch("osa.cli.credentials.refresh_access_token", return_value=None):
+            token = resolve_token("https://example.com", path=cred_file)
         assert token == "stored-at"
 
     def test_returns_none_when_no_credentials(self, cred_file: Path, monkeypatch):

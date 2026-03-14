@@ -11,8 +11,10 @@ from starlette.requests import Request
 from osa.config import Config
 from osa.domain.auth.command.assign_role import AssignRoleHandler
 from osa.domain.auth.command.device import (
+    CompleteDeviceOAuthHandler,
     InitiateDeviceAuthHandler,
     PollDeviceTokenHandler,
+    VerifyDeviceCodeHandler,
 )
 from osa.domain.auth.command.login import (
     CompleteOAuthHandler,
@@ -56,6 +58,8 @@ class AuthProvider(Provider):
     revoke_role_handler = provide(RevokeRoleHandler, scope=Scope.UOW)
     initiate_device_auth_handler = provide(InitiateDeviceAuthHandler, scope=Scope.UOW)
     poll_device_token_handler = provide(PollDeviceTokenHandler, scope=Scope.UOW)
+    verify_device_code_handler = provide(VerifyDeviceCodeHandler, scope=Scope.UOW)
+    complete_device_oauth_handler = provide(CompleteDeviceOAuthHandler, scope=Scope.UOW)
 
     # Query Handlers
     get_user_roles_handler = provide(GetUserRolesHandler, scope=Scope.UOW)
