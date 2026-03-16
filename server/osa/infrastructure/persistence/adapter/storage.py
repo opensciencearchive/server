@@ -21,7 +21,6 @@ class LocalFileStorageAdapter(FileStoragePort):
 
     def __init__(self, base_path: str) -> None:
         self.base_path = Path(base_path)
-        self.base_path.mkdir(parents=True, exist_ok=True)
 
     def _dep_dir(self, deposition_id: DepositionSRN) -> Path:
         safe_id = f"{deposition_id.domain.root}_{deposition_id.id.root}"

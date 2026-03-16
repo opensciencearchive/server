@@ -143,10 +143,7 @@ async def initiate_login(
             },
         )
 
-    # Determine callback URL
     callback_url = config.auth.callback_url
-    if not callback_url:
-        callback_url = str(request.url_for("handle_oauth_callback"))
 
     # Determine final redirect URI
     final_redirect = redirect_uri or config.frontend.url
@@ -224,10 +221,7 @@ async def handle_oauth_callback(
         )
 
     try:
-        # Determine callback URL (must match what was used in authorization)
         callback_url = config.auth.callback_url
-        if not callback_url:
-            callback_url = str(request.url_for("handle_oauth_callback"))
 
         if is_device_flow:
             # Device flow: resolve user without minting tokens, then authorize device
@@ -352,7 +346,7 @@ async def get_me(
 
 @router.post("/device", response_model=DeviceAuthorizationResponse)
 async def initiate_device_auth(
-    request: Request,
+    config: FromDishka[Config],
     handler: FromDishka[InitiateDeviceAuthHandler],
 ) -> DeviceAuthorizationResponse:
     """Start a device authorization flow.
@@ -360,8 +354,7 @@ async def initiate_device_auth(
     CLI calls this to begin the device flow. Returns a device code (for polling),
     a user code (for the human), and a verification URL.
     """
-    # Build verification URI from current request
-    verification_uri_base = str(request.url_for("show_device_verification_page"))
+    verification_uri_base = f"{config.base_url}/api/v1/auth/device/verify"
 
     result = await handler.run(InitiateDeviceAuth(verification_uri_base=verification_uri_base))
 
@@ -381,7 +374,7 @@ async def show_device_verification_page(
     error_message: Annotated[str | None, Query()] = None,
 ) -> HTMLResponse:
     """Display the code entry page for device flow verification."""
-    action_url = str(request.url_for("submit_device_code"))
+    action_url = "/api/v1/auth/device/verify"
     prefilled_code = escape(code or "")
     error_html = ""
     if error_message:
@@ -406,11 +399,7 @@ async def submit_device_code(
 
     Validates the code and redirects to ORCID OAuth flow if valid.
     """
-    verify_url = str(request.url_for("show_device_verification_page"))
-
     callback_url = config.auth.callback_url
-    if not callback_url:
-        callback_url = str(request.url_for("handle_oauth_callback"))
 
     try:
         # TODO: make provider configurable instead of hardcoding "orcid"
@@ -429,7 +418,7 @@ async def submit_device_code(
                 "error_message": "Invalid or expired code. Check your terminal and try again.",
             }
         )
-        return RedirectResponse(url=f"{verify_url}?{params}", status_code=302)
+        return RedirectResponse(url=f"/api/v1/auth/device/verify?{params}", status_code=302)
 
 
 @router.post("/device/token")

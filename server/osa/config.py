@@ -202,6 +202,24 @@ class Config(BaseSettings):
         "env_nested_delimiter": "__",  # Allows OSA_DATABASE__URL override
     }
 
+    @property
+    def base_url(self) -> str:
+        """Public base URL derived from domain. HTTPS unless localhost."""
+        scheme = "http" if self.domain == "localhost" else "https"
+        return f"{scheme}://{self.domain}"
+
+    @model_validator(mode="after")
+    def derive_callback_url(self) -> Self:
+        """Derive OAuth callback URL from domain if not explicitly set.
+
+        Uses HTTPS for all domains except localhost (which uses HTTP).
+        This avoids relying on request.url_for() which sees HTTP behind
+        TLS-terminating proxies/ingresses.
+        """
+        if not self.auth.callback_url:
+            self.auth.callback_url = f"{self.base_url}/api/v1/auth/callback"
+        return self
+
     @model_validator(mode="after")
     def derive_database_url(self) -> Self:
         """Derive database URL from OSAPaths if not explicitly set.
