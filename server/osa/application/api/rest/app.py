@@ -57,15 +57,15 @@ def create_app() -> FastAPI:
 
     # Configure logging early
     configure_logging(config.logging)
-    logger.info("Starting OSA server: %s v%s", config.server.name, config.server.version)
+    logger.info("Starting OSA server: %s v%s", config.name, config.version)
 
     # Validate all handlers have authorization declarations (fail fast)
     validate_all_handlers()
 
     app_instance = FastAPI(
-        title=config.server.name,
-        description=config.server.description,
-        version=config.server.version,
+        title=config.name,
+        description=config.description,
+        version=config.version,
         lifespan=lifespan,
     )
 

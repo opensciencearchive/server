@@ -1,35 +1,16 @@
 import logging
 import os
+import re
 import sys
 from pathlib import Path
-from typing import Annotated, Any, Union
+from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 from typing_extensions import Self
 
-from osa.cli.util.paths import OSAPaths
-from osa.infrastructure.index.vector.config import VectorBackendConfig
-
-
-# =============================================================================
-# Index Configuration
-# =============================================================================
-
-# Union of all backend configs (extend as new backends are added)
-AnyBackendConfig = Annotated[
-    Union[VectorBackendConfig],
-    Field(discriminator=None),  # Could add discriminator when more backends exist
-]
-
-
-class IndexConfig(BaseModel):
-    """Configuration for an index."""
-
-    name: str  # Unique name for this index (used in search API)
-    backend: str  # "vector", "keyword", etc.
-    config: AnyBackendConfig
+from osa.util.paths import OSAPaths
 
 
 # =============================================================================
@@ -64,15 +45,6 @@ class Frontend(BaseModel):
     """Frontend configuration (nested in Config, uses env_nested_delimiter)."""
 
     url: str = "http://localhost:3000"
-
-
-class Server(BaseModel):
-    """Server configuration (nested in Config, uses env_nested_delimiter)."""
-
-    name: str = "Open Science Archive"
-    version: str = "0.0.1"  # TODO: better type?
-    description: str = "An open platform for depositing scientific data"
-    domain: str = "localhost"  # Node domain for SRN construction
 
 
 class DatabaseConfig(BaseModel):
@@ -148,13 +120,41 @@ class JwtConfig(BaseModel):
         return self
 
 
+_ORCID_PATTERN = re.compile(r"^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$")
+
+
+class ProvidersConfig(BaseModel):
+    """Provider-keyed auth provider configuration."""
+
+    orcid: OrcidConfig = OrcidConfig()
+
+
+class AdminsConfig(BaseModel):
+    """Provider-keyed lists of user identifiers for SUPERADMIN bootstrapping."""
+
+    orcid: list[str] = []
+
+    @field_validator("orcid", mode="after")
+    @classmethod
+    def validate_orcid_ids(cls, v: list[str]) -> list[str]:
+        """Validate that each entry matches ORCiD format."""
+        for orcid_id in v:
+            if not _ORCID_PATTERN.match(orcid_id):
+                raise ValueError(
+                    f"Invalid ORCiD ID format: {orcid_id!r}. "
+                    "Expected XXXX-XXXX-XXXX-XXXY where X is a digit and Y is a digit or 'X'."
+                )
+        return v
+
+
 class AuthConfig(BaseModel):
     """Authentication configuration."""
 
-    orcid: OrcidConfig = OrcidConfig()
+    providers: ProvidersConfig = ProvidersConfig()
     jwt: JwtConfig  # Required - no default, must be configured via env vars
     callback_url: str = ""  # Full callback URL (e.g., https://myarchive.org/api/v1/auth/callback)
     base_role: str | None = None  # Implicit role for all authenticated users (e.g., "DEPOSITOR")
+    admins: AdminsConfig = AdminsConfig()
 
 
 _PG_PREFIXES = (
@@ -181,14 +181,18 @@ def _normalize_pg_url(url: str) -> str:
 
 
 class Config(BaseSettings):
+    # Archive identity (promoted from Server model)
+    name: str = "Open Science Archive"
+    version: str = "0.0.1"
+    description: str = "An open platform for depositing scientific data"
+    domain: str = "localhost"  # Node domain for SRN construction
+
     # These are BaseModel, so env_nested_delimiter handles their env vars
-    server: Server = Server()
     frontend: Frontend = Frontend()
     database: DatabaseConfig = DatabaseConfig()
     logging: LoggingConfig = LoggingConfig()
     worker: WorkerConfig = WorkerConfig()  # Background worker settings
     auth: AuthConfig  # Required - set via OSA_AUTH__JWT__SECRET env var
-    indexes: list[IndexConfig] = []  # list of index configs
     host_data_dir: str | None = None  # Host path for OSA_DATA_DIR (sibling container mounts)
 
     model_config = {

@@ -3,7 +3,7 @@ from typing import AsyncIterable
 from dishka import provide
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from osa.cli.util.paths import OSAPaths
+from osa.util.paths import OSAPaths
 from osa.config import Config
 from osa.domain.deposition.port.convention_repository import ConventionRepository
 from osa.domain.deposition.port.ontology_reader import OntologyReader
@@ -152,7 +152,7 @@ class PersistenceProvider(Provider):
         return RecordService(
             record_repo=record_repo,
             outbox=outbox,
-            node_domain=Domain(config.server.domain),
+            node_domain=Domain(config.domain),
             feature_reader=feature_reader,
         )
 

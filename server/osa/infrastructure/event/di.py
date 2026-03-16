@@ -8,7 +8,6 @@ from dishka import AsyncContainer, provide
 from osa.domain.curation.handler import AutoApproveCuration
 from osa.domain.deposition.handler import CreateDepositionFromSource, ReturnToDraft
 from osa.domain.feature.handler import CreateFeatureTables, InsertRecordFeatures
-from osa.domain.index.handler import FanOutToIndexBackends, KeywordIndexHandler, VectorIndexHandler
 from osa.domain.record.handler import ConvertDepositionToRecord
 from osa.domain.shared.event import EventHandler
 from osa.domain.shared.event_log import EventLog
@@ -46,10 +45,6 @@ HANDLERS: HandlerTypes = HandlerTypes(
         AutoApproveCuration,
         # Record handlers
         ConvertDepositionToRecord,
-        # Index handlers
-        FanOutToIndexBackends,
-        VectorIndexHandler,
-        KeywordIndexHandler,
     ]
 )
 

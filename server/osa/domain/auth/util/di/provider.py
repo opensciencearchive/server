@@ -86,7 +86,12 @@ class AuthProvider(Provider):
     ) -> AuthService:
         """Provide AuthService."""
         base_role = Role[config.auth.base_role] if config.auth.base_role else None
-        logger.info("AuthService base_role config: %s -> %s", config.auth.base_role, base_role)
+        admin_orcids = set(config.auth.admins.orcid)
+        logger.info(
+            "AuthService config: base_role=%s, admin_orcids=%d",
+            base_role,
+            len(admin_orcids),
+        )
         return AuthService(
             _user_repo=user_repo,
             _linked_account_repo=linked_account_repo,
@@ -96,6 +101,7 @@ class AuthProvider(Provider):
             _token_service=token_service,
             _outbox=outbox,
             _base_role=base_role,
+            _admin_orcids=admin_orcids,
         )
 
     @provide(scope=Scope.UOW)

@@ -12,4 +12,4 @@ class ValidationProvider(Provider):
 
     @provide(scope=Scope.UOW)
     def get_node_domain(self, config: Config) -> Domain:
-        return Domain(config.server.domain)
+        return Domain(config.domain)

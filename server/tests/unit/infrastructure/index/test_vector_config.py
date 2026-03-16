@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from osa.cli.util.paths import OSAPaths
+from osa.util.paths import OSAPaths
 from osa.infrastructure.index.vector.config import VectorBackendConfig
 
 
