@@ -1,9 +1,7 @@
 name: Image
 
 on:
-  push:
-    branches: [main]
-    paths: [server/**]
+  workflow_call:
   release:
     types: [published]
 
