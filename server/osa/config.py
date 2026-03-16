@@ -93,7 +93,7 @@ class OrcidConfig(BaseModel):
 
     client_id: str = ""
     client_secret: str = ""
-    sandbox: bool = True  # Use sandbox.orcid.org by default
+    sandbox: bool = False  # Use production orcid.org by default
 
     @property
     def base_url(self) -> str:
