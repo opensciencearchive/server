@@ -59,6 +59,7 @@ def make_auth_service(
         _token_service=token_service,
         _outbox=outbox,
         _base_role=base_role,
+        _admin_orcids=set(),
     )
 
 

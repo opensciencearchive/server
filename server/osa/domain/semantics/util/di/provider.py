@@ -25,7 +25,7 @@ class SemanticsProvider(Provider):
     ) -> OntologyService:
         return OntologyService(
             ontology_repo=ontology_repo,
-            node_domain=Domain(config.server.domain),
+            node_domain=Domain(config.domain),
         )
 
     @provide(scope=Scope.UOW)
@@ -38,7 +38,7 @@ class SemanticsProvider(Provider):
         return SchemaService(
             schema_repo=schema_repo,
             ontology_repo=ontology_repo,
-            node_domain=Domain(config.server.domain),
+            node_domain=Domain(config.domain),
         )
 
     # Command Handlers

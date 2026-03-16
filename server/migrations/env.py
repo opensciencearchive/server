@@ -31,7 +31,7 @@ if database_url:
     config.set_main_option("sqlalchemy.url", sync_url)
 else:
     # Derive SQLite URL from OSA_DATA_DIR (same logic as Config class)
-    from osa.cli.util.paths import OSAPaths
+    from osa.util.paths import OSAPaths
 
     paths = OSAPaths()
     paths.ensure_directories()  # Create directories if they don't exist

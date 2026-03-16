@@ -77,9 +77,9 @@ class AuthInfraProvider(Provider):
         providers: dict[str, IdentityProvider] = {}
 
         # Register ORCID if configured
-        if config.auth.orcid.client_id:
+        if config.auth.providers.orcid.client_id:
             providers["orcid"] = OrcidIdentityProvider(
-                config=config.auth.orcid, http_client=http_client
+                config=config.auth.providers.orcid, http_client=http_client
             )
 
         return InMemoryProviderRegistry(providers)

@@ -50,6 +50,7 @@ class AuthService(Service):
     _token_service: TokenService
     _outbox: Outbox
     _base_role: Role | None
+    _admin_orcids: set[str]
 
     async def initiate_login(
         self,
@@ -453,20 +454,24 @@ class AuthService(Service):
         )
         await self._linked_account_repo.save(linked_account)
 
-        # Assign configured base role to new users
-        if self._base_role is not None:
+        # Determine effective role: admin ORCiDs get SUPERADMIN, others get base_role
+        effective_role: Role | None = self._base_role
+        if identity_info.external_id in self._admin_orcids:
+            effective_role = Role.SUPERADMIN
+
+        if effective_role is not None:
             assignment = RoleAssignment.create(
                 user_id=user.id,
-                role=self._base_role,
+                role=effective_role,
                 assigned_by=user.id,
             )
             await self._role_repo.save(assignment)
 
         logger.info(
-            "New user created: user_id=%s, provider=%s, base_role=%s",
+            "New user created: user_id=%s, provider=%s, role=%s",
             user.id,
             identity_info.provider,
-            self._base_role.name if self._base_role else None,
+            effective_role.name if effective_role else None,
         )
 
         return user, linked_account

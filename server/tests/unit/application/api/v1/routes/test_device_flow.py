@@ -62,6 +62,7 @@ def make_auth_service(
         _token_service=make_token_service(),
         _outbox=AsyncMock(),
         _base_role=None,
+        _admin_orcids=set(),
     )
 
 

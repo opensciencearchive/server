@@ -1,6 +1,6 @@
 from dishka import AsyncContainer, make_async_container
 
-from osa.cli.util.paths import OSAPaths
+from osa.util.paths import OSAPaths
 from osa.config import Config
 from osa.domain.auth.util.di import AuthProvider
 from osa.domain.discovery.util.di import DiscoveryProvider

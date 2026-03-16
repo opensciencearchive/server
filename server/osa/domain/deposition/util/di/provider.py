@@ -43,7 +43,7 @@ class DepositionProvider(Provider):
             convention_repo=convention_repo,
             file_storage=file_storage,
             outbox=outbox,
-            node_domain=Domain(config.server.domain),
+            node_domain=Domain(config.domain),
         )
 
     @provide(scope=Scope.UOW)
@@ -58,7 +58,7 @@ class DepositionProvider(Provider):
             convention_repo=convention_repo,
             schema_service=schema_service,
             outbox=outbox,
-            node_domain=Domain(config.server.domain),
+            node_domain=Domain(config.domain),
         )
 
     @provide(scope=Scope.APP)
