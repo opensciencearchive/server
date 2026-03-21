@@ -1,4 +1,4 @@
-"""Unit tests for LocalFileStorageAdapter hook output methods."""
+"""Unit tests for FilesystemStorageAdapter hook output methods."""
 
 import json
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from osa.domain.shared.model.srn import DepositionSRN
-from osa.infrastructure.persistence.adapter.storage import LocalFileStorageAdapter
+from osa.infrastructure.persistence.adapter.storage import FilesystemStorageAdapter
 
 
 def _make_dep_srn() -> DepositionSRN:
@@ -15,7 +15,7 @@ def _make_dep_srn() -> DepositionSRN:
 
 class TestGetHookOutputDir:
     def test_returns_hooks_subdirectory(self, tmp_path: Path):
-        adapter = LocalFileStorageAdapter(base_path=str(tmp_path))
+        adapter = FilesystemStorageAdapter(base_path=str(tmp_path))
         dep_srn = _make_dep_srn()
 
         output_dir = adapter.get_hook_output_dir(dep_srn, "pocket_detect")
@@ -25,7 +25,7 @@ class TestGetHookOutputDir:
         assert output_dir.exists()
 
     def test_creates_directory(self, tmp_path: Path):
-        adapter = LocalFileStorageAdapter(base_path=str(tmp_path))
+        adapter = FilesystemStorageAdapter(base_path=str(tmp_path))
         dep_srn = _make_dep_srn()
 
         output_dir = adapter.get_hook_output_dir(dep_srn, "my_hook")
@@ -33,7 +33,7 @@ class TestGetHookOutputDir:
         assert output_dir.is_dir()
 
     def test_idempotent(self, tmp_path: Path):
-        adapter = LocalFileStorageAdapter(base_path=str(tmp_path))
+        adapter = FilesystemStorageAdapter(base_path=str(tmp_path))
         dep_srn = _make_dep_srn()
 
         dir1 = adapter.get_hook_output_dir(dep_srn, "hook_a")
@@ -45,7 +45,7 @@ class TestGetHookOutputDir:
 class TestReadHookFeatures:
     @pytest.mark.asyncio
     async def test_reads_features_list(self, tmp_path: Path):
-        adapter = LocalFileStorageAdapter(base_path=str(tmp_path))
+        adapter = FilesystemStorageAdapter(base_path=str(tmp_path))
         dep_srn = _make_dep_srn()
 
         # Write features.json in the output/ subdirectory
@@ -60,7 +60,7 @@ class TestReadHookFeatures:
 
     @pytest.mark.asyncio
     async def test_reads_features_dict(self, tmp_path: Path):
-        adapter = LocalFileStorageAdapter(base_path=str(tmp_path))
+        adapter = FilesystemStorageAdapter(base_path=str(tmp_path))
         dep_srn = _make_dep_srn()
 
         output_dir = tmp_path / "depositions" / "localhost_test-dep" / "hooks" / "detect" / "output"
@@ -74,7 +74,7 @@ class TestReadHookFeatures:
 
     @pytest.mark.asyncio
     async def test_returns_empty_when_missing(self, tmp_path: Path):
-        adapter = LocalFileStorageAdapter(base_path=str(tmp_path))
+        adapter = FilesystemStorageAdapter(base_path=str(tmp_path))
         dep_srn = _make_dep_srn()
 
         features = await adapter.read_hook_features(dep_srn, "nonexistent")
@@ -85,7 +85,7 @@ class TestReadHookFeatures:
 class TestHookFeaturesExist:
     @pytest.mark.asyncio
     async def test_true_when_file_exists(self, tmp_path: Path):
-        adapter = LocalFileStorageAdapter(base_path=str(tmp_path))
+        adapter = FilesystemStorageAdapter(base_path=str(tmp_path))
         dep_srn = _make_dep_srn()
 
         output_dir = tmp_path / "depositions" / "localhost_test-dep" / "hooks" / "detect" / "output"
@@ -96,7 +96,7 @@ class TestHookFeaturesExist:
 
     @pytest.mark.asyncio
     async def test_false_when_missing(self, tmp_path: Path):
-        adapter = LocalFileStorageAdapter(base_path=str(tmp_path))
+        adapter = FilesystemStorageAdapter(base_path=str(tmp_path))
         dep_srn = _make_dep_srn()
 
         assert await adapter.hook_features_exist(dep_srn, "nonexistent") is False
@@ -105,7 +105,7 @@ class TestHookFeaturesExist:
 class TestDeleteCleansHookOutputs:
     @pytest.mark.asyncio
     async def test_rmtree_removes_hooks_dir(self, tmp_path: Path):
-        adapter = LocalFileStorageAdapter(base_path=str(tmp_path))
+        adapter = FilesystemStorageAdapter(base_path=str(tmp_path))
         dep_srn = _make_dep_srn()
 
         # Create hook output

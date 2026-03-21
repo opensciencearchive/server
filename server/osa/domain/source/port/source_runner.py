@@ -14,6 +14,7 @@ from osa.domain.shared.model.source import SourceDefinition
 class SourceInputs:
     """Inputs for a source container run."""
 
+    convention_srn: str
     config: dict[str, Any] | None = None
     since: datetime | None = None
     limit: int | None = None

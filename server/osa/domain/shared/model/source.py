@@ -33,7 +33,6 @@ class SourceDefinition(ValueObject):
 
     image: str
     digest: str
-    runner: str = "oci"
     config: dict[str, Any] | None = None
     limits: SourceLimits = Field(default_factory=SourceLimits)
     schedule: SourceScheduleConfig | None = None

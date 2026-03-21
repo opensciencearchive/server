@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import shutil
 import tempfile
 from collections.abc import AsyncIterator
@@ -9,10 +10,13 @@ from typing import Any
 
 from osa.domain.deposition.model.value import DepositionFile
 from osa.domain.deposition.port.storage import FileStoragePort
+from osa.domain.shared.error import InfrastructureError
 from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
 
+logger = logging.getLogger(__name__)
 
-class LocalFileStorageAdapter(FileStoragePort):
+
+class FilesystemStorageAdapter(FileStoragePort):
     """Local filesystem adapter satisfying all domain storage ports.
 
     Implements FileStoragePort (deposition files), SourceStoragePort,
@@ -80,12 +84,16 @@ class LocalFileStorageAdapter(FileStoragePort):
         files_dir = self._files_dir(deposition_id)
         target = self._safe_path(files_dir, filename)
 
-        # Atomic write: write to temp file then rename
+        # Atomic write: write to temp file then rename (copy+delete on S3 CSI)
         fd, tmp_path = tempfile.mkstemp(dir=files_dir)
         try:
             with open(fd, "wb") as f:
                 f.write(content)
-            Path(tmp_path).rename(target)
+            try:
+                Path(tmp_path).rename(target)
+            except OSError:
+                shutil.copy2(tmp_path, target)
+                Path(tmp_path).unlink(missing_ok=True)
         except Exception:
             Path(tmp_path).unlink(missing_ok=True)
             raise
@@ -158,9 +166,17 @@ class LocalFileStorageAdapter(FileStoragePort):
         if not source_files_dir.exists():
             return
         files_dir = self._files_dir(deposition_srn)
-        # Rename entire source_id directory contents into deposition files dir
+        # Move files into deposition dir (copy+delete fallback for S3 CSI)
         for f in source_files_dir.iterdir():
             target = files_dir / f.name
-            f.rename(target)
+            try:
+                f.rename(target)
+            except OSError:
+                try:
+                    shutil.copy2(f, target)
+                    f.unlink()
+                except OSError as e:
+                    raise InfrastructureError(f"Failed to copy file {f.name}: {e}") from e
         # Clean up empty source_id directory
-        source_files_dir.rmdir()
+        if source_files_dir.exists():
+            source_files_dir.rmdir()

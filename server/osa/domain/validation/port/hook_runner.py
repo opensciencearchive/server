@@ -15,6 +15,7 @@ class HookInputs:
     """Inputs to pass to a hook container."""
 
     record_json: dict
+    deposition_srn: str
     files_dir: Path | None = None
     config: dict | None = None
 

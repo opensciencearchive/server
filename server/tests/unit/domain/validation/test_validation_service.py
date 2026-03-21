@@ -62,6 +62,7 @@ def _make_service(
 def _make_inputs() -> HookInputs:
     return HookInputs(
         record_json={"srn": "urn:osa:localhost:dep:test123", "metadata": {"name": "test"}},
+        deposition_srn="urn:osa:localhost:dep:test123",
     )
 
 

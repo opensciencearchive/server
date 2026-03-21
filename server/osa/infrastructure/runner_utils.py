@@ -1,0 +1,100 @@
+"""Shared result-parsing utilities for OCI and K8s runners."""
+
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+from osa.domain.validation.model.hook_result import ProgressEntry
+
+
+def parse_progress_file(output_dir: Path) -> list[ProgressEntry]:
+    """Parse progress.jsonl from hook output directory."""
+    progress_file = output_dir / "progress.jsonl"
+    if not progress_file.exists():
+        return []
+
+    entries = []
+    for line in progress_file.read_text().strip().split("\n"):
+        if not line.strip():
+            continue
+        try:
+            data = json.loads(line)
+            entries.append(
+                ProgressEntry(
+                    step=data.get("step"),
+                    status=data.get("status", "unknown"),
+                    message=data.get("message"),
+                )
+            )
+        except json.JSONDecodeError:
+            continue
+    return entries
+
+
+def detect_rejection(progress: list[ProgressEntry]) -> tuple[bool, str | None]:
+    """Check if any progress entry indicates rejection.
+
+    Returns (is_rejected, rejection_reason).
+    """
+    for entry in reversed(progress):
+        if entry.status == "rejected":
+            return True, entry.message
+    return False, None
+
+
+def parse_memory(memory: str) -> int:
+    """Parse memory string like '2g' or '512m' to bytes."""
+    memory = memory.strip().lower()
+    match = re.match(r"^(\d+(?:\.\d+)?)(g|m|k)?i?$", memory)
+    if not match:
+        raise ValueError(f"Invalid memory format: {memory}")
+
+    amount = float(match.group(1))
+    unit = match.group(2)
+
+    match unit:
+        case "g":
+            return int(amount * 1024 * 1024 * 1024)
+        case "m":
+            return int(amount * 1024 * 1024)
+        case "k":
+            return int(amount * 1024)
+        case None:
+            return int(amount)
+        case _:
+            raise ValueError(f"Unknown memory unit: {unit}")
+
+
+def parse_records_file(output_dir: Path) -> list[dict[str, Any]]:
+    """Parse records.jsonl from source output directory."""
+    import logfire
+
+    records: list[dict[str, Any]] = []
+    records_file = output_dir / "records.jsonl"
+    if not records_file.exists():
+        return records
+
+    for line in records_file.read_text().strip().split("\n"):
+        if not line.strip():
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            logfire.warn("Skipping invalid JSON line in records.jsonl")
+            continue
+    return records
+
+
+def parse_session_file(output_dir: Path) -> dict[str, Any] | None:
+    """Parse session.json from source output directory."""
+    import logfire
+
+    session_file = output_dir / "session.json"
+    if not session_file.exists():
+        return None
+    try:
+        return json.loads(session_file.read_text())
+    except json.JSONDecodeError:
+        logfire.warn("Invalid session.json")
+        return None

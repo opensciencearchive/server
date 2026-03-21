@@ -3,7 +3,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, field_validator, model_validator
@@ -81,6 +81,24 @@ class WorkerConfig(BaseModel):
 
     poll_interval: float = 0.5  # Seconds between outbox polls
     batch_size: int = 100  # Maximum events to fetch per poll cycle
+
+
+class K8sConfig(BaseModel):
+    """Kubernetes-specific runner settings, required when runner.backend == "k8s"."""
+
+    namespace: str = "osa"
+    service_account: str | None = None
+    data_pvc_name: str = ""
+    data_mount_path: str = "/data"
+    image_pull_secrets: list[str] = []
+    job_ttl_seconds: int = 300
+
+
+class RunnerConfig(BaseModel):
+    """Runner backend selection and Kubernetes configuration."""
+
+    backend: Literal["oci", "k8s"] = "oci"
+    k8s: K8sConfig = K8sConfig()
 
 
 # =============================================================================
@@ -193,6 +211,7 @@ class Config(BaseSettings):
     logging: LoggingConfig = LoggingConfig()
     worker: WorkerConfig = WorkerConfig()  # Background worker settings
     auth: AuthConfig  # Required - set via OSA_AUTH__JWT__SECRET env var
+    runner: RunnerConfig = RunnerConfig()
     host_data_dir: str | None = None  # Host path for OSA_DATA_DIR (sibling container mounts)
 
     model_config = {

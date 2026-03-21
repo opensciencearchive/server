@@ -15,6 +15,11 @@ from osa.domain.shared.model.hook import (
 from osa.domain.validation.model.hook_result import HookStatus, ProgressEntry
 from osa.domain.validation.port.hook_runner import HookInputs
 from osa.infrastructure.oci.runner import OciHookRunner
+from osa.infrastructure.runner_utils import (
+    detect_rejection,
+    parse_memory,
+    parse_progress_file,
+)
 
 
 def _make_hook(
@@ -47,43 +52,34 @@ def _make_runner(docker: AsyncMock | None = None) -> OciHookRunner:
 
 class TestParseMemory:
     def test_gigabytes(self):
-        runner = _make_runner()
-        assert runner._parse_memory("2g") == 2 * 1024 * 1024 * 1024
+        assert parse_memory("2g") == 2 * 1024 * 1024 * 1024
 
     def test_megabytes(self):
-        runner = _make_runner()
-        assert runner._parse_memory("512m") == 512 * 1024 * 1024
+        assert parse_memory("512m") == 512 * 1024 * 1024
 
     def test_kilobytes(self):
-        runner = _make_runner()
-        assert runner._parse_memory("1024k") == 1024 * 1024
+        assert parse_memory("1024k") == 1024 * 1024
 
     def test_bare_bytes(self):
-        runner = _make_runner()
-        assert runner._parse_memory("1048576") == 1048576
+        assert parse_memory("1048576") == 1048576
 
     def test_fractional(self):
-        runner = _make_runner()
-        assert runner._parse_memory("1.5g") == int(1.5 * 1024 * 1024 * 1024)
+        assert parse_memory("1.5g") == int(1.5 * 1024 * 1024 * 1024)
 
     def test_case_insensitive(self):
-        runner = _make_runner()
-        assert runner._parse_memory("2G") == 2 * 1024 * 1024 * 1024
+        assert parse_memory("2G") == 2 * 1024 * 1024 * 1024
 
     def test_with_i_suffix(self):
-        runner = _make_runner()
-        assert runner._parse_memory("2gi") == 2 * 1024 * 1024 * 1024
+        assert parse_memory("2gi") == 2 * 1024 * 1024 * 1024
 
     def test_invalid_format(self):
-        runner = _make_runner()
         with pytest.raises(ValueError, match="Invalid memory format"):
-            runner._parse_memory("abc")
+            parse_memory("abc")
 
 
 class TestParseProgress:
     def test_empty_when_no_file(self, tmp_path: Path):
-        runner = _make_runner()
-        entries = runner._parse_progress(tmp_path)
+        entries = parse_progress_file(tmp_path)
         assert entries == []
 
     def test_parses_valid_jsonl(self, tmp_path: Path):
@@ -92,8 +88,7 @@ class TestParseProgress:
             '{"step":"Loading","status":"completed","message":"Done"}\n'
             '{"step":"Analyzing","status":"completed","message":"Finished"}\n'
         )
-        runner = _make_runner()
-        entries = runner._parse_progress(tmp_path)
+        entries = parse_progress_file(tmp_path)
         assert len(entries) == 2
         assert entries[0].step == "Loading"
         assert entries[0].status == "completed"
@@ -106,8 +101,7 @@ class TestParseProgress:
             "not valid json\n"
             '{"step":"AlsoGood","status":"completed"}\n'
         )
-        runner = _make_runner()
-        entries = runner._parse_progress(tmp_path)
+        entries = parse_progress_file(tmp_path)
         assert len(entries) == 2
 
     def test_skips_blank_lines(self, tmp_path: Path):
@@ -115,15 +109,13 @@ class TestParseProgress:
         progress_file.write_text(
             '{"step":"A","status":"completed"}\n\n{"step":"B","status":"completed"}\n'
         )
-        runner = _make_runner()
-        entries = runner._parse_progress(tmp_path)
+        entries = parse_progress_file(tmp_path)
         assert len(entries) == 2
 
     def test_handles_missing_optional_fields(self, tmp_path: Path):
         progress_file = tmp_path / "progress.jsonl"
         progress_file.write_text('{"status":"completed"}\n')
-        runner = _make_runner()
-        entries = runner._parse_progress(tmp_path)
+        entries = parse_progress_file(tmp_path)
         assert len(entries) == 1
         assert entries[0].step is None
         assert entries[0].message is None
@@ -131,34 +123,35 @@ class TestParseProgress:
 
 class TestCheckRejection:
     def test_no_rejection(self):
-        runner = _make_runner()
         entries = [
             ProgressEntry(step="Load", status="completed", message="OK"),
             ProgressEntry(step="Process", status="completed", message="Done"),
         ]
-        assert runner._check_rejection(entries) is None
+        rejected, reason = detect_rejection(entries)
+        assert not rejected
+        assert reason is None
 
     def test_detects_rejection(self):
-        runner = _make_runner()
         entries = [
             ProgressEntry(step="Load", status="completed", message="OK"),
             ProgressEntry(step="Validate", status="rejected", message="Missing atoms"),
         ]
-        result = runner._check_rejection(entries)
-        assert result == "Missing atoms"
+        rejected, reason = detect_rejection(entries)
+        assert rejected
+        assert reason == "Missing atoms"
 
     def test_empty_progress(self):
-        runner = _make_runner()
-        assert runner._check_rejection([]) is None
+        rejected, reason = detect_rejection([])
+        assert not rejected
 
     def test_returns_last_rejection(self):
         """When multiple rejections exist, returns the most recent."""
-        runner = _make_runner()
         entries = [
             ProgressEntry(step="A", status="rejected", message="First rejection"),
             ProgressEntry(step="B", status="rejected", message="Second rejection"),
         ]
-        assert runner._check_rejection(entries) == "Second rejection"
+        rejected, reason = detect_rejection(entries)
+        assert reason == "Second rejection"
 
 
 class TestContainerLifecycle:
@@ -172,7 +165,9 @@ class TestContainerLifecycle:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
-        inputs = HookInputs(record_json={"srn": "test"})
+        inputs = HookInputs(
+            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:test123"
+        )
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
@@ -195,7 +190,9 @@ class TestContainerLifecycle:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
-        inputs = HookInputs(record_json={"srn": "test"})
+        inputs = HookInputs(
+            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:test123"
+        )
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
@@ -215,7 +212,9 @@ class TestContainerLifecycle:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
-        inputs = HookInputs(record_json={"srn": "test"})
+        inputs = HookInputs(
+            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:test123"
+        )
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
@@ -242,7 +241,9 @@ class TestContainerLifecycle:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook(timeout=1)  # 1 second timeout
-        inputs = HookInputs(record_json={"srn": "test"})
+        inputs = HookInputs(
+            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:test123"
+        )
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
@@ -262,7 +263,9 @@ class TestContainerLifecycle:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
-        inputs = HookInputs(record_json={"srn": "test"})
+        inputs = HookInputs(
+            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:test123"
+        )
 
         work_dir = tmp_path / "hook_work"
         work_dir.mkdir()
@@ -292,7 +295,9 @@ class TestContainerConfig:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook(memory="4g", cpu="4.0")
-        inputs = HookInputs(record_json={"srn": "test"})
+        inputs = HookInputs(
+            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:test123"
+        )
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
@@ -323,7 +328,9 @@ class TestContainerConfig:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
-        inputs = HookInputs(record_json={"srn": "test"})
+        inputs = HookInputs(
+            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:test123"
+        )
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
@@ -350,7 +357,11 @@ class TestContainerConfig:
         hook = _make_hook()
         files_dir = tmp_path / "files"
         files_dir.mkdir()
-        inputs = HookInputs(record_json={"srn": "test"}, files_dir=files_dir)
+        inputs = HookInputs(
+            record_json={"srn": "test"},
+            deposition_srn="urn:osa:localhost:dep:test123",
+            files_dir=files_dir,
+        )
 
         work_dir = tmp_path / "hook_work"
         work_dir.mkdir()
@@ -382,7 +393,11 @@ class TestContainerConfig:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
-        inputs = HookInputs(record_json={"srn": "test"}, files_dir=None)
+        inputs = HookInputs(
+            record_json={"srn": "test"},
+            deposition_srn="urn:osa:localhost:dep:test123",
+            files_dir=None,
+        )
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
@@ -407,7 +422,9 @@ class TestContainerConfig:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
-        inputs = HookInputs(record_json={"srn": "test"})
+        inputs = HookInputs(
+            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:test123"
+        )
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()

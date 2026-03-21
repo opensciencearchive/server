@@ -3,7 +3,6 @@
 import asyncio
 import json
 import os
-import re
 import stat
 import time
 from pathlib import Path
@@ -13,8 +12,13 @@ import aiodocker
 import logfire
 
 from osa.domain.shared.model.hook import HookDefinition
-from osa.domain.validation.model.hook_result import HookResult, HookStatus, ProgressEntry
+from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
+from osa.infrastructure.runner_utils import (
+    detect_rejection,
+    parse_memory,
+    parse_progress_file,
+)
 
 
 def _force_remove(func, path, exc):
@@ -83,7 +87,12 @@ class OciHookRunner(HookRunner):
                 )
             except asyncio.TimeoutError:
                 duration = time.monotonic() - start_time
-                logfire.error("Hook timed out", hook=hook.name, timeout=timeout)
+                logfire.error(
+                    "Hook timed out",
+                    hook=hook.name,
+                    deposition_srn=inputs.deposition_srn,
+                    timeout=timeout,
+                )
                 return HookResult(
                     hook_name=hook.name,
                     status=HookStatus.FAILED,
@@ -122,8 +131,8 @@ class OciHookRunner(HookRunner):
                 "User": "65534:65534",
                 "HostConfig": {
                     "Binds": binds,
-                    "Memory": self._parse_memory(hook.runtime.limits.memory),
-                    "MemorySwap": self._parse_memory(hook.runtime.limits.memory),
+                    "Memory": parse_memory(hook.runtime.limits.memory),
+                    "MemorySwap": parse_memory(hook.runtime.limits.memory),
                     "NanoCpus": int(float(hook.runtime.limits.cpu) * 1e9),
                     "NetworkMode": "none",
                     "ReadonlyRootfs": True,
@@ -151,11 +160,11 @@ class OciHookRunner(HookRunner):
                 }
 
             # Parse progress file
-            progress = self._parse_progress(output_dir)
+            progress = parse_progress_file(output_dir)
 
             # Check for rejection in progress
-            rejection = self._check_rejection(progress)
-            if rejection:
+            rejected, rejection = detect_rejection(progress)
+            if rejected:
                 return {
                     "status": HookStatus.REJECTED,
                     "rejection_reason": rejection,
@@ -223,55 +232,3 @@ class OciHookRunner(HookRunner):
         logfire.info("Pulling hook image", image=image)
         await self._docker.images.pull(image)
         return image
-
-    def _parse_progress(self, osa_out: Path) -> list[ProgressEntry]:
-        """Parse progress.jsonl from hook output."""
-        progress_file = osa_out / "progress.jsonl"
-        if not progress_file.exists():
-            return []
-
-        entries = []
-        for line in progress_file.read_text().strip().split("\n"):
-            if not line.strip():
-                continue
-            try:
-                data = json.loads(line)
-                entries.append(
-                    ProgressEntry(
-                        step=data.get("step"),
-                        status=data.get("status", "unknown"),
-                        message=data.get("message"),
-                    )
-                )
-            except json.JSONDecodeError:
-                continue
-        return entries
-
-    def _check_rejection(self, progress: list[ProgressEntry]) -> str | None:
-        """Check if any progress entry indicates rejection."""
-        for entry in reversed(progress):
-            if entry.status == "rejected":
-                return entry.message
-        return None
-
-    def _parse_memory(self, memory: str) -> int:
-        """Parse memory string like '2g' or '512m' to bytes."""
-        memory = memory.strip().lower()
-        match = re.match(r"^(\d+(?:\.\d+)?)(g|m|k)?i?$", memory)
-        if not match:
-            raise ValueError(f"Invalid memory format: {memory}")
-
-        amount = float(match.group(1))
-        unit = match.group(2)
-
-        match unit:
-            case "g":
-                return int(amount * 1024 * 1024 * 1024)
-            case "m":
-                return int(amount * 1024 * 1024)
-            case "k":
-                return int(amount * 1024)
-            case None:
-                return int(amount)
-            case _:
-                raise ValueError(f"Unknown memory unit: {unit}")

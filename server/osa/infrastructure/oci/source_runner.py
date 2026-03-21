@@ -3,7 +3,6 @@
 import asyncio
 import json
 import os
-import re
 import stat
 import time
 from pathlib import Path
@@ -14,6 +13,11 @@ import logfire
 from osa.domain.shared.error import ExternalServiceError
 from osa.domain.shared.model.source import SourceDefinition
 from osa.domain.source.port.source_runner import SourceInputs, SourceOutput, SourceRunner
+from osa.infrastructure.runner_utils import (
+    parse_memory,
+    parse_records_file,
+    parse_session_file,
+)
 
 
 class OciSourceRunner(SourceRunner):
@@ -133,8 +137,8 @@ class OciSourceRunner(SourceRunner):
                 "Env": env,
                 "HostConfig": {
                     "Binds": binds,
-                    "Memory": self._parse_memory(source.limits.memory),
-                    "MemorySwap": self._parse_memory(source.limits.memory),
+                    "Memory": parse_memory(source.limits.memory),
+                    "MemorySwap": parse_memory(source.limits.memory),
                     "NanoCpus": int(float(source.limits.cpu) * 1e9),
                     # No NetworkMode: "none" — sources need network access
                     # No ReadonlyRootfs — sources may need writable FS
@@ -162,7 +166,9 @@ class OciSourceRunner(SourceRunner):
                 logs_str = "".join(logs) if logs else ""
                 raise ExternalServiceError(f"Source exited with code {exit_code}: {logs_str[:500]}")
 
-            return self._parse_output(output_dir, files_dir)
+            records = parse_records_file(output_dir)
+            session = parse_session_file(output_dir)
+            return SourceOutput(records=records, session=session, files_dir=files_dir)
 
         except aiodocker.DockerError as e:
             logfire.error("Docker error running source", error=str(e))
@@ -207,49 +213,3 @@ class OciSourceRunner(SourceRunner):
         logfire.info("Pulling source image", image=image)
         await self._docker.images.pull(image)
         return image
-
-    def _parse_output(self, output_dir: Path, files_dir: Path) -> SourceOutput:
-        """Parse records.jsonl and session.json from the output directory."""
-        records: list[dict] = []
-        records_file = output_dir / "records.jsonl"
-        if records_file.exists():
-            for line in records_file.read_text().strip().split("\n"):
-                if not line.strip():
-                    continue
-                try:
-                    records.append(json.loads(line))
-                except json.JSONDecodeError:
-                    logfire.warn("Skipping invalid JSON line in records.jsonl")
-                    continue
-
-        session = None
-        session_file = output_dir / "session.json"
-        if session_file.exists():
-            try:
-                session = json.loads(session_file.read_text())
-            except json.JSONDecodeError:
-                logfire.warn("Invalid session.json")
-
-        return SourceOutput(records=records, session=session, files_dir=files_dir)
-
-    def _parse_memory(self, memory: str) -> int:
-        """Parse memory string like '4g' or '512m' to bytes."""
-        memory = memory.strip().lower()
-        match = re.match(r"^(\d+(?:\.\d+)?)(g|m|k)?i?$", memory)
-        if not match:
-            raise ValueError(f"Invalid memory format: {memory}")
-
-        amount = float(match.group(1))
-        unit = match.group(2)
-
-        match unit:
-            case "g":
-                return int(amount * 1024 * 1024 * 1024)
-            case "m":
-                return int(amount * 1024 * 1024)
-            case "k":
-                return int(amount * 1024)
-            case None:
-                return int(amount)
-            case _:
-                raise ValueError(f"Unknown memory unit: {unit}")

@@ -15,7 +15,7 @@ from osa.infrastructure.auth import AuthInfraProvider
 from osa.infrastructure.event.di import EventProvider
 from osa.infrastructure.http.di import HttpProvider
 from osa.infrastructure.index.di import IndexProvider
-from osa.infrastructure.oci import OciProvider
+from osa.infrastructure.k8s.di import RunnerProvider
 from osa.infrastructure.persistence import PersistenceProvider
 from osa.infrastructure.source.di import SourceProvider
 from osa.util.di.scope import Scope
@@ -42,7 +42,7 @@ def create_container(
 
     return make_async_container(
         PersistenceProvider(),
-        OciProvider(),
+        RunnerProvider(),
         IndexProvider(),
         SourceProvider(),
         EventProvider(extra_handlers=extra_handlers),
