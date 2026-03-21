@@ -137,7 +137,6 @@ class K8sSourceRunner(SourceRunner):
             # Phase 2: Completion
             result = await self._wait_for_completion(
                 batch_api,
-                core_api,
                 job_name_to_watch,
                 namespace,
                 timeout_seconds=source.limits.timeout_seconds + 30,
@@ -363,7 +362,6 @@ class K8sSourceRunner(SourceRunner):
     async def _wait_for_completion(
         self,
         batch_api: BatchV1Api,
-        core_api: CoreV1Api,
         job_name: str,
         namespace: str,
         *,

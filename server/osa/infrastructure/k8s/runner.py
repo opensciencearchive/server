@@ -136,7 +136,6 @@ class K8sHookRunner(HookRunner):
             # Phase 2: Wait for completion
             result = await self._wait_for_completion(
                 batch_api,
-                core_api,
                 job_name_to_watch,
                 namespace,
                 timeout_seconds=hook.runtime.limits.timeout_seconds + 30,
@@ -385,7 +384,6 @@ class K8sHookRunner(HookRunner):
     async def _wait_for_completion(
         self,
         batch_api: BatchV1Api,
-        core_api: CoreV1Api,
         job_name: str,
         namespace: str,
         *,
