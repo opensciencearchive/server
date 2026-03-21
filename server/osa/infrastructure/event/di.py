@@ -27,30 +27,28 @@ logger = logging.getLogger(__name__)
 # Type alias for handler list
 HandlerTypes = NewType("HandlerTypes", list[type[EventHandler[Any]]])
 
-# All event handlers for WorkerPool registration
-HANDLERS: HandlerTypes = HandlerTypes(
-    [
-        # Feature handlers (must run before source triggers)
-        CreateFeatureTables,
-        InsertRecordFeatures,
-        # Source handlers
-        TriggerInitialSourceRun,
-        PullFromSource,
-        # Validation handlers
-        ValidateDeposition,
-        # Deposition handlers
-        CreateDepositionFromSource,
-        ReturnToDraft,
-        # Curation handlers
-        AutoApproveCuration,
-        # Record handlers
-        ConvertDepositionToRecord,
-    ]
-)
+# Core event handlers shipped with OSA
+_CORE_HANDLERS: list[type[EventHandler[Any]]] = [
+    # Feature handlers (must run before source triggers)
+    CreateFeatureTables,
+    InsertRecordFeatures,
+    # Source handlers
+    TriggerInitialSourceRun,
+    PullFromSource,
+    # Validation handlers
+    ValidateDeposition,
+    # Deposition handlers
+    CreateDepositionFromSource,
+    ReturnToDraft,
+    # Curation handlers
+    AutoApproveCuration,
+    # Record handlers
+    ConvertDepositionToRecord,
+]
 
 
 def build_subscription_registry(handlers: HandlerTypes) -> SubscriptionRegistry:
-    """Build a SubscriptionRegistry from the HANDLERS list.
+    """Build a SubscriptionRegistry from handler list.
 
     Maps each handler's __event_type__.__name__ → handler.__name__.
     """
@@ -68,7 +66,36 @@ class EventProvider(Provider):
 
     Handlers, Schedules, and Outbox are UOW-scoped (fresh per unit of work).
     WorkerPool and SubscriptionRegistry are APP-scoped singletons.
+
+    To register additional event handlers (e.g. from an external package),
+    pass them to the constructor::
+
+        EventProvider(extra_handlers=[MeterUsage, SendNotification])
+
+    Extra handlers are merged with the core handlers for subscription
+    routing, WorkerPool registration, and DI resolution.
     """
+
+    def __init__(
+        self,
+        *,
+        extra_handlers: list[type[EventHandler[Any]]] | None = None,
+    ) -> None:
+        super().__init__()
+        self._all_handlers = HandlerTypes([*_CORE_HANDLERS, *(extra_handlers or [])])
+
+        # Register DI bindings for every handler (core + extra).
+        # Each handler becomes a UOW-scoped dependency that Dishka can
+        # instantiate with its declared fields injected.
+        seen: set[type] = set()
+        for handler_type in self._all_handlers:
+            if handler_type in seen:
+                raise ValueError(
+                    f"Duplicate event handler registration: {handler_type.__name__!r}. "
+                    "Remove it from extra_handlers — it is already a core handler."
+                )
+            seen.add(handler_type)
+            self.provide(handler_type, scope=Scope.UOW)
 
     # UOW-scoped Outbox (wraps EventRepository + SubscriptionRegistry)
     @provide(scope=Scope.UOW)
@@ -80,17 +107,13 @@ class EventProvider(Provider):
     def get_event_log(self, repo: EventRepository) -> EventLog:
         return EventLog(repo)
 
-    # UOW-scoped providers for handlers
-    for _handler_type in HANDLERS:
-        locals()[_handler_type.__name__] = provide(_handler_type, scope=Scope.UOW)
-
     # UOW-scoped provider for SourceSchedule
     source_schedule = provide(SourceSchedule, scope=Scope.UOW)
 
     @provide(scope=Scope.APP)
     def get_handler_types(self) -> HandlerTypes:
-        """Return the handler types for WorkerPool registration."""
-        return HANDLERS
+        """Return all handler types (core + extra) for WorkerPool registration."""
+        return self._all_handlers
 
     @provide(scope=Scope.APP)
     def get_subscription_registry(self, handler_types: HandlerTypes) -> SubscriptionRegistry:

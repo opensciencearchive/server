@@ -209,6 +209,13 @@ class Config(BaseSettings):
         return f"{scheme}://{self.domain}"
 
     @model_validator(mode="after")
+    def derive_frontend_url(self) -> Self:
+        """Derive frontend URL from domain if still the default localhost value."""
+        if self.frontend.url == "http://localhost:3000":
+            self.frontend = Frontend(url=self.base_url)
+        return self
+
+    @model_validator(mode="after")
     def derive_callback_url(self) -> Self:
         """Derive OAuth callback URL from domain if not explicitly set.
 

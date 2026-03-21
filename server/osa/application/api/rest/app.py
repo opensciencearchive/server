@@ -1,7 +1,9 @@
 import logging
 from contextlib import asynccontextmanager
+from typing import Any
 
 import logfire
+from dishka import Provider as DishkaProvider
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -26,6 +28,7 @@ from osa.application.di import create_container
 from osa.config import Config, configure_logging
 from osa.domain.shared.authorization.startup import validate_all_handlers
 from osa.domain.shared.error import OSAError
+from osa.domain.shared.event import EventHandler
 from osa.infrastructure.event.worker import WorkerPool
 from osa.infrastructure.persistence.seed import ensure_system_user
 from osa.util.di.fastapi import setup_dishka
@@ -50,8 +53,30 @@ async def lifespan(app: FastAPI):
     await container.close()
 
 
-def create_app() -> FastAPI:
-    """Create FastAPI application."""
+def create_app(
+    *,
+    providers: list[DishkaProvider] | None = None,
+    extra_handlers: list[type[EventHandler[Any]]] | None = None,
+) -> FastAPI:
+    """Create FastAPI application.
+
+    This is the main entry point for running OSA. External hosts (e.g.
+    Amacrin) use the keyword arguments to customise the runtime without
+    duplicating any app wiring::
+
+        app = create_app(
+            providers=[K8sProvider()],
+            extra_handlers=[MeterUsage, SendNotification],
+        )
+
+    Args:
+        providers: Extra Dishka providers that override the built-in
+            bindings. For example, pass a ``K8sProvider`` to replace the
+            default OCI container runner with a Kubernetes-based one.
+        extra_handlers: Extra event handler types registered alongside
+            the core handlers for subscription routing, WorkerPool
+            registration, and DI resolution.
+    """
     # Pydantic Settings populates from env vars at runtime
     config = Config()  # type: ignore[call-arg]
 
@@ -74,7 +99,10 @@ def create_app() -> FastAPI:
     logfire.instrument_fastapi(app_instance)
 
     # Setup dependency injection
-    container = create_container()
+    container = create_container(
+        *(providers or []),
+        extra_handlers=extra_handlers,
+    )
     setup_dishka(container, app_instance)
 
     # Register v1 routes with /api/v1 prefix
@@ -115,10 +143,3 @@ def create_app() -> FastAPI:
         )
 
     return app_instance
-
-
-# Create app instance for uvicorn
-# Note: Logfire must be configured before this module is imported
-# In production: start_app.py handles this
-# In tests: configure in conftest.py
-app = create_app()
