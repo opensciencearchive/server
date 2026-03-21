@@ -1,9 +1,9 @@
-"""Tests for SRN-to-Job-name sanitization."""
+"""Tests for K8s naming utilities: Job names and label values."""
 
 import re
 
-
-from osa.infrastructure.k8s.naming import job_name
+from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+from osa.infrastructure.k8s.naming import job_name, label_value, sanitize_label
 
 
 class TestJobName:
@@ -50,3 +50,46 @@ class TestJobName:
         """DNS-1035 labels must start with a letter."""
         name = job_name("hook", "123test", "urn:osa:localhost:dep:abc")
         assert name[0].isalpha()
+
+
+class TestSanitizeLabel:
+    def test_replaces_colons(self):
+        assert ":" not in sanitize_label("sha256:abc123def")
+
+    def test_preserves_valid_chars(self):
+        assert sanitize_label("hello-world_1.0") == "hello-world_1.0"
+
+    def test_truncates_to_63(self):
+        assert len(sanitize_label("a" * 100)) <= 63
+
+    def test_strips_edge_chars(self):
+        result = sanitize_label(".leading-and-trailing.")
+        assert not result.startswith(".")
+        assert not result.endswith(".")
+
+    def test_collapses_runs(self):
+        assert ".." not in sanitize_label("a::b")
+
+
+class TestLabelValue:
+    def test_deposition_srn(self):
+        srn = DepositionSRN.parse("urn:osa:localhost:dep:abc123")
+        result = label_value(srn)
+        assert result == "localhost.dep.abc123"
+        assert ":" not in result
+
+    def test_convention_srn_with_version(self):
+        srn = ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
+        result = label_value(srn)
+        assert result == "localhost.conv.test.1.0.0"
+
+    def test_no_colons_in_output(self):
+        srn = DepositionSRN.parse("urn:osa:archive.university.edu:dep:xyz789")
+        result = label_value(srn)
+        assert ":" not in result
+        assert re.match(r"^[a-zA-Z0-9._-]+$", result)
+
+    def test_max_63_chars(self):
+        long_id = "a" * 60  # LocalId max is 64; with "localhost.dep." prefix this exceeds 63
+        srn = DepositionSRN.parse(f"urn:osa:localhost:dep:{long_id}")
+        assert len(label_value(srn)) <= 63

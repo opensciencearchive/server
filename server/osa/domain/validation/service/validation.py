@@ -107,7 +107,7 @@ class ValidationService(Service):
         record_json = {"srn": str(deposition_srn), "metadata": metadata}
         inputs = HookInputs(
             record_json=record_json,
-            deposition_srn=str(deposition_srn),
+            deposition_srn=deposition_srn,
             files_dir=Path(files_dir) if files_dir else None,
         )
 

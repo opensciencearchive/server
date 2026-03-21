@@ -12,9 +12,10 @@ from typing import TYPE_CHECKING
 from osa.config import K8sConfig
 from osa.domain.shared.error import ExternalServiceError, InfrastructureError
 from osa.domain.shared.model.source import SourceDefinition
+from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.source.port.source_runner import SourceInputs, SourceOutput, SourceRunner
 from osa.infrastructure.k8s.errors import classify_api_error
-from osa.infrastructure.k8s.naming import job_name
+from osa.infrastructure.k8s.naming import job_name, label_value, sanitize_label
 from osa.infrastructure.runner_utils import parse_records_file, parse_session_file
 
 if TYPE_CHECKING:
@@ -93,7 +94,7 @@ class K8sSourceRunner(SourceRunner):
         work_dir: Path,
         files_dir: Path,
         *,
-        convention_srn: str = "",
+        convention_srn: ConventionSRN | None = None,
     ) -> SourceOutput:
         """Core Job lifecycle for source execution."""
         namespace = self._config.namespace
@@ -101,7 +102,9 @@ class K8sSourceRunner(SourceRunner):
 
         try:
             # Check for existing Jobs
-            existing = await self._check_existing_job(batch_api, namespace, convention_srn)
+            existing = await self._check_existing_job(
+                batch_api, namespace, convention_srn, source.digest
+            )
 
             if existing == "succeeded":
                 return self._parse_source_output(work_dir, files_dir)
@@ -168,11 +171,17 @@ class K8sSourceRunner(SourceRunner):
         return SourceOutput(records=records, session=session, files_dir=files_dir)
 
     async def _check_existing_job(
-        self, batch_api: BatchV1Api, namespace: str, convention_srn: str
+        self,
+        batch_api: BatchV1Api,
+        namespace: str,
+        convention_srn: ConventionSRN | None,
+        digest: str = "",
     ) -> str | None:
         label_parts = ["osa.io/role=source"]
-        if convention_srn:
-            label_parts.append(f"osa.io/convention={convention_srn}")
+        if convention_srn is not None:
+            label_parts.append(f"osa.io/convention={label_value(convention_srn)}")
+        if digest:
+            label_parts.append(f"osa.io/digest={sanitize_label(digest)}")
         label_selector = ",".join(label_parts)
 
         try:
@@ -194,7 +203,7 @@ class K8sSourceRunner(SourceRunner):
         work_dir: Path,
         files_dir: Path,
         inputs: SourceInputs | None = None,
-        convention_srn: str = "",
+        convention_srn: ConventionSRN | None = None,
     ) -> V1Job:
         from kubernetes_asyncio.client import (
             V1Capabilities,
@@ -214,7 +223,7 @@ class K8sSourceRunner(SourceRunner):
             V1VolumeMount,
         )
 
-        name = job_name("source", "src", convention_srn or "unknown")
+        name = job_name("source", "src", str(convention_srn) if convention_srn else "unknown")
         relative_work = self._relative_path(work_dir)
         input_subpath = f"{relative_work}/input"
         output_subpath = f"{relative_work}/output"
@@ -222,9 +231,10 @@ class K8sSourceRunner(SourceRunner):
 
         labels: dict[str, str] = {
             "osa.io/role": "source",
+            "osa.io/digest": sanitize_label(source.digest),
         }
-        if convention_srn:
-            labels["osa.io/convention"] = convention_srn
+        if convention_srn is not None:
+            labels["osa.io/convention"] = label_value(convention_srn)
 
         env = [
             V1EnvVar(name="OSA_IN", value="/osa/in"),
@@ -380,6 +390,14 @@ class K8sSourceRunner(SourceRunner):
                 return "failed:BackoffLimitExceeded"
 
             await asyncio.sleep(poll_interval)
+
+        # Timed out — poll once more to catch last-millisecond completions
+        try:
+            job = await batch_api.read_namespaced_job(job_name, namespace)
+            if job.status.succeeded:
+                return "succeeded"
+        except Exception:
+            pass
 
         return "failed:WatchTimeout"
 

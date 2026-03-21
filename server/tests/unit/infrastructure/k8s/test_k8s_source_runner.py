@@ -9,8 +9,11 @@ import pytest
 from osa.config import K8sConfig
 from osa.domain.shared.error import ExternalServiceError
 from osa.domain.shared.model.source import SourceDefinition, SourceLimits
+from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.source.port.source_runner import SourceInputs
 from osa.infrastructure.k8s.source_runner import K8sSourceRunner
+
+_CONV_SRN = ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
 
 
 def _make_source(
@@ -124,7 +127,7 @@ class TestSourceJobSpec:
             source,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
-            inputs=SourceInputs(convention_srn="urn:osa:localhost:conv:test", limit=100, offset=50),
+            inputs=SourceInputs(convention_srn=_CONV_SRN, limit=100, offset=50),
         )
         env = spec.spec.template.spec.containers[0].env
         env_dict = {e.name: e.value for e in env}
@@ -144,7 +147,7 @@ class TestSourceJobSpec:
             source,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
-            inputs=SourceInputs(convention_srn="urn:osa:localhost:conv:test", since=since),
+            inputs=SourceInputs(convention_srn=_CONV_SRN, since=since),
         )
         env = spec.spec.template.spec.containers[0].env
         env_dict = {e.name: e.value for e in env}
@@ -168,7 +171,7 @@ class TestSourceJobSpec:
             source,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
-            convention_srn="urn:osa:localhost:conv:conv1",
+            convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:conv1@1.0.0"),
         )
         name = spec.metadata.name
         assert name.startswith("osa-source-")
@@ -181,10 +184,10 @@ class TestSourceJobSpec:
             source,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
-            convention_srn="urn:osa:localhost:conv:conv1",
+            convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:conv1@1.0.0"),
         )
         labels = spec.spec.template.metadata.labels
-        assert labels["osa.io/convention"] == "urn:osa:localhost:conv:conv1"
+        assert labels["osa.io/convention"] == "localhost.conv.conv1.1.0.0"
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +241,7 @@ class TestSourceLifecycle:
         )
         (output_dir / "session.json").write_text('{"cursor":"abc"}')
 
-        inputs = SourceInputs(convention_srn="urn:osa:localhost:conv:test")
+        inputs = SourceInputs(convention_srn=_CONV_SRN)
         result = await runner._run_job(
             batch_api,
             core_api,
@@ -289,7 +292,7 @@ class TestSourceLifecycle:
         work_dir.mkdir(parents=True)
         files_dir = work_dir / "files"
         files_dir.mkdir(parents=True)
-        inputs = SourceInputs(convention_srn="urn:osa:localhost:conv:test")
+        inputs = SourceInputs(convention_srn=_CONV_SRN)
 
         with pytest.raises(ExternalServiceError, match="[Tt]imed out|[Dd]eadline"):
             await runner._run_job(
@@ -349,7 +352,7 @@ class TestSourceLifecycle:
         work_dir.mkdir(parents=True)
         files_dir = work_dir / "files"
         files_dir.mkdir(parents=True)
-        inputs = SourceInputs(convention_srn="urn:osa:localhost:conv:test")
+        inputs = SourceInputs(convention_srn=_CONV_SRN)
 
         with pytest.raises(ExternalServiceError, match="[Oo]OM"):
             await runner._run_job(
@@ -408,7 +411,9 @@ class TestConventionSrnFromInputs:
         files_dir = work_dir / "files"
         files_dir.mkdir(parents=True)
 
-        inputs = SourceInputs(convention_srn="urn:osa:localhost:conv:my-conv")
+        inputs = SourceInputs(
+            convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:my-conv@1.0.0")
+        )
 
         with (
             patch("kubernetes_asyncio.client.BatchV1Api", return_value=batch_api),
@@ -420,4 +425,4 @@ class TestConventionSrnFromInputs:
         call_args = batch_api.create_namespaced_job.call_args
         spec = call_args[0][1]
         labels = spec.metadata.labels
-        assert labels["osa.io/convention"] == "urn:osa:localhost:conv:my-conv"
+        assert labels["osa.io/convention"] == "localhost.conv.my-conv.1.0.0"

@@ -1,7 +1,38 @@
-"""SRN-to-Job-name sanitization for DNS-1035 compliance."""
+"""K8s naming utilities: Job names (DNS-1035) and label values."""
 
 import re
 import secrets
+
+from osa.domain.shared.model.srn import SRN
+
+
+def sanitize_label(raw: str) -> str:
+    """Sanitize a raw string for use as a K8s label value.
+
+    K8s label values must match [a-zA-Z0-9._-], max 63 chars.
+    Replaces invalid characters with dots and collapses runs.
+    """
+    sanitized = re.sub(r"[^a-zA-Z0-9._-]", ".", raw)
+    sanitized = re.sub(r"[._-]{2,}", ".", sanitized)
+    return sanitized[:63].strip("-._")
+
+
+def label_value(srn: SRN) -> str:
+    """Convert an SRN to a K8s-safe label value.
+
+    Strips the constant ``urn:osa:`` prefix to save space within the
+    63-char K8s label limit, then sanitizes for label compliance.
+
+    Examples:
+        label_value(DepositionSRN.parse("urn:osa:localhost:dep:abc123"))
+        → "localhost.dep.abc123"
+    """
+    # Format: urn:osa:{domain}:{type}:{id}[@version]
+    # Strip "urn:osa:" prefix — it's constant and wastes label budget
+    compact = f"{srn.domain.root}.{srn.type.value}.{srn.id.root}"
+    if srn.version is not None:
+        compact += f".{srn.version}"
+    return sanitize_label(compact)
 
 
 def job_name(prefix: str, hook_name: str, deposition_srn: str) -> str:

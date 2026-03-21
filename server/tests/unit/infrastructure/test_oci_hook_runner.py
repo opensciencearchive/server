@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from osa.domain.shared.model.srn import DepositionSRN
 from osa.domain.shared.model.hook import (
     ColumnDef,
     HookDefinition,
@@ -166,7 +167,8 @@ class TestContainerLifecycle:
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
         inputs = HookInputs(
-            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:test123"
+            record_json={"srn": "test"},
+            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
         )
 
         output_dir = tmp_path / "output"
@@ -191,7 +193,8 @@ class TestContainerLifecycle:
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
         inputs = HookInputs(
-            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:test123"
+            record_json={"srn": "test"},
+            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
         )
 
         output_dir = tmp_path / "output"
@@ -213,7 +216,8 @@ class TestContainerLifecycle:
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
         inputs = HookInputs(
-            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:test123"
+            record_json={"srn": "test"},
+            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
         )
 
         output_dir = tmp_path / "output"
@@ -242,7 +246,8 @@ class TestContainerLifecycle:
         runner = OciHookRunner(docker=docker)
         hook = _make_hook(timeout=1)  # 1 second timeout
         inputs = HookInputs(
-            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:test123"
+            record_json={"srn": "test"},
+            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
         )
 
         output_dir = tmp_path / "output"
@@ -264,7 +269,8 @@ class TestContainerLifecycle:
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
         inputs = HookInputs(
-            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:test123"
+            record_json={"srn": "test"},
+            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
         )
 
         work_dir = tmp_path / "hook_work"
@@ -296,7 +302,8 @@ class TestContainerConfig:
         runner = OciHookRunner(docker=docker)
         hook = _make_hook(memory="4g", cpu="4.0")
         inputs = HookInputs(
-            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:test123"
+            record_json={"srn": "test"},
+            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
         )
 
         output_dir = tmp_path / "output"
@@ -329,7 +336,8 @@ class TestContainerConfig:
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
         inputs = HookInputs(
-            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:test123"
+            record_json={"srn": "test"},
+            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
         )
 
         output_dir = tmp_path / "output"
@@ -359,7 +367,7 @@ class TestContainerConfig:
         files_dir.mkdir()
         inputs = HookInputs(
             record_json={"srn": "test"},
-            deposition_srn="urn:osa:localhost:dep:test123",
+            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
             files_dir=files_dir,
         )
 
@@ -395,7 +403,7 @@ class TestContainerConfig:
         hook = _make_hook()
         inputs = HookInputs(
             record_json={"srn": "test"},
-            deposition_srn="urn:osa:localhost:dep:test123",
+            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
             files_dir=None,
         )
 
@@ -423,7 +431,8 @@ class TestContainerConfig:
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
         inputs = HookInputs(
-            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:test123"
+            record_json={"srn": "test"},
+            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
         )
 
         output_dir = tmp_path / "output"

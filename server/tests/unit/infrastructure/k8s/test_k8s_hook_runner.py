@@ -14,9 +14,12 @@ from osa.domain.shared.model.hook import (
     OciLimits,
     TableFeatureSpec,
 )
+from osa.domain.shared.model.srn import DepositionSRN
 from osa.domain.validation.model.hook_result import HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs
 from osa.infrastructure.k8s.runner import K8sHookRunner
+
+_DEP_SRN = DepositionSRN.parse("urn:osa:localhost:dep:abc123")
 
 
 def _make_hook(
@@ -69,7 +72,9 @@ class TestJobSpecGeneration:
         runner = _make_runner()
         hook = _make_hook(image="ghcr.io/org/hook:v2", digest="sha256:def456")
         spec = runner._build_job_spec(
-            hook, Path("/data/depositions/localhost_abc/hooks/validate_dna")
+            hook,
+            Path("/data/depositions/localhost_abc/hooks/validate_dna"),
+            deposition_srn=_DEP_SRN,
         )
 
         container = spec.spec.template.spec.containers[0]
@@ -79,7 +84,9 @@ class TestJobSpecGeneration:
         runner = _make_runner()
         hook = _make_hook()
         spec = runner._build_job_spec(
-            hook, Path("/data/depositions/localhost_abc/hooks/validate_dna")
+            hook,
+            Path("/data/depositions/localhost_abc/hooks/validate_dna"),
+            deposition_srn=_DEP_SRN,
         )
 
         pod_spec = spec.spec.template.spec
@@ -99,7 +106,9 @@ class TestJobSpecGeneration:
         runner = _make_runner()
         hook = _make_hook(memory="4g", cpu="2.0")
         spec = runner._build_job_spec(
-            hook, Path("/data/depositions/localhost_abc/hooks/validate_dna")
+            hook,
+            Path("/data/depositions/localhost_abc/hooks/validate_dna"),
+            deposition_srn=_DEP_SRN,
         )
 
         resources = spec.spec.template.spec.containers[0].resources
@@ -110,7 +119,7 @@ class TestJobSpecGeneration:
         runner = _make_runner()
         hook = _make_hook()
         work_dir = Path("/data/depositions/localhost_abc/hooks/validate_dna")
-        spec = runner._build_job_spec(hook, work_dir)
+        spec = runner._build_job_spec(hook, work_dir, deposition_srn=_DEP_SRN)
 
         volumes = spec.spec.template.spec.volumes
         pvc_vol = next(v for v in volumes if v.name == "data")
@@ -129,7 +138,9 @@ class TestJobSpecGeneration:
         runner = _make_runner()
         hook = _make_hook(name="pocket_detect")
         spec = runner._build_job_spec(
-            hook, Path("/data/depositions/localhost_abc/hooks/pocket_detect")
+            hook,
+            Path("/data/depositions/localhost_abc/hooks/pocket_detect"),
+            deposition_srn=_DEP_SRN,
         )
 
         env = spec.spec.template.spec.containers[0].env
@@ -142,7 +153,9 @@ class TestJobSpecGeneration:
         runner = _make_runner()
         hook = _make_hook()
         spec = runner._build_job_spec(
-            hook, Path("/data/depositions/localhost_abc/hooks/validate_dna")
+            hook,
+            Path("/data/depositions/localhost_abc/hooks/validate_dna"),
+            deposition_srn=_DEP_SRN,
         )
 
         assert spec.spec.backoff_limit == 0
@@ -151,7 +164,9 @@ class TestJobSpecGeneration:
         runner = _make_runner()
         hook = _make_hook(timeout=300)
         spec = runner._build_job_spec(
-            hook, Path("/data/depositions/localhost_abc/hooks/validate_dna")
+            hook,
+            Path("/data/depositions/localhost_abc/hooks/validate_dna"),
+            deposition_srn=_DEP_SRN,
         )
 
         # scheduling_timeout (120) + hook timeout (300)
@@ -161,7 +176,9 @@ class TestJobSpecGeneration:
         runner = _make_runner()
         hook = _make_hook()
         spec = runner._build_job_spec(
-            hook, Path("/data/depositions/localhost_abc/hooks/validate_dna")
+            hook,
+            Path("/data/depositions/localhost_abc/hooks/validate_dna"),
+            deposition_srn=_DEP_SRN,
         )
 
         pod_spec = spec.spec.template.spec
@@ -174,13 +191,13 @@ class TestJobSpecGeneration:
         spec = runner._build_job_spec(
             hook,
             Path("/data/depositions/localhost_abc/hooks/validate_dna"),
-            deposition_srn="urn:osa:localhost:dep:abc123",
+            deposition_srn=_DEP_SRN,
         )
 
         labels = spec.spec.template.metadata.labels
         assert labels["osa.io/role"] == "hook"
         assert labels["osa.io/hook"] == "validate_dna"
-        assert labels["osa.io/deposition"] == "urn:osa:localhost:dep:abc123"
+        assert labels["osa.io/deposition"] == "localhost.dep.abc123"
 
     def test_human_readable_job_name(self):
         runner = _make_runner()
@@ -188,7 +205,7 @@ class TestJobSpecGeneration:
         spec = runner._build_job_spec(
             hook,
             Path("/data/depositions/localhost_abc/hooks/validate_dna"),
-            deposition_srn="urn:osa:localhost:dep:abc123",
+            deposition_srn=_DEP_SRN,
         )
 
         name = spec.metadata.name
@@ -199,7 +216,9 @@ class TestJobSpecGeneration:
         runner = _make_runner()
         hook = _make_hook()
         spec = runner._build_job_spec(
-            hook, Path("/data/depositions/localhost_abc/hooks/validate_dna")
+            hook,
+            Path("/data/depositions/localhost_abc/hooks/validate_dna"),
+            deposition_srn=_DEP_SRN,
         )
 
         volumes = spec.spec.template.spec.volumes
@@ -210,7 +229,9 @@ class TestJobSpecGeneration:
         runner = _make_runner()
         hook = _make_hook()
         spec = runner._build_job_spec(
-            hook, Path("/data/depositions/localhost_abc/hooks/validate_dna")
+            hook,
+            Path("/data/depositions/localhost_abc/hooks/validate_dna"),
+            deposition_srn=_DEP_SRN,
         )
 
         pod_spec = spec.spec.template.spec
@@ -220,7 +241,9 @@ class TestJobSpecGeneration:
         runner = _make_runner(config=_make_config(job_ttl_seconds=600))
         hook = _make_hook()
         spec = runner._build_job_spec(
-            hook, Path("/data/depositions/localhost_abc/hooks/validate_dna")
+            hook,
+            Path("/data/depositions/localhost_abc/hooks/validate_dna"),
+            deposition_srn=_DEP_SRN,
         )
 
         assert spec.spec.ttl_seconds_after_finished == 600
@@ -231,6 +254,7 @@ class TestJobSpecGeneration:
         spec = runner._build_job_spec(
             hook,
             Path("/data/depositions/localhost_abc/hooks/validate_dna"),
+            deposition_srn=_DEP_SRN,
             files_dir=Path("/data/depositions/localhost_abc/files"),
         )
 
@@ -243,7 +267,9 @@ class TestJobSpecGeneration:
         runner = _make_runner(config=_make_config(image_pull_secrets=["ghcr-secret"]))
         hook = _make_hook()
         spec = runner._build_job_spec(
-            hook, Path("/data/depositions/localhost_abc/hooks/validate_dna")
+            hook,
+            Path("/data/depositions/localhost_abc/hooks/validate_dna"),
+            deposition_srn=_DEP_SRN,
         )
 
         secrets = spec.spec.template.spec.image_pull_secrets
@@ -254,7 +280,9 @@ class TestJobSpecGeneration:
         runner = _make_runner(config=_make_config(service_account="osa-runner"))
         hook = _make_hook()
         spec = runner._build_job_spec(
-            hook, Path("/data/depositions/localhost_abc/hooks/validate_dna")
+            hook,
+            Path("/data/depositions/localhost_abc/hooks/validate_dna"),
+            deposition_srn=_DEP_SRN,
         )
 
         assert spec.spec.template.spec.service_account_name == "osa-runner"
@@ -424,16 +452,14 @@ class TestExecutionAndCleanup:
             '{"step":"Check","status":"completed","message":"OK"}\n'
         )
 
-        inputs = HookInputs(
-            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:abc123"
-        )
+        inputs = HookInputs(record_json={"srn": "test"}, deposition_srn=_DEP_SRN)
         result = await runner._run_job(
             batch_api,
             core_api,
             hook,
             inputs,
             work_dir,
-            deposition_srn="urn:osa:localhost:dep:abc123",
+            deposition_srn=_DEP_SRN,
         )
 
         assert result.status == HookStatus.PASSED
@@ -476,9 +502,7 @@ class TestExecutionAndCleanup:
         hook = _make_hook()
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         work_dir.mkdir(parents=True)
-        inputs = HookInputs(
-            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:abc123"
-        )
+        inputs = HookInputs(record_json={"srn": "test"}, deposition_srn=_DEP_SRN)
 
         result = await runner._run_job(
             batch_api,
@@ -486,7 +510,7 @@ class TestExecutionAndCleanup:
             hook,
             inputs,
             work_dir,
-            deposition_srn="urn:osa:localhost:dep:abc123",
+            deposition_srn=_DEP_SRN,
         )
 
         assert result.status == HookStatus.FAILED
@@ -544,9 +568,7 @@ class TestExecutionAndCleanup:
         hook = _make_hook()
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         work_dir.mkdir(parents=True)
-        inputs = HookInputs(
-            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:abc123"
-        )
+        inputs = HookInputs(record_json={"srn": "test"}, deposition_srn=_DEP_SRN)
 
         result = await runner._run_job(
             batch_api,
@@ -554,7 +576,7 @@ class TestExecutionAndCleanup:
             hook,
             inputs,
             work_dir,
-            deposition_srn="urn:osa:localhost:dep:abc123",
+            deposition_srn=_DEP_SRN,
         )
 
         assert result.status == HookStatus.FAILED
@@ -606,9 +628,7 @@ class TestExecutionAndCleanup:
         hook = _make_hook()
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         work_dir.mkdir(parents=True)
-        inputs = HookInputs(
-            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:abc123"
-        )
+        inputs = HookInputs(record_json={"srn": "test"}, deposition_srn=_DEP_SRN)
 
         result = await runner._run_job(
             batch_api,
@@ -616,7 +636,7 @@ class TestExecutionAndCleanup:
             hook,
             inputs,
             work_dir,
-            deposition_srn="urn:osa:localhost:dep:abc123",
+            deposition_srn=_DEP_SRN,
         )
 
         assert result.status == HookStatus.FAILED
@@ -663,9 +683,7 @@ class TestExecutionAndCleanup:
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         output_dir = work_dir / "output"
         output_dir.mkdir(parents=True)
-        inputs = HookInputs(
-            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:abc123"
-        )
+        inputs = HookInputs(record_json={"srn": "test"}, deposition_srn=_DEP_SRN)
 
         result = await runner._run_job(
             batch_api,
@@ -673,7 +691,7 @@ class TestExecutionAndCleanup:
             hook,
             inputs,
             work_dir,
-            deposition_srn="urn:osa:localhost:dep:abc123",
+            deposition_srn=_DEP_SRN,
         )
 
         assert result.status == HookStatus.PASSED
@@ -702,9 +720,7 @@ class TestExecutionAndCleanup:
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         output_dir = work_dir / "output"
         output_dir.mkdir(parents=True)
-        inputs = HookInputs(
-            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:abc123"
-        )
+        inputs = HookInputs(record_json={"srn": "test"}, deposition_srn=_DEP_SRN)
 
         result = await runner._run_job(
             batch_api,
@@ -712,7 +728,7 @@ class TestExecutionAndCleanup:
             hook,
             inputs,
             work_dir,
-            deposition_srn="urn:osa:localhost:dep:abc123",
+            deposition_srn=_DEP_SRN,
         )
 
         assert result.status == HookStatus.PASSED
@@ -760,9 +776,7 @@ class TestExecutionAndCleanup:
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         output_dir = work_dir / "output"
         output_dir.mkdir(parents=True)
-        inputs = HookInputs(
-            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:abc123"
-        )
+        inputs = HookInputs(record_json={"srn": "test"}, deposition_srn=_DEP_SRN)
 
         result = await runner._run_job(
             batch_api,
@@ -770,7 +784,7 @@ class TestExecutionAndCleanup:
             hook,
             inputs,
             work_dir,
-            deposition_srn="urn:osa:localhost:dep:abc123",
+            deposition_srn=_DEP_SRN,
         )
 
         assert result.status == HookStatus.PASSED
@@ -830,9 +844,7 @@ class TestExecutionAndCleanup:
         (output_dir / "progress.jsonl").write_text(
             '{"step":"Validate","status":"rejected","message":"Missing atoms"}\n'
         )
-        inputs = HookInputs(
-            record_json={"srn": "test"}, deposition_srn="urn:osa:localhost:dep:abc123"
-        )
+        inputs = HookInputs(record_json={"srn": "test"}, deposition_srn=_DEP_SRN)
 
         result = await runner._run_job(
             batch_api,
@@ -840,7 +852,7 @@ class TestExecutionAndCleanup:
             hook,
             inputs,
             work_dir,
-            deposition_srn="urn:osa:localhost:dep:abc123",
+            deposition_srn=_DEP_SRN,
         )
 
         assert result.status == HookStatus.REJECTED
@@ -897,7 +909,7 @@ class TestDepositionSrnFromInputs:
         hook = _make_hook()
         inputs = HookInputs(
             record_json={"srn": "test"},
-            deposition_srn="urn:osa:localhost:dep:my-real-srn",
+            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:my-real-srn"),
         )
 
         with (
@@ -910,4 +922,4 @@ class TestDepositionSrnFromInputs:
         call_args = batch_api.create_namespaced_job.call_args
         spec = call_args[0][1]  # positional arg: (namespace, spec)
         labels = spec.metadata.labels
-        assert labels["osa.io/deposition"] == "urn:osa:localhost:dep:my-real-srn"
+        assert labels["osa.io/deposition"] == "localhost.dep.my-real-srn"

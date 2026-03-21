@@ -71,7 +71,7 @@ class SourceService(Service):
 
         # Build inputs
         inputs = SourceInputs(
-            convention_srn=str(convention_srn),
+            convention_srn=convention_srn,
             config=source.config,
             since=since,
             limit=limit,

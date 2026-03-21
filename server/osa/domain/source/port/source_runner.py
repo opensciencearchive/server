@@ -8,13 +8,14 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from osa.domain.shared.model.source import SourceDefinition
+from osa.domain.shared.model.srn import ConventionSRN
 
 
 @dataclass(frozen=True)
 class SourceInputs:
     """Inputs for a source container run."""
 
-    convention_srn: str
+    convention_srn: ConventionSRN
     config: dict[str, Any] | None = None
     since: datetime | None = None
     limit: int | None = None
