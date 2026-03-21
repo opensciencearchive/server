@@ -104,6 +104,17 @@ class TestEventProviderExtraHandlers:
         core_count = sum(1 for h in provider._all_handlers if h in _CORE_HANDLERS)
         assert core_count == len(_CORE_HANDLERS)
 
+    def test_duplicate_extra_handler_raises(self):
+        """Passing the same handler twice raises ValueError."""
+        with pytest.raises(ValueError, match="Duplicate event handler"):
+            EventProvider(extra_handlers=[AlphaHandler, AlphaHandler])
+
+    def test_core_handler_in_extra_raises(self):
+        """Passing a core handler as extra raises ValueError."""
+        core = _CORE_HANDLERS[0]
+        with pytest.raises(ValueError, match="Duplicate event handler"):
+            EventProvider(extra_handlers=[core])
+
 
 # ---------------------------------------------------------------------------
 # Subscription registry

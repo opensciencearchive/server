@@ -87,7 +87,14 @@ class EventProvider(Provider):
         # Register DI bindings for every handler (core + extra).
         # Each handler becomes a UOW-scoped dependency that Dishka can
         # instantiate with its declared fields injected.
+        seen: set[type] = set()
         for handler_type in self._all_handlers:
+            if handler_type in seen:
+                raise ValueError(
+                    f"Duplicate event handler registration: {handler_type.__name__!r}. "
+                    "Remove it from extra_handlers — it is already a core handler."
+                )
+            seen.add(handler_type)
             self.provide(handler_type, scope=Scope.UOW)
 
     # UOW-scoped Outbox (wraps EventRepository + SubscriptionRegistry)
