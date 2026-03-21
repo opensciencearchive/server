@@ -74,4 +74,4 @@ HEALTHCHECK --interval=5s --timeout=10s --start-period=5s --retries=3 \
     CMD curl --fail http://localhost:8000/api/v1/health || exit 1
 
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["uvicorn", "osa.application.api.rest.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "--factory", "osa.application.api.rest.app:create_app", "--host", "0.0.0.0", "--port", "8000"]

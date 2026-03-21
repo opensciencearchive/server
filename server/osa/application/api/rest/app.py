@@ -143,10 +143,3 @@ def create_app(
         )
 
     return app_instance
-
-
-# Create app instance for uvicorn
-# Note: Logfire must be configured before this module is imported
-# In production: start_app.py handles this
-# In tests: configure in conftest.py
-app = create_app()

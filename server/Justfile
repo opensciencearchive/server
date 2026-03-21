@@ -8,11 +8,11 @@ default:
 
 # Run development server with hot-reload
 dev:
-    uv run uvicorn osa.application.api.rest.app:app --reload --host 0.0.0.0 --port 8000
+    uv run uvicorn --factory osa.application.api.rest.app:create_app --reload --host 0.0.0.0 --port 8000
 
 # Run with debug logging
 dev-debug:
-    LOG_LEVEL=DEBUG uv run uvicorn osa.application.api.rest.app:app --reload --host 0.0.0.0 --port 8000
+    LOG_LEVEL=DEBUG uv run uvicorn --factory osa.application.api.rest.app:create_app --reload --host 0.0.0.0 --port 8000
 
 # === Testing ===
 
