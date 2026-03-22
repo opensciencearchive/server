@@ -17,7 +17,12 @@ from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.infrastructure.k8s.errors import classify_api_error
 from osa.infrastructure.k8s.naming import job_name, label_value
-from osa.infrastructure.runner_utils import detect_rejection, parse_progress_file, relative_path
+from osa.infrastructure.runner_utils import (
+    detect_rejection,
+    parse_progress_file,
+    relative_path,
+    to_k8s_quantity,
+)
 
 if TYPE_CHECKING:
     from kubernetes_asyncio.client import ApiClient, BatchV1Api, CoreV1Api, V1Job
@@ -283,7 +288,10 @@ class K8sHookRunner(HookRunner):
                 V1EnvVar(name="OSA_HOOK_NAME", value=hook.name),
             ],
             resources=V1ResourceRequirements(
-                limits={"memory": hook.runtime.limits.memory, "cpu": hook.runtime.limits.cpu},
+                limits={
+                    "memory": to_k8s_quantity(hook.runtime.limits.memory),
+                    "cpu": hook.runtime.limits.cpu,
+                },
             ),
             security_context=V1SecurityContext(
                 read_only_root_filesystem=True,

@@ -94,9 +94,12 @@ class FilesystemStorageAdapter(FileStoragePort):
             except OSError:
                 try:
                     shutil.copy2(tmp_path, target)
-                    Path(tmp_path).unlink(missing_ok=True)
                 except OSError as e:
                     raise InfrastructureError(f"Failed to write file {filename}: {e}") from e
+                try:
+                    Path(tmp_path).unlink()
+                except OSError:
+                    logger.warning("Failed to clean up temp file: %s", tmp_path)
         except Exception:
             Path(tmp_path).unlink(missing_ok=True)
             raise

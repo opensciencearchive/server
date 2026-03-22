@@ -16,7 +16,12 @@ from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.source.port.source_runner import SourceInputs, SourceOutput, SourceRunner
 from osa.infrastructure.k8s.errors import classify_api_error
 from osa.infrastructure.k8s.naming import job_name, label_value, sanitize_label
-from osa.infrastructure.runner_utils import parse_records_file, parse_session_file, relative_path
+from osa.infrastructure.runner_utils import (
+    parse_records_file,
+    parse_session_file,
+    relative_path,
+    to_k8s_quantity,
+)
 
 if TYPE_CHECKING:
     from kubernetes_asyncio.client import ApiClient, BatchV1Api, CoreV1Api, V1Job
@@ -270,7 +275,10 @@ class K8sSourceRunner(SourceRunner):
             image=f"{source.image}@{source.digest}",
             env=env,
             resources=V1ResourceRequirements(
-                limits={"memory": source.limits.memory, "cpu": source.limits.cpu},
+                limits={
+                    "memory": to_k8s_quantity(source.limits.memory),
+                    "cpu": source.limits.cpu,
+                },
             ),
             security_context=V1SecurityContext(
                 capabilities=V1Capabilities(drop=["ALL"]),

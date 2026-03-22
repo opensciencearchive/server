@@ -157,3 +157,31 @@ class TestSaveFileFallback:
             pytest.raises(InfrastructureError, match="test.txt"),
         ):
             await adapter.save_file(dep_srn, "test.txt", content, len(content))
+
+    @pytest.mark.asyncio
+    async def test_save_file_unlink_failure_after_copy_succeeds(self, tmp_path: Path):
+        """If copy2 succeeds but temp unlink fails, the write still succeeds."""
+        adapter = FilesystemStorageAdapter(str(tmp_path))
+        dep_srn = _make_dep_srn()
+        content = b"hello world"
+
+        def failing_rename(self_path, target):
+            raise OSError("Cross-device link")
+
+        original_unlink = Path.unlink
+
+        def selective_unlink(self_path, *, missing_ok=False):
+            # Only fail for temp files (inside the fallback path)
+            if "tmp" in str(self_path) or str(self_path).startswith("/tmp"):
+                raise OSError("Permission denied")
+            original_unlink(self_path, missing_ok=missing_ok)
+
+        with (
+            patch.object(Path, "rename", failing_rename),
+            patch.object(Path, "unlink", selective_unlink),
+        ):
+            result = await adapter.save_file(dep_srn, "test.txt", content, len(content))
+
+        files_dir = adapter.get_files_dir(dep_srn)
+        assert (files_dir / "test.txt").read_bytes() == content
+        assert result.name == "test.txt"

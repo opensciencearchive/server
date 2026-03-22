@@ -20,6 +20,7 @@ from osa.infrastructure.runner_utils import (
     detect_rejection,
     parse_memory,
     parse_progress_file,
+    to_k8s_quantity,
 )
 
 
@@ -76,6 +77,38 @@ class TestParseMemory:
     def test_invalid_format(self):
         with pytest.raises(ValueError, match="Invalid memory format"):
             parse_memory("abc")
+
+
+class TestToK8sQuantity:
+    """Convert Docker-style memory strings to K8s resource quantities."""
+
+    def test_gigabytes(self):
+        assert to_k8s_quantity("2g") == "2Gi"
+
+    def test_megabytes(self):
+        assert to_k8s_quantity("512m") == "512Mi"
+
+    def test_kilobytes(self):
+        assert to_k8s_quantity("1024k") == "1024Ki"
+
+    def test_bare_bytes(self):
+        assert to_k8s_quantity("1048576") == "1048576"
+
+    def test_fractional_gigabytes(self):
+        assert to_k8s_quantity("1.5g") == "1536Mi"
+
+    def test_fractional_megabytes(self):
+        assert to_k8s_quantity("1.5m") == "1536Ki"
+
+    def test_case_insensitive(self):
+        assert to_k8s_quantity("2G") == "2Gi"
+
+    def test_with_i_suffix(self):
+        assert to_k8s_quantity("2gi") == "2Gi"
+
+    def test_invalid_format(self):
+        with pytest.raises(ValueError, match="Invalid memory format"):
+            to_k8s_quantity("abc")
 
 
 class TestParseProgress:

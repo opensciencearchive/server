@@ -112,7 +112,7 @@ class TestJobSpecGeneration:
         )
 
         resources = spec.spec.template.spec.containers[0].resources
-        assert resources.limits["memory"] == "4g"
+        assert resources.limits["memory"] == "4Gi"
         assert resources.limits["cpu"] == "2.0"
 
     def test_volume_mounts(self):

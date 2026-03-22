@@ -66,6 +66,45 @@ def parse_memory(memory: str) -> int:
             raise ValueError(f"Unknown memory unit: {unit}")
 
 
+_MEMORY_RE = re.compile(r"^(\d+(?:\.\d+)?)(g|m|k)?i?$")
+
+
+def to_k8s_quantity(memory: str) -> str:
+    """Convert a Docker-style memory string to a K8s resource quantity.
+
+    Docker uses lowercase units where 'm' means megabytes.
+    K8s uses IEC binary units where 'Mi' means mebibytes and lowercase 'm'
+    means *milli* (10⁻³).  This function bridges the two conventions.
+
+    Fractional values are converted down one unit to produce an integer
+    quantity (e.g. "1.5g" → "1536Mi") since K8s quantities must be integers
+    when using binary suffixes.
+    """
+    raw = memory.strip().lower()
+    match = _MEMORY_RE.match(raw)
+    if not match:
+        raise ValueError(f"Invalid memory format: {memory}")
+
+    amount = float(match.group(1))
+    unit = match.group(2)
+
+    match unit:
+        case "g":
+            if amount == int(amount):
+                return f"{int(amount)}Gi"
+            return f"{int(amount * 1024)}Mi"
+        case "m":
+            if amount == int(amount):
+                return f"{int(amount)}Mi"
+            return f"{int(amount * 1024)}Ki"
+        case "k":
+            return f"{int(amount)}Ki"
+        case None:
+            return str(int(amount))
+        case _:
+            raise ValueError(f"Unknown memory unit: {unit}")
+
+
 def relative_path(path: Path, data_mount_path: str) -> str:
     """Strip the data mount prefix to get a PVC-relative subpath.
 

@@ -88,7 +88,7 @@ class TestSourceJobSpec:
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
         )
         resources = spec.spec.template.spec.containers[0].resources
-        assert resources.limits["memory"] == "4g"
+        assert resources.limits["memory"] == "4Gi"
         # activeDeadlineSeconds = scheduling_timeout + source timeout
         assert spec.spec.active_deadline_seconds == 120 + 3600
 
