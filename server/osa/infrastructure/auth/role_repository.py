@@ -2,10 +2,11 @@
 
 from uuid import UUID
 
-from sqlalchemy import delete, insert, select
+from sqlalchemy import CursorResult, delete, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.auth.model.role import Role
+from osa.domain.shared.error import InfrastructureError
 from osa.domain.auth.model.role_assignment import RoleAssignment, RoleAssignmentId
 from osa.domain.auth.model.value import UserId
 from osa.domain.auth.port.role_repository import RoleAssignmentRepository
@@ -61,6 +62,8 @@ class PostgresRoleAssignmentRepository(RoleAssignmentRepository):
         )
         result = await self.session.execute(stmt)
         await self.session.flush()
+        if not isinstance(result, CursorResult):
+            raise InfrastructureError(f"Expected CursorResult, got {type(result).__name__}")
         return result.rowcount > 0
 
     async def get(self, user_id: UserId, role: Role) -> RoleAssignment | None:

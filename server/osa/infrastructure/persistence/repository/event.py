@@ -5,11 +5,12 @@ from datetime import UTC, datetime, timedelta
 from typing import TypeVar
 from uuid import uuid4
 
-from sqlalchemy import func, insert, or_, select, update
+from sqlalchemy import CursorResult, func, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import INTERVAL
 from sqlalchemy.sql import literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from osa.domain.shared.error import InfrastructureError
 from osa.domain.shared.event import ClaimResult, Delivery, Event, EventId
 from osa.domain.shared.port.event_repository import EventRepository
 from osa.infrastructure.persistence.tables import deliveries_table, events_table
@@ -278,6 +279,8 @@ class SQLAlchemyEventRepository(EventRepository):
         )
 
         result = await self._session.execute(stmt)
+        if not isinstance(result, CursorResult):
+            raise InfrastructureError(f"Expected CursorResult, got {type(result).__name__}")
         count = result.rowcount
         if count > 0:
             logger.info(f"Reset {count} stale deliveries (older than {timeout_seconds}s)")

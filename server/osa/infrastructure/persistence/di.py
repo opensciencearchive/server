@@ -35,7 +35,7 @@ from osa.infrastructure.persistence.adapter.readers import (
     OntologyReaderAdapter,
     SchemaReaderAdapter,
 )
-from osa.infrastructure.persistence.adapter.storage import LocalFileStorageAdapter
+from osa.infrastructure.persistence.adapter.storage import FilesystemStorageAdapter
 from osa.infrastructure.persistence.database import (
     create_db_engine,
     create_session_factory,
@@ -120,7 +120,7 @@ class PersistenceProvider(Provider):
     # File storage
     @provide(scope=Scope.APP)
     def get_file_storage(self, paths: "OSAPaths") -> FileStoragePort:
-        return LocalFileStorageAdapter(base_path=str(paths.data_dir / "files"))
+        return FilesystemStorageAdapter(base_path=str(paths.data_dir / "files"))
 
     @provide(scope=Scope.APP)
     def get_source_storage(self, file_storage: FileStoragePort) -> SourceStoragePort:

@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import delete, insert, select, update
+from sqlalchemy import CursorResult, delete, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,7 @@ from osa.domain.auth.model.value import (
     UserCode,
     UserId,
 )
+from osa.domain.shared.error import InfrastructureError
 from osa.domain.auth.port.repository import (
     DeviceAuthorizationRepository,
     LinkedAccountRepository,
@@ -228,6 +229,8 @@ class PostgresRefreshTokenRepository(RefreshTokenRepository):
         )
         result = await self.session.execute(stmt)
         await self.session.flush()
+        if not isinstance(result, CursorResult):
+            raise InfrastructureError(f"Expected CursorResult, got {type(result).__name__}")
         return result.rowcount
 
 
@@ -349,4 +352,6 @@ class PostgresDeviceAuthorizationRepository(DeviceAuthorizationRepository):
         )
         result = await self.session.execute(stmt)
         await self.session.flush()
+        if not isinstance(result, CursorResult):
+            raise InfrastructureError(f"Expected CursorResult, got {type(result).__name__}")
         return result.rowcount

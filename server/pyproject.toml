@@ -37,6 +37,11 @@ geo-entrez = "sources.geo_entrez:GEOEntrezSource"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[project.optional-dependencies]
+k8s = [
+    "kubernetes-asyncio>=31.0",
+]
+
 [dependency-groups]
 dev = [
     "coverage>=7.12.0",

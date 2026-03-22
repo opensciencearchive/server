@@ -1,9 +1,9 @@
-"""Unit tests for LocalFileStorageAdapter — path traversal prevention."""
+"""Unit tests for FilesystemStorageAdapter — path traversal prevention."""
 
 import pytest
 
 from osa.domain.shared.model.srn import DepositionSRN
-from osa.infrastructure.persistence.adapter.storage import LocalFileStorageAdapter
+from osa.infrastructure.persistence.adapter.storage import FilesystemStorageAdapter
 
 
 def _make_dep_srn() -> DepositionSRN:
@@ -17,7 +17,7 @@ class TestPathTraversalPrevention:
         import tempfile
 
         self._tmpdir = tempfile.mkdtemp()
-        self.adapter = LocalFileStorageAdapter(base_path=self._tmpdir)
+        self.adapter = FilesystemStorageAdapter(base_path=self._tmpdir)
         self.dep_srn = _make_dep_srn()
 
     @pytest.mark.asyncio
@@ -64,7 +64,7 @@ class TestFileIsolation:
         import tempfile
 
         self._tmpdir = tempfile.mkdtemp()
-        self.adapter = LocalFileStorageAdapter(base_path=self._tmpdir)
+        self.adapter = FilesystemStorageAdapter(base_path=self._tmpdir)
         self.dep_srn = _make_dep_srn()
 
     def test_get_files_dir_returns_files_subdirectory(self):

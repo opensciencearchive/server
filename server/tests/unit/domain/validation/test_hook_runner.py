@@ -5,25 +5,34 @@ from pathlib import Path
 import pytest
 
 from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.model.srn import DepositionSRN
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 
 
 class TestHookInputs:
     def test_minimal_construction(self):
-        inputs = HookInputs(record_json={"srn": "urn:osa:localhost:rec:123"})
+        inputs = HookInputs(
+            record_json={"srn": "urn:osa:localhost:rec:123"},
+            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
+        )
         assert inputs.record_json == {"srn": "urn:osa:localhost:rec:123"}
         assert inputs.files_dir is None
         assert inputs.config is None
 
     def test_with_files_dir(self):
         files = Path("/tmp/files")
-        inputs = HookInputs(record_json={"srn": "test"}, files_dir=files)
+        inputs = HookInputs(
+            record_json={"srn": "test"},
+            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
+            files_dir=files,
+        )
         assert inputs.files_dir == files
 
     def test_with_config(self):
         inputs = HookInputs(
             record_json={"srn": "test"},
+            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
             config={"r_min": 3.0, "threshold": 0.5},
         )
         assert inputs.config == {"r_min": 3.0, "threshold": 0.5}
@@ -32,6 +41,7 @@ class TestHookInputs:
         files = Path("/tmp/data/files")
         inputs = HookInputs(
             record_json={"srn": "urn:osa:localhost:rec:456", "name": "test"},
+            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test456"),
             files_dir=files,
             config={"key": "value"},
         )
@@ -40,7 +50,10 @@ class TestHookInputs:
         assert inputs.config == {"key": "value"}
 
     def test_is_frozen(self):
-        inputs = HookInputs(record_json={"srn": "test"})
+        inputs = HookInputs(
+            record_json={"srn": "test"},
+            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
+        )
         with pytest.raises(AttributeError):
             inputs.record_json = {}  # type: ignore[misc]
 

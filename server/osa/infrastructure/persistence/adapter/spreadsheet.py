@@ -13,7 +13,7 @@ from osa.domain.deposition.port.spreadsheet import (
     SpreadsheetPort,
 )
 from osa.domain.semantics.model.schema import Schema
-from osa.domain.semantics.model.value import FieldDefinition, FieldType
+from osa.domain.semantics.model.value import FieldDefinition, FieldType, TermConstraints
 
 # Ontologies with <=20 terms get dropdown validation; others get an instruction note.
 _MAX_DROPDOWN_TERMS = 20
@@ -44,7 +44,7 @@ class OpenpyxlSpreadsheetAdapter(SpreadsheetPort):
             desc_cell.font = _DESC_FONT
 
             # Add dropdown for term fields with small ontologies
-            if field.type == FieldType.TERM and field.constraints:
+            if field.type == FieldType.TERM and isinstance(field.constraints, TermConstraints):
                 onto_srn_str = str(field.constraints.ontology_srn)
                 terms = ontology_terms_by_srn.get(onto_srn_str, [])
                 if terms and len(terms) <= _MAX_DROPDOWN_TERMS:
