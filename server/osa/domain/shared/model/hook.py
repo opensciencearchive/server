@@ -32,8 +32,8 @@ class OciLimits(ValueObject):
     """Resource limits for OCI hook execution."""
 
     timeout_seconds: int = 300
-    memory: str = "2g"
-    cpu: str = "2.0"
+    memory: str = "512m"
+    cpu: str = "1.0"
 
 
 class RuntimeConfig(ValueObject):

@@ -11,8 +11,8 @@ class SourceLimits(ValueObject):
     """Resource limits for source container execution."""
 
     timeout_seconds: int = 3600
-    memory: str = "4g"
-    cpu: str = "2.0"
+    memory: str = "512m"
+    cpu: str = "1.0"
 
 
 class SourceScheduleConfig(ValueObject):

@@ -233,6 +233,7 @@ class K8sHookRunner(HookRunner):
             V1PodDNSConfig,
             V1PodSecurityContext,
             V1PodSpec,
+            V1SeccompProfile,
             V1PodTemplateSpec,
             V1ResourceRequirements,
             V1SecurityContext,
@@ -299,6 +300,7 @@ class K8sHookRunner(HookRunner):
                 allow_privilege_escalation=False,
                 run_as_user=65534,
                 run_as_group=65534,
+                seccomp_profile=V1SeccompProfile(type="RuntimeDefault"),
             ),
             volume_mounts=mounts,
         )
@@ -306,7 +308,10 @@ class K8sHookRunner(HookRunner):
         pod_spec = V1PodSpec(
             restart_policy="Never",
             automount_service_account_token=False,
-            security_context=V1PodSecurityContext(run_as_non_root=True),
+            security_context=V1PodSecurityContext(
+                run_as_non_root=True,
+                seccomp_profile=V1SeccompProfile(type="RuntimeDefault"),
+            ),
             dns_policy="None",
             dns_config=V1PodDNSConfig(nameservers=[]),
             containers=[container],
