@@ -17,7 +17,7 @@ ENV UV_LINK_MODE=copy
 # Install dependencies first (better caching)
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+    uv sync --frozen --no-install-project --no-dev --extra k8s
 
 # Copy application code
 COPY osa/ ./osa/
@@ -28,7 +28,7 @@ COPY entrypoint.sh ./
 COPY README.md ./
 # Install the project
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --extra k8s
 
 # Pre-download embedding model to bake into image (avoids runtime download)
 RUN /app/.venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
