@@ -33,7 +33,7 @@ class OciLimits(ValueObject):
 
     timeout_seconds: int = 300
     memory: str = "512m"
-    cpu: str = "1.0"
+    cpu: str = "0.5"
 
 
 class RuntimeConfig(ValueObject):

@@ -12,7 +12,7 @@ class SourceLimits(ValueObject):
 
     timeout_seconds: int = 3600
     memory: str = "512m"
-    cpu: str = "1.0"
+    cpu: str = "0.25"
 
 
 class SourceScheduleConfig(ValueObject):

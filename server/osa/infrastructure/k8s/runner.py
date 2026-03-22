@@ -310,6 +310,7 @@ class K8sHookRunner(HookRunner):
             automount_service_account_token=False,
             security_context=V1PodSecurityContext(
                 run_as_non_root=True,
+                fs_group=65534,
                 seccomp_profile=V1SeccompProfile(type="RuntimeDefault"),
             ),
             dns_policy="None",

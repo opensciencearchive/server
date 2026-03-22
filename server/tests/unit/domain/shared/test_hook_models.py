@@ -93,7 +93,7 @@ def test_oci_limits_defaults():
     limits = OciLimits()
     assert limits.timeout_seconds == 300
     assert limits.memory == "512m"
-    assert limits.cpu == "1.0"
+    assert limits.cpu == "0.5"
 
 
 def test_oci_limits_custom():
@@ -144,7 +144,7 @@ def test_hook_definition_full():
             image="ghcr.io/osa/hooks/pocketeer:v1",
             digest="sha256:abc123",
             config={"r_min": 3.0},
-            limits=OciLimits(timeout_seconds=300, memory="512m", cpu="1.0"),
+            limits=OciLimits(timeout_seconds=300, memory="512m", cpu="0.5"),
         ),
         feature=TableFeatureSpec(
             cardinality="many",
