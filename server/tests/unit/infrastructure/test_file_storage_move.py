@@ -137,3 +137,23 @@ class TestSaveFileFallback:
         files_dir = adapter.get_files_dir(dep_srn)
         assert (files_dir / "test.txt").read_bytes() == content
         assert result.name == "test.txt"
+
+    @pytest.mark.asyncio
+    async def test_save_file_copy_failure_raises_infrastructure_error(self, tmp_path: Path):
+        """Copy failure wraps OSError in InfrastructureError with filename context."""
+        adapter = FilesystemStorageAdapter(str(tmp_path))
+        dep_srn = _make_dep_srn()
+        content = b"hello world"
+
+        def failing_rename(self_path, target):
+            raise OSError("Cross-device link")
+
+        with (
+            patch.object(Path, "rename", failing_rename),
+            patch(
+                "osa.infrastructure.persistence.adapter.storage.shutil.copy2",
+                side_effect=OSError("No space left on device"),
+            ),
+            pytest.raises(InfrastructureError, match="test.txt"),
+        ):
+            await adapter.save_file(dep_srn, "test.txt", content, len(content))

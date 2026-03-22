@@ -100,6 +100,16 @@ class RunnerConfig(BaseModel):
     backend: Literal["oci", "k8s"] = "oci"
     k8s: K8sConfig = K8sConfig()
 
+    @model_validator(mode="after")
+    def validate_k8s_required_fields(self) -> Self:
+        """Validate that required K8s fields are set when backend is 'k8s'."""
+        if self.backend == "k8s" and not self.k8s.data_pvc_name:
+            raise ValueError(
+                "runner.k8s.data_pvc_name is required when runner.backend == 'k8s'. "
+                "Set OSA_RUNNER__K8S__DATA_PVC_NAME."
+            )
+        return self
+
 
 # =============================================================================
 # Authentication Configuration

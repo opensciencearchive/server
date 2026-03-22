@@ -17,7 +17,7 @@ from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.infrastructure.k8s.errors import classify_api_error
 from osa.infrastructure.k8s.naming import job_name, label_value
-from osa.infrastructure.runner_utils import detect_rejection, parse_progress_file
+from osa.infrastructure.runner_utils import detect_rejection, parse_progress_file, relative_path
 
 if TYPE_CHECKING:
     from kubernetes_asyncio.client import ApiClient, BatchV1Api, CoreV1Api, V1Job
@@ -327,11 +327,7 @@ class K8sHookRunner(HookRunner):
 
     def _relative_path(self, path: Path) -> str:
         """Strip the data mount prefix to get a PVC-relative subpath."""
-        mount = self._config.data_mount_path.rstrip("/")
-        path_str = str(path)
-        if not path_str.startswith(mount):
-            raise ValueError(f"Path {path} is outside the data mount prefix {mount}")
-        return path_str[len(mount) :].lstrip("/")
+        return relative_path(path, self._config.data_mount_path)
 
     async def _wait_for_scheduling(
         self,

@@ -92,8 +92,11 @@ class FilesystemStorageAdapter(FileStoragePort):
             try:
                 Path(tmp_path).rename(target)
             except OSError:
-                shutil.copy2(tmp_path, target)
-                Path(tmp_path).unlink(missing_ok=True)
+                try:
+                    shutil.copy2(tmp_path, target)
+                    Path(tmp_path).unlink(missing_ok=True)
+                except OSError as e:
+                    raise InfrastructureError(f"Failed to write file {filename}: {e}") from e
         except Exception:
             Path(tmp_path).unlink(missing_ok=True)
             raise

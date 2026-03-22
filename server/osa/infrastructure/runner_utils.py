@@ -66,6 +66,18 @@ def parse_memory(memory: str) -> int:
             raise ValueError(f"Unknown memory unit: {unit}")
 
 
+def relative_path(path: Path, data_mount_path: str) -> str:
+    """Strip the data mount prefix to get a PVC-relative subpath.
+
+    Used by K8s runners to convert absolute paths into PVC sub_path values.
+    """
+    mount = data_mount_path.rstrip("/")
+    path_str = str(path)
+    if not path_str.startswith(mount):
+        raise ValueError(f"Path {path} is outside the data mount prefix {mount}")
+    return path_str[len(mount) :].lstrip("/")
+
+
 def parse_records_file(output_dir: Path) -> list[dict[str, Any]]:
     """Parse records.jsonl from source output directory."""
     import logfire

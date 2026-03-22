@@ -16,7 +16,7 @@ from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.source.port.source_runner import SourceInputs, SourceOutput, SourceRunner
 from osa.infrastructure.k8s.errors import classify_api_error
 from osa.infrastructure.k8s.naming import job_name, label_value, sanitize_label
-from osa.infrastructure.runner_utils import parse_records_file, parse_session_file
+from osa.infrastructure.runner_utils import parse_records_file, parse_session_file, relative_path
 
 if TYPE_CHECKING:
     from kubernetes_asyncio.client import ApiClient, BatchV1Api, CoreV1Api, V1Job
@@ -310,11 +310,7 @@ class K8sSourceRunner(SourceRunner):
         )
 
     def _relative_path(self, path: Path) -> str:
-        mount = self._config.data_mount_path.rstrip("/")
-        path_str = str(path)
-        if not path_str.startswith(mount):
-            raise ValueError(f"Path {path} is outside the data mount prefix {mount}")
-        return path_str[len(mount) :].lstrip("/")
+        return relative_path(path, self._config.data_mount_path)
 
     async def _wait_for_scheduling(
         self,
