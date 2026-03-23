@@ -112,7 +112,7 @@ class RunnerProvider(Provider):
         await api_client.close()
 
     @provide(when=K8S, scope=Scope.APP)
-    async def get_s3_client(self, config: Config) -> AsyncIterable[S3Client]:
+    def get_s3_client(self, config: Config) -> S3Client:
         k8s = config.runner.k8s
         client = S3Client(
             bucket=k8s.s3_bucket,
@@ -120,8 +120,7 @@ class RunnerProvider(Provider):
             endpoint_url=k8s.s3_endpoint_url,
         )
         logger.info("S3 client initialized (bucket=%s)", k8s.s3_bucket)
-        yield client
-        await client.close()
+        return client
 
     @provide(when=K8S, scope=Scope.UOW)
     def get_hook_runner_k8s(

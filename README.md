@@ -8,6 +8,9 @@
   <strong>A domain-agnostic archive for AI-ready scientific data</strong>
 </p>
 
+> **⚠️ Under active development** — OSA is not yet ready for production use. APIs, data formats, and configuration may change without notice.
+
+
 <p align="center">
   <a href="#quick-start">Quick Start</a> •
   <a href="#development">Development</a> •
