@@ -66,3 +66,12 @@ environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
     "sys_platform == 'linux' and platform_machine == 'aarch64'",
 ]
+
+# Override aioboto3's tight aiobotocore pin to get botocore>=1.41 which
+# supports AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE (EKS Pod Identity).
+# Remove once aioboto3 merges https://github.com/terricain/aioboto3/pull/401
+override-dependencies = [
+    "aiobotocore>=3.1.2,<4",
+    "botocore>=1.41.0,<2",
+    "boto3>=1.41.0,<2",
+]
