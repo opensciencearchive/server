@@ -26,19 +26,23 @@ class S3Client:
         bucket: str,
         endpoint_url: str | None = None,
     ) -> None:
-        import aioboto3
-
         self._bucket = bucket
         self._endpoint_url = endpoint_url
-        self._session = aioboto3.Session()
 
     @asynccontextmanager
     async def _client(self):
-        """Yield a short-lived S3 client with fresh credentials."""
+        """Yield a short-lived S3 client with fresh credentials.
+
+        Session is created lazily in async context to ensure the
+        async credential chain (Pod Identity, IRSA) resolves correctly.
+        """
+        import aioboto3
+
+        session = aioboto3.Session()
         kwargs: dict[str, str] = {}
         if self._endpoint_url:
             kwargs["endpoint_url"] = self._endpoint_url
-        async with self._session.client("s3", **kwargs) as client:
+        async with session.client("s3", **kwargs) as client:
             yield client
 
     async def put_object(self, key: str, body: str | bytes) -> None:
