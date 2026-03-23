@@ -39,7 +39,7 @@ class TestMoveSourceFilesFallback:
         assert not source_files.exists()
 
     def test_fallback_copy_delete_on_oserror(self, tmp_path: Path):
-        """Falls back to shutil.copy2 + unlink when rename() raises OSError."""
+        """Falls back to shutil.copyfile + unlink when rename() raises OSError."""
         adapter = FilesystemStorageAdapter(str(tmp_path))
         dep_srn = _make_dep_srn()
 
@@ -99,7 +99,7 @@ class TestMoveSourceFilesFallback:
 
         with (
             patch.object(Path, "rename", failing_rename),
-            patch("shutil.copy2", side_effect=OSError("No space left on device")),
+            patch("shutil.copyfile", side_effect=OSError("No space left on device")),
             pytest.raises(InfrastructureError, match="data.csv"),
         ):
             adapter.move_source_files_to_deposition(staging_dir, source_id, dep_srn)
@@ -151,7 +151,7 @@ class TestSaveFileFallback:
         with (
             patch.object(Path, "rename", failing_rename),
             patch(
-                "osa.infrastructure.persistence.adapter.storage.shutil.copy2",
+                "osa.infrastructure.persistence.adapter.storage.shutil.copyfile",
                 side_effect=OSError("No space left on device"),
             ),
             pytest.raises(InfrastructureError, match="test.txt"),
@@ -160,7 +160,7 @@ class TestSaveFileFallback:
 
     @pytest.mark.asyncio
     async def test_save_file_unlink_failure_after_copy_succeeds(self, tmp_path: Path):
-        """If copy2 succeeds but temp unlink fails, the write still succeeds."""
+        """If copyfile succeeds but temp unlink fails, the write still succeeds."""
         adapter = FilesystemStorageAdapter(str(tmp_path))
         dep_srn = _make_dep_srn()
         content = b"hello world"
