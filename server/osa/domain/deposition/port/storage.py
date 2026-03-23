@@ -51,12 +51,12 @@ class FileStoragePort(Port, Protocol):
     ) -> None: ...
 
     @abstractmethod
-    def move_source_files_to_deposition(
+    async def move_source_files_to_deposition(
         self,
         staging_dir: Path,
         source_id: str,
         deposition_srn: DepositionSRN,
     ) -> None:
-        """Rename source staging files into the deposition's canonical file location.
-        O(1) on local FS, server-side copy on S3."""
+        """Move source staging files into the deposition's canonical file location.
+        O(1) rename on local FS, server-side copy on S3."""
         ...

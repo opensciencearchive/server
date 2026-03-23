@@ -35,7 +35,7 @@ class CreateDepositionFromSource(EventHandler[SourceRecordReady]):
             metadata=event.metadata,
         )
 
-        self.file_storage.move_source_files_to_deposition(
+        await self.file_storage.move_source_files_to_deposition(
             staging_dir=Path(event.staging_dir),
             source_id=event.source_id,
             deposition_srn=dep.srn,

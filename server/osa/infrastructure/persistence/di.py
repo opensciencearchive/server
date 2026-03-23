@@ -1,6 +1,8 @@
 from typing import AsyncIterable
 
 from dishka import provide
+
+from osa.infrastructure.s3.client import S3Client
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from osa.util.paths import OSAPaths
@@ -63,6 +65,7 @@ from osa.infrastructure.persistence.repository.validation import (
     PostgresValidationRunRepository,
 )
 from osa.util.di.base import Provider
+from osa.util.di.markers import K8S
 from osa.util.di.scope import Scope
 
 
@@ -117,10 +120,17 @@ class PersistenceProvider(Provider):
     schema_reader = provide(SchemaReaderAdapter, scope=Scope.UOW, provides=SchemaReader)
     ontology_reader = provide(OntologyReaderAdapter, scope=Scope.UOW, provides=OntologyReader)
 
-    # File storage
+    # File storage — default (OCI/Docker, filesystem)
     @provide(scope=Scope.APP)
     def get_file_storage(self, paths: "OSAPaths") -> FileStoragePort:
         return FilesystemStorageAdapter(base_path=str(paths.data_dir / "files"))
+
+    # File storage — K8s (S3 via aioboto3, reuses S3Client from RunnerProvider)
+    @provide(when=K8S, scope=Scope.APP)
+    def get_file_storage_s3(self, config: Config, s3: "S3Client") -> FileStoragePort:
+        from osa.infrastructure.s3.storage import S3StorageAdapter
+
+        return S3StorageAdapter(s3=s3, data_mount_path=config.runner.k8s.data_mount_path)
 
     @provide(scope=Scope.APP)
     def get_source_storage(self, file_storage: FileStoragePort) -> SourceStoragePort:

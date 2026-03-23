@@ -22,11 +22,11 @@ class SourceStoragePort(Port, Protocol):
         ...
 
     @abstractmethod
-    def move_source_files_to_deposition(
+    async def move_source_files_to_deposition(
         self,
         staging_dir: Path,
         source_id: str,
         deposition_srn: DepositionSRN,
     ) -> None:
-        """Rename source staging files into the deposition's canonical file location."""
+        """Move source staging files into the deposition's canonical file location."""
         ...

@@ -10,14 +10,16 @@ import logging
 from typing import AsyncIterable
 
 import aiodocker
-from dishka import Marker, activate, provide
+from dishka import activate, provide
 
 from osa.config import Config
 from osa.domain.source.port.source_runner import SourceRunner
 from osa.domain.validation.port.hook_runner import HookRunner
 from osa.infrastructure.oci.runner import OciHookRunner
 from osa.infrastructure.oci.source_runner import OciSourceRunner
+from osa.infrastructure.s3.client import S3Client
 from osa.util.di.base import Provider
+from osa.util.di.markers import K8S
 from osa.util.di.scope import Scope
 
 try:
@@ -26,8 +28,6 @@ except ImportError:
     ApiClient = object  # type: ignore[misc,assignment]
 
 logger = logging.getLogger(__name__)
-
-K8S = Marker("k8s")
 
 
 class RunnerProvider(Provider):
@@ -111,22 +111,36 @@ class RunnerProvider(Provider):
         yield api_client
         await api_client.close()
 
+    @provide(when=K8S, scope=Scope.APP)
+    async def get_s3_client(self, config: Config) -> AsyncIterable[S3Client]:
+        k8s = config.runner.k8s
+        client = S3Client(
+            bucket=k8s.s3_bucket,
+            region=k8s.s3_region,
+            endpoint_url=k8s.s3_endpoint_url,
+        )
+        logger.info("S3 client initialized (bucket=%s)", k8s.s3_bucket)
+        yield client
+        await client.close()
+
     @provide(when=K8S, scope=Scope.UOW)
     def get_hook_runner_k8s(
         self,
         k8s_api_client: ApiClient,
         config: Config,
+        s3: S3Client,
     ) -> HookRunner:
         from osa.infrastructure.k8s.runner import K8sHookRunner
 
-        return K8sHookRunner(api_client=k8s_api_client, config=config.runner.k8s)
+        return K8sHookRunner(api_client=k8s_api_client, config=config.runner.k8s, s3=s3)
 
     @provide(when=K8S, scope=Scope.UOW)
     def get_source_runner_k8s(
         self,
         k8s_api_client: ApiClient,
         config: Config,
+        s3: S3Client,
     ) -> SourceRunner:
         from osa.infrastructure.k8s.source_runner import K8sSourceRunner
 
-        return K8sSourceRunner(api_client=k8s_api_client, config=config.runner.k8s)
+        return K8sSourceRunner(api_client=k8s_api_client, config=config.runner.k8s, s3=s3)

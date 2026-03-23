@@ -1,11 +1,16 @@
 """Shared result-parsing utilities for OCI and K8s runners."""
 
+from __future__ import annotations
+
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from osa.domain.validation.model.hook_result import ProgressEntry
+
+if TYPE_CHECKING:
+    from osa.infrastructure.s3.client import S3Client
 
 
 def parse_progress_file(output_dir: Path) -> list[ProgressEntry]:
@@ -148,4 +153,74 @@ def parse_session_file(output_dir: Path) -> dict[str, Any] | None:
         return json.loads(session_file.read_text())
     except json.JSONDecodeError:
         logfire.warn("Invalid session.json")
+        return None
+
+
+# ── S3-based parse functions (used by K8s runners) ──────────────────
+
+
+async def parse_progress_from_s3(s3: S3Client, prefix: str) -> list[ProgressEntry]:
+    """Parse progress.jsonl from S3 key prefix."""
+    import logfire
+
+    key = f"{prefix}/progress.jsonl"
+    try:
+        data = await s3.get_object(key)
+    except Exception:
+        return []
+
+    entries = []
+    for line in data.decode().strip().split("\n"):
+        if not line.strip():
+            continue
+        try:
+            d = json.loads(line)
+            entries.append(
+                ProgressEntry(
+                    step=d.get("step"),
+                    status=d.get("status", "unknown"),
+                    message=d.get("message"),
+                )
+            )
+        except json.JSONDecodeError:
+            logfire.warn("Skipping invalid JSON line in progress.jsonl")
+            continue
+    return entries
+
+
+async def parse_records_from_s3(s3: S3Client, prefix: str) -> list[dict[str, Any]]:
+    """Parse records.jsonl from S3 key prefix."""
+    import logfire
+
+    key = f"{prefix}/records.jsonl"
+    try:
+        data = await s3.get_object(key)
+    except Exception:
+        return []
+
+    records: list[dict[str, Any]] = []
+    for line in data.decode().strip().split("\n"):
+        if not line.strip():
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            logfire.warn("Skipping invalid JSON line in records.jsonl")
+            continue
+    return records
+
+
+async def parse_session_from_s3(s3: S3Client, prefix: str) -> dict[str, Any] | None:
+    """Parse session.json from S3 key prefix."""
+    import logfire
+
+    key = f"{prefix}/session.json"
+    try:
+        data = await s3.get_object(key)
+    except Exception:
+        return None
+    try:
+        return json.loads(data)
+    except json.JSONDecodeError:
+        logfire.warn("Invalid session.json from S3")
         return None

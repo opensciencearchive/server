@@ -43,9 +43,20 @@ def _make_config(**overrides) -> K8sConfig:
     return K8sConfig(**defaults)
 
 
+def _make_s3_mock() -> AsyncMock:
+    """Create an S3Client mock that returns sensible defaults."""
+    s3 = AsyncMock()
+    s3.get_object.return_value = b""
+    s3.put_object.return_value = None
+    s3.list_objects.return_value = []
+    s3.head_object.return_value = False
+    return s3
+
+
 def _make_runner(config: K8sConfig | None = None) -> K8sSourceRunner:
     api_client = MagicMock()
-    return K8sSourceRunner(api_client=api_client, config=config or _make_config())
+    s3 = _make_s3_mock()
+    return K8sSourceRunner(api_client=api_client, config=config or _make_config(), s3=s3)
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +210,7 @@ class TestSourceLifecycle:
     @pytest.mark.asyncio
     async def test_successful_run_with_records(self, tmp_path: Path):
         config = _make_config(data_mount_path=str(tmp_path))
-        runner = K8sSourceRunner(api_client=MagicMock(), config=config)
+        runner = K8sSourceRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
@@ -230,16 +241,22 @@ class TestSourceLifecycle:
 
         source = _make_source()
         work_dir = tmp_path / "sources" / "localhost_conv1" / "staging" / "run1"
-        output_dir = work_dir / "output"
-        output_dir.mkdir(parents=True)
         files_dir = work_dir / "files"
-        files_dir.mkdir(parents=True)
 
-        # Write records output
-        (output_dir / "records.jsonl").write_text(
-            '{"id":"r1","metadata":{"title":"Test"}}\n{"id":"r2","metadata":{"title":"Test2"}}\n'
+        # Configure S3 mock to return records and session
+        records_data = (
+            b'{"id":"r1","metadata":{"title":"Test"}}\n{"id":"r2","metadata":{"title":"Test2"}}\n'
         )
-        (output_dir / "session.json").write_text('{"cursor":"abc"}')
+        session_data = b'{"cursor":"abc"}'
+
+        async def s3_get(key: str) -> bytes:
+            if "records.jsonl" in key:
+                return records_data
+            if "session.json" in key:
+                return session_data
+            return b""
+
+        runner._s3.get_object.side_effect = s3_get
 
         inputs = SourceInputs(convention_srn=_CONV_SRN)
         result = await runner._run_job(
@@ -259,7 +276,7 @@ class TestSourceLifecycle:
     @pytest.mark.asyncio
     async def test_timeout_raises_external_service_error(self, tmp_path: Path):
         config = _make_config(data_mount_path=str(tmp_path))
-        runner = K8sSourceRunner(api_client=MagicMock(), config=config)
+        runner = K8sSourceRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
@@ -307,7 +324,7 @@ class TestSourceLifecycle:
     @pytest.mark.asyncio
     async def test_oom_raises_external_service_error(self, tmp_path: Path):
         config = _make_config(data_mount_path=str(tmp_path))
-        runner = K8sSourceRunner(api_client=MagicMock(), config=config)
+        runner = K8sSourceRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
@@ -378,7 +395,7 @@ class TestConventionSrnFromInputs:
         from unittest.mock import patch
 
         config = _make_config(data_mount_path=str(tmp_path))
-        runner = K8sSourceRunner(api_client=MagicMock(), config=config)
+        runner = K8sSourceRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()

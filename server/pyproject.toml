@@ -39,7 +39,9 @@ build-backend = "hatchling.build"
 
 [project.optional-dependencies]
 k8s = [
+    "aioboto3>=15.5.0",
     "kubernetes-asyncio>=31.0",
+    "types-aiobotocore-s3>=3.3.0",
 ]
 
 [dependency-groups]

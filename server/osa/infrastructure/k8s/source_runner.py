@@ -17,14 +17,14 @@ from osa.domain.source.port.source_runner import SourceInputs, SourceOutput, Sou
 from osa.infrastructure.k8s.errors import classify_api_error
 from osa.infrastructure.k8s.naming import job_name, label_value, sanitize_label
 from osa.infrastructure.runner_utils import (
-    parse_records_file,
-    parse_session_file,
     relative_path,
     to_k8s_quantity,
 )
 
 if TYPE_CHECKING:
     from kubernetes_asyncio.client import ApiClient, BatchV1Api, CoreV1Api, V1Job
+
+    from osa.infrastructure.s3.client import S3Client
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +43,14 @@ class K8sSourceRunner(SourceRunner):
     - Errors raise ExternalServiceError (not returned as result values)
     """
 
-    def __init__(self, api_client: ApiClient, config: K8sConfig) -> None:
+    def __init__(self, api_client: ApiClient, config: K8sConfig, s3: S3Client) -> None:
         self._api_client = api_client
         self._config = config
+        self._s3 = s3
+
+    def _s3_prefix(self, work_dir: Path, subdir: str) -> str:
+        """Convert a PVC path + subdir to an S3 key prefix."""
+        return f"{relative_path(work_dir, self._config.data_mount_path)}/{subdir}"
 
     async def run(
         self,
@@ -66,19 +71,15 @@ class K8sSourceRunner(SourceRunner):
         batch_api = BatchV1Api(self._api_client)
         core_api = CoreV1Api(self._api_client)
 
-        # Write input files
-        input_dir = work_dir / "input"
-        input_dir.mkdir(parents=True, exist_ok=True)
-        output_dir = work_dir / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        files_dir.mkdir(parents=True, exist_ok=True)
+        # Write input files to S3 (container reads them via PVC/S3 CSI)
+        input_prefix = self._s3_prefix(work_dir, "input")
 
         if inputs.config or source.config:
             config = {**(source.config or {}), **(inputs.config or {})}
-            (input_dir / "config.json").write_text(json.dumps(config))
+            await self._s3.put_object(f"{input_prefix}/config.json", json.dumps(config))
 
         if inputs.session:
-            (input_dir / "session.json").write_text(json.dumps(inputs.session))
+            await self._s3.put_object(f"{input_prefix}/session.json", json.dumps(inputs.session))
 
         return await self._run_job(
             batch_api,
@@ -112,7 +113,7 @@ class K8sSourceRunner(SourceRunner):
             )
 
             if existing == "succeeded":
-                return self._parse_source_output(work_dir, files_dir)
+                return await self._parse_source_output(work_dir, files_dir)
 
             if existing and existing.startswith("active:"):
                 job_name_to_watch = existing.split(":", 1)[1]
@@ -148,7 +149,7 @@ class K8sSourceRunner(SourceRunner):
             )
 
             if result == "succeeded":
-                output = self._parse_source_output(work_dir, files_dir)
+                output = await self._parse_source_output(work_dir, files_dir)
                 logger.info(
                     "Source completed",
                     extra={
@@ -168,10 +169,15 @@ class K8sSourceRunner(SourceRunner):
             if job_name_to_watch:
                 await self._cleanup_job(batch_api, job_name_to_watch, namespace)
 
-    def _parse_source_output(self, work_dir: Path, files_dir: Path) -> SourceOutput:
-        output_dir = work_dir / "output"
-        records = parse_records_file(output_dir)
-        session = parse_session_file(output_dir)
+    async def _parse_source_output(self, work_dir: Path, files_dir: Path) -> SourceOutput:
+        from osa.infrastructure.runner_utils import (
+            parse_records_from_s3,
+            parse_session_from_s3,
+        )
+
+        output_prefix = self._s3_prefix(work_dir, "output")
+        records = await parse_records_from_s3(self._s3, output_prefix)
+        session = await parse_session_from_s3(self._s3, output_prefix)
         return SourceOutput(records=records, session=session, files_dir=files_dir)
 
     async def _check_existing_job(

@@ -162,7 +162,7 @@ class FilesystemStorageAdapter(FileStoragePort):
         output.mkdir(parents=True, exist_ok=True)
         return output
 
-    def move_source_files_to_deposition(
+    async def move_source_files_to_deposition(
         self,
         staging_dir: Path,
         source_id: str,

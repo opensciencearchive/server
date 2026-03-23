@@ -84,7 +84,11 @@ class WorkerConfig(BaseModel):
 
 
 class K8sConfig(BaseModel):
-    """Kubernetes-specific runner settings, required when runner.backend == "k8s"."""
+    """Kubernetes-specific runner settings, required when runner.backend == "k8s".
+
+    S3 fields are used by the OSA server to bypass the FUSE/CSI mount and
+    talk to S3 directly via aioboto3. Container pods still use the PVC mount.
+    """
 
     namespace: str = "osa"
     service_account: str | None = None
@@ -92,6 +96,9 @@ class K8sConfig(BaseModel):
     data_mount_path: str = "/data"
     image_pull_secrets: list[str] = []
     job_ttl_seconds: int = 300
+    s3_bucket: str = ""
+    s3_region: str = "us-east-1"
+    s3_endpoint_url: str | None = None
 
 
 class RunnerConfig(BaseModel):
@@ -103,11 +110,17 @@ class RunnerConfig(BaseModel):
     @model_validator(mode="after")
     def validate_k8s_required_fields(self) -> Self:
         """Validate that required K8s fields are set when backend is 'k8s'."""
-        if self.backend == "k8s" and not self.k8s.data_pvc_name:
-            raise ValueError(
-                "runner.k8s.data_pvc_name is required when runner.backend == 'k8s'. "
-                "Set OSA_RUNNER__K8S__DATA_PVC_NAME."
-            )
+        if self.backend == "k8s":
+            if not self.k8s.data_pvc_name:
+                raise ValueError(
+                    "runner.k8s.data_pvc_name is required when runner.backend == 'k8s'. "
+                    "Set OSA_RUNNER__K8S__DATA_PVC_NAME."
+                )
+            if not self.k8s.s3_bucket:
+                raise ValueError(
+                    "runner.k8s.s3_bucket is required when runner.backend == 'k8s'. "
+                    "Set OSA_RUNNER__K8S__S3_BUCKET."
+                )
         return self
 
 

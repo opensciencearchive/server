@@ -45,7 +45,7 @@ class TestCreateDepositionFromSource:
 
         deposition_service = AsyncMock()
         deposition_service.create.return_value = dep
-        file_storage = MagicMock()
+        file_storage = AsyncMock()
 
         handler = CreateDepositionFromSource(
             deposition_service=deposition_service,
@@ -81,7 +81,7 @@ class TestCreateDepositionFromSource:
 
         deposition_service = AsyncMock()
         deposition_service.create.return_value = dep
-        file_storage = MagicMock()
+        file_storage = AsyncMock()
 
         handler = CreateDepositionFromSource(
             deposition_service=deposition_service,

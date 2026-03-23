@@ -109,6 +109,10 @@ db-connect:
 image-tag:
     @echo "ghcr.io/$(gh repo view --json owner,name -q '.owner.login')/osa:sha-$(git rev-parse --short=7 HEAD)"
 
+# Print the tag of the latest image pushed to GHCR
+image-latest:
+    @GH_PAGER= gh api /orgs/opensciencearchive/packages/container/osa/versions --jq '.[0].metadata.container.tags[0]'
+
 # === Maintenance ===
 
 # Clean up Docker resources (volumes, images, etc.)

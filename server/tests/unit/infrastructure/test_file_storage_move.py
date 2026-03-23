@@ -21,7 +21,8 @@ def _make_dep_srn() -> DepositionSRN:
 class TestMoveSourceFilesFallback:
     """move_source_files_to_deposition falls back to copy+delete on OSError."""
 
-    def test_rename_works_on_local_filesystem(self, tmp_path: Path):
+    @pytest.mark.asyncio
+    async def test_rename_works_on_local_filesystem(self, tmp_path: Path):
         """rename() still works on local filesystem (no fallback needed)."""
         adapter = FilesystemStorageAdapter(str(tmp_path))
         dep_srn = _make_dep_srn()
@@ -32,13 +33,14 @@ class TestMoveSourceFilesFallback:
         source_files.mkdir(parents=True)
         (source_files / "data.csv").write_text("a,b,c")
 
-        adapter.move_source_files_to_deposition(staging_dir, source_id, dep_srn)
+        await adapter.move_source_files_to_deposition(staging_dir, source_id, dep_srn)
 
         files_dir = adapter.get_files_dir(dep_srn)
         assert (files_dir / "data.csv").read_text() == "a,b,c"
         assert not source_files.exists()
 
-    def test_fallback_copy_delete_on_oserror(self, tmp_path: Path):
+    @pytest.mark.asyncio
+    async def test_fallback_copy_delete_on_oserror(self, tmp_path: Path):
         """Falls back to shutil.copyfile + unlink when rename() raises OSError."""
         adapter = FilesystemStorageAdapter(str(tmp_path))
         dep_srn = _make_dep_srn()
@@ -53,13 +55,14 @@ class TestMoveSourceFilesFallback:
             raise OSError("Cross-device link")
 
         with patch.object(Path, "rename", failing_rename):
-            adapter.move_source_files_to_deposition(staging_dir, source_id, dep_srn)
+            await adapter.move_source_files_to_deposition(staging_dir, source_id, dep_srn)
 
         files_dir = adapter.get_files_dir(dep_srn)
         assert (files_dir / "data.csv").read_text() == "a,b,c"
         assert not (source_files / "data.csv").exists()
 
-    def test_fallback_is_idempotent_on_retry(self, tmp_path: Path):
+    @pytest.mark.asyncio
+    async def test_fallback_is_idempotent_on_retry(self, tmp_path: Path):
         """Retrying copy+delete after a crash works (file already at target)."""
         adapter = FilesystemStorageAdapter(str(tmp_path))
         dep_srn = _make_dep_srn()
@@ -78,12 +81,13 @@ class TestMoveSourceFilesFallback:
             raise OSError("Cross-device link")
 
         with patch.object(Path, "rename", failing_rename):
-            adapter.move_source_files_to_deposition(staging_dir, source_id, dep_srn)
+            await adapter.move_source_files_to_deposition(staging_dir, source_id, dep_srn)
 
         assert (files_dir / "data.csv").read_text() == "a,b,c"
         assert not (source_files / "data.csv").exists()
 
-    def test_copy_failure_raises_infrastructure_error(self, tmp_path: Path):
+    @pytest.mark.asyncio
+    async def test_copy_failure_raises_infrastructure_error(self, tmp_path: Path):
         """Copy failure wraps OSError in InfrastructureError with file context."""
         adapter = FilesystemStorageAdapter(str(tmp_path))
         dep_srn = _make_dep_srn()
@@ -102,7 +106,7 @@ class TestMoveSourceFilesFallback:
             patch("shutil.copyfile", side_effect=OSError("No space left on device")),
             pytest.raises(InfrastructureError, match="data.csv"),
         ):
-            adapter.move_source_files_to_deposition(staging_dir, source_id, dep_srn)
+            await adapter.move_source_files_to_deposition(staging_dir, source_id, dep_srn)
 
 
 class TestSaveFileFallback:

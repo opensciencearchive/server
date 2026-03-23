@@ -57,9 +57,20 @@ def _make_config(**overrides) -> K8sConfig:
     return K8sConfig(**defaults)
 
 
+def _make_s3_mock() -> AsyncMock:
+    """Create an S3Client mock that returns sensible defaults."""
+    s3 = AsyncMock()
+    s3.get_object.return_value = b""
+    s3.put_object.return_value = None
+    s3.list_objects.return_value = []
+    s3.head_object.return_value = False
+    return s3
+
+
 def _make_runner(config: K8sConfig | None = None) -> K8sHookRunner:
     api_client = MagicMock()
-    return K8sHookRunner(api_client=api_client, config=config or _make_config())
+    s3 = _make_s3_mock()
+    return K8sHookRunner(api_client=api_client, config=config or _make_config(), s3=s3)
 
 
 # ---------------------------------------------------------------------------
@@ -412,7 +423,7 @@ class TestExecutionAndCleanup:
     async def test_successful_run(self, tmp_path: Path):
         """Full lifecycle: create → schedule → complete → parse → cleanup."""
         config = _make_config(data_mount_path=str(tmp_path))
-        runner = K8sHookRunner(api_client=MagicMock(), config=config)
+        runner = K8sHookRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
@@ -443,13 +454,11 @@ class TestExecutionAndCleanup:
         completed_job.status.failed = None
         batch_api.read_namespaced_job.return_value = completed_job
 
-        # Create output directory with progress
+        # Configure S3 mock to return progress data
         hook = _make_hook()
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
-        output_dir = work_dir / "output"
-        output_dir.mkdir(parents=True)
-        (output_dir / "progress.jsonl").write_text(
-            '{"step":"Check","status":"completed","message":"OK"}\n'
+        runner._s3.get_object.return_value = (
+            b'{"step":"Check","status":"completed","message":"OK"}\n'
         )
 
         inputs = HookInputs(record_json={"srn": "test"}, deposition_srn=_DEP_SRN)
@@ -470,7 +479,7 @@ class TestExecutionAndCleanup:
     @pytest.mark.asyncio
     async def test_timeout_deadline_exceeded(self, tmp_path: Path):
         config = _make_config(data_mount_path=str(tmp_path))
-        runner = K8sHookRunner(api_client=MagicMock(), config=config)
+        runner = K8sHookRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
@@ -523,7 +532,7 @@ class TestExecutionAndCleanup:
     @pytest.mark.asyncio
     async def test_oom_exit_137(self, tmp_path: Path):
         config = _make_config(data_mount_path=str(tmp_path))
-        runner = K8sHookRunner(api_client=MagicMock(), config=config)
+        runner = K8sHookRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
@@ -585,7 +594,7 @@ class TestExecutionAndCleanup:
     @pytest.mark.asyncio
     async def test_nonzero_exit(self, tmp_path: Path):
         config = _make_config(data_mount_path=str(tmp_path))
-        runner = K8sHookRunner(api_client=MagicMock(), config=config)
+        runner = K8sHookRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
@@ -646,7 +655,7 @@ class TestExecutionAndCleanup:
     async def test_orphan_running_job_attaches(self, tmp_path: Path):
         """Existing running Job → attach and wait for it."""
         config = _make_config(data_mount_path=str(tmp_path))
-        runner = K8sHookRunner(api_client=MagicMock(), config=config)
+        runner = K8sHookRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
@@ -702,7 +711,7 @@ class TestExecutionAndCleanup:
     async def test_orphan_completed_job_reads_output(self, tmp_path: Path):
         """Existing completed Job → read its output."""
         config = _make_config(data_mount_path=str(tmp_path))
-        runner = K8sHookRunner(api_client=MagicMock(), config=config)
+        runner = K8sHookRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
@@ -738,7 +747,7 @@ class TestExecutionAndCleanup:
     async def test_orphan_failed_job_creates_new(self, tmp_path: Path):
         """Existing failed Job → create new one."""
         config = _make_config(data_mount_path=str(tmp_path))
-        runner = K8sHookRunner(api_client=MagicMock(), config=config)
+        runner = K8sHookRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
@@ -794,7 +803,7 @@ class TestExecutionAndCleanup:
     async def test_cleanup_404_ignored(self, tmp_path: Path):
         """404 on Job delete is ignored (already cleaned up)."""
         config = _make_config(data_mount_path=str(tmp_path))
-        runner = K8sHookRunner(api_client=MagicMock(), config=config)
+        runner = K8sHookRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
 
@@ -811,7 +820,7 @@ class TestExecutionAndCleanup:
     async def test_rejection_via_progress(self, tmp_path: Path):
         """Hook with rejected progress entry returns REJECTED."""
         config = _make_config(data_mount_path=str(tmp_path))
-        runner = K8sHookRunner(api_client=MagicMock(), config=config)
+        runner = K8sHookRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
@@ -839,10 +848,8 @@ class TestExecutionAndCleanup:
 
         hook = _make_hook()
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
-        output_dir = work_dir / "output"
-        output_dir.mkdir(parents=True)
-        (output_dir / "progress.jsonl").write_text(
-            '{"step":"Validate","status":"rejected","message":"Missing atoms"}\n'
+        runner._s3.get_object.return_value = (
+            b'{"step":"Validate","status":"rejected","message":"Missing atoms"}\n'
         )
         inputs = HookInputs(record_json={"srn": "test"}, deposition_srn=_DEP_SRN)
 
@@ -873,7 +880,7 @@ class TestDepositionSrnFromInputs:
         from unittest.mock import patch
 
         config = _make_config(data_mount_path=str(tmp_path))
-        runner = K8sHookRunner(api_client=MagicMock(), config=config)
+        runner = K8sHookRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
@@ -902,9 +909,7 @@ class TestDepositionSrnFromInputs:
         # Work dir does NOT follow depositions path convention — proves
         # we're not parsing the path to extract the SRN
         work_dir = tmp_path / "arbitrary" / "path"
-        output_dir = work_dir / "output"
-        output_dir.mkdir(parents=True)
-        (output_dir / "progress.jsonl").write_text("")
+        # S3 mock returns empty progress (default from _make_s3_mock)
 
         hook = _make_hook()
         inputs = HookInputs(
