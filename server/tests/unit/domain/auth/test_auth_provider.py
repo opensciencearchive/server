@@ -1,5 +1,6 @@
-"""Tests for AuthProvider identity resolution (get_identity / get_principal)."""
+"""Tests for identity resolution and AuthProvider (get_principal)."""
 
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
@@ -10,11 +11,11 @@ from osa.config import JwtConfig
 from osa.domain.auth.model.identity import Anonymous
 from osa.domain.auth.model.principal import Principal
 from osa.domain.auth.model.role import Role
-from osa.domain.auth.model.role_assignment import RoleAssignment, RoleAssignmentId
 from osa.domain.auth.model.value import ProviderIdentity, UserId
 from osa.domain.auth.service.token import TokenService
 from osa.domain.auth.util.di.provider import AuthProvider
 from osa.domain.shared.error import AuthorizationError
+from osa.util.di.fastapi import resolve_identity
 
 
 def _make_jwt_config() -> JwtConfig:
@@ -46,31 +47,36 @@ def _make_valid_token(token_service: TokenService, user_id: UserId) -> str:
     )
 
 
-def _make_role_repo(assignments: list[RoleAssignment] | None = None) -> AsyncMock:
-    repo = AsyncMock()
-    repo.get_by_user_id.return_value = assignments or []
-    return repo
+def _make_session_factory(role_names: list[str] | None = None) -> MagicMock:
+    """Create a mock async_sessionmaker that returns role rows."""
+    rows = [(name,) for name in (role_names or [])]
+    mock_result = MagicMock()
+    mock_result.__iter__ = lambda self: iter(rows)
+
+    session = AsyncMock()
+    session.execute.return_value = mock_result
+
+    @asynccontextmanager
+    async def session_ctx():
+        yield session
+
+    factory = MagicMock()
+    factory.return_value = session_ctx()
+    # Make factory callable multiple times
+    factory.side_effect = lambda: session_ctx()
+    return factory
 
 
-class TestGetIdentity:
+class TestResolveIdentity:
     @pytest.mark.asyncio
     async def test_valid_jwt_returns_principal_with_roles(self) -> None:
         token_service = _make_token_service()
         user_id = UserId.generate()
         token = _make_valid_token(token_service, user_id)
         request = _make_request(f"Bearer {token}")
+        session_factory = _make_session_factory(["curator"])
 
-        assignment = RoleAssignment(
-            id=RoleAssignmentId.generate(),
-            user_id=user_id,
-            role=Role.CURATOR,
-            assigned_by=UserId.generate(),
-            assigned_at=datetime.now(UTC),
-        )
-        role_repo = _make_role_repo([assignment])
-
-        provider = AuthProvider()
-        identity = await provider.get_identity(request, token_service, role_repo)
+        identity = await resolve_identity(request, token_service, session_factory)
 
         assert isinstance(identity, Principal)
         assert identity.user_id == user_id
@@ -91,10 +97,9 @@ class TestGetIdentity:
         }
         token = pyjwt.encode(payload, jwt_config.secret, algorithm=jwt_config.algorithm)
         request = _make_request(f"Bearer {token}")
-        role_repo = _make_role_repo()
+        session_factory = _make_session_factory()
 
-        provider = AuthProvider()
-        identity = await provider.get_identity(request, token_service, role_repo)
+        identity = await resolve_identity(request, token_service, session_factory)
 
         assert isinstance(identity, Anonymous)
 
@@ -102,10 +107,9 @@ class TestGetIdentity:
     async def test_invalid_jwt_returns_anonymous(self) -> None:
         token_service = _make_token_service()
         request = _make_request("Bearer not-a-valid-jwt")
-        role_repo = _make_role_repo()
+        session_factory = _make_session_factory()
 
-        provider = AuthProvider()
-        identity = await provider.get_identity(request, token_service, role_repo)
+        identity = await resolve_identity(request, token_service, session_factory)
 
         assert isinstance(identity, Anonymous)
 
@@ -113,10 +117,9 @@ class TestGetIdentity:
     async def test_no_auth_header_returns_anonymous(self) -> None:
         token_service = _make_token_service()
         request = _make_request()
-        role_repo = _make_role_repo()
+        session_factory = _make_session_factory()
 
-        provider = AuthProvider()
-        identity = await provider.get_identity(request, token_service, role_repo)
+        identity = await resolve_identity(request, token_service, session_factory)
 
         assert isinstance(identity, Anonymous)
 

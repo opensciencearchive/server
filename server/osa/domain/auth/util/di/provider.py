@@ -22,7 +22,7 @@ from osa.domain.auth.command.login import (
 )
 from osa.domain.auth.command.revoke_role import RevokeRoleHandler
 from osa.domain.auth.command.token import LogoutHandler, RefreshTokensHandler
-from osa.domain.auth.model.identity import Anonymous, Identity
+from osa.domain.auth.model.identity import Identity
 from osa.domain.auth.model.principal import Principal
 from osa.domain.auth.model.role import Role
 from osa.domain.auth.model.value import CurrentUser, ProviderIdentity, UserId
@@ -67,9 +67,9 @@ class AuthProvider(Provider):
     # Services
     authorization_service = provide(AuthorizationService, scope=Scope.UOW)
 
-    @provide(scope=Scope.UOW)
+    @provide(scope=Scope.APP)
     def get_token_service(self, config: Config) -> TokenService:
-        """Provide TokenService."""
+        """Provide TokenService (stateless, only needs config)."""
         return TokenService(_config=config.auth.jwt)
 
     @provide(scope=Scope.UOW)
@@ -147,48 +147,7 @@ class AuthProvider(Provider):
                 headers={"WWW-Authenticate": "Bearer"},
             ) from e
 
-    @provide(scope=Scope.UOW)
-    async def get_identity(
-        self,
-        request: Request,
-        token_service: TokenService,
-        role_repo: RoleAssignmentRepository,
-    ) -> Identity:
-        """Resolve Identity from JWT + role lookup.
-
-        Returns Anonymous for unauthenticated requests, Principal for authenticated.
-        """
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            return Anonymous()
-
-        token = auth_header[7:]  # Remove "Bearer " prefix
-
-        try:
-            payload = token_service.validate_access_token(token)
-        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-            return Anonymous()
-
-        user_id = UserId(UUID(payload["sub"]))
-
-        # Lookup roles from DB (includes base_role if assigned at user creation)
-        assignments = await role_repo.get_by_user_id(user_id)
-        roles = frozenset(a.role for a in assignments)
-        logger.debug(
-            "Identity resolved: user_id=%s, roles=%s, assignments=%d",
-            user_id,
-            roles,
-            len(assignments),
-        )
-
-        return Principal(
-            user_id=user_id,
-            provider_identity=ProviderIdentity(
-                provider=payload["provider"],
-                external_id=payload["external_id"],
-            ),
-            roles=roles,
-        )
+    identity = from_context(provides=Identity, scope=Scope.UOW)
 
     @provide(scope=Scope.UOW)
     def get_principal(self, identity: Identity) -> Principal:
