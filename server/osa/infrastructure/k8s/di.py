@@ -116,7 +116,6 @@ class RunnerProvider(Provider):
         k8s = config.runner.k8s
         client = S3Client(
             bucket=k8s.s3_bucket,
-            region=k8s.s3_region,
             endpoint_url=k8s.s3_endpoint_url,
         )
         logger.info("S3 client initialized (bucket=%s)", k8s.s3_bucket)

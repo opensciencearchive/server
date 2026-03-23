@@ -24,24 +24,21 @@ class S3Client:
     def __init__(
         self,
         bucket: str,
-        region: str = "us-east-1",
         endpoint_url: str | None = None,
     ) -> None:
         import aioboto3
 
         self._bucket = bucket
-        self._region = region
         self._endpoint_url = endpoint_url
         self._session = aioboto3.Session()
 
     @asynccontextmanager
     async def _client(self):
         """Yield a short-lived S3 client with fresh credentials."""
-        async with self._session.client(
-            "s3",
-            region_name=self._region,
-            endpoint_url=self._endpoint_url,
-        ) as client:
+        kwargs: dict[str, str] = {}
+        if self._endpoint_url:
+            kwargs["endpoint_url"] = self._endpoint_url
+        async with self._session.client("s3", **kwargs) as client:
             yield client
 
     async def put_object(self, key: str, body: str | bytes) -> None:

@@ -97,7 +97,6 @@ class K8sConfig(BaseModel):
     image_pull_secrets: list[str] = []
     job_ttl_seconds: int = 300
     s3_bucket: str = ""
-    s3_region: str = "us-east-1"
     s3_endpoint_url: str | None = None
 
 
