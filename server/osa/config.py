@@ -367,8 +367,5 @@ def configure_logging(config: LoggingConfig) -> None:
     logging.getLogger("asyncio").setLevel(logging.WARNING)
     logging.getLogger("aiosqlite").setLevel(logging.WARNING)
     logging.getLogger("apscheduler").setLevel(logging.WARNING)  # Suppress job completion spam
-    logging.getLogger("filelock").setLevel(logging.WARNING)  # Suppress huggingface lock spam
-    logging.getLogger("chromadb").setLevel(logging.INFO)  # Suppress chromadb debug noise
-    logging.getLogger("sentence_transformers").setLevel(logging.INFO)
 
     logging.debug("Logging configured: level=%s, file=%s", config.level, config.file)

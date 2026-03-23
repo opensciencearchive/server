@@ -107,11 +107,6 @@ class OSAPaths:
         """SQLite database file."""
         return self._data_dir / "osa.db"
 
-    @property
-    def vectors_dir(self) -> Path:
-        """Vector database directory."""
-        return self._data_dir / "vectors"
-
     # -------------------------------------------------------------------------
     # State paths
     # -------------------------------------------------------------------------
@@ -151,7 +146,6 @@ class OSAPaths:
         self._state_dir.mkdir(parents=True, exist_ok=True)
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
-        self.vectors_dir.mkdir(parents=True, exist_ok=True)
 
     def is_initialized(self) -> bool:
         """Check if OSA has been initialized (config file exists)."""

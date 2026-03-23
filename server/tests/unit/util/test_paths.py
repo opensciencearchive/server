@@ -35,7 +35,6 @@ class TestOSAPathsXDGMode:
 
         assert paths.config_file == test_home / ".config" / "osa" / "config.yaml"
         assert paths.database_file == test_home / ".local" / "share" / "osa" / "osa.db"
-        assert paths.vectors_dir == test_home / ".local" / "share" / "osa" / "vectors"
         assert paths.server_state_file == test_home / ".local" / "state" / "osa" / "server.json"
         assert paths.logs_dir == test_home / ".local" / "state" / "osa" / "logs"
         assert paths.server_log == test_home / ".local" / "state" / "osa" / "logs" / "server.log"
@@ -66,7 +65,6 @@ class TestOSAPathsUnifiedMode:
 
         assert paths.config_file == Path("/data/config/config.yaml")
         assert paths.database_file == Path("/data/data/osa.db")
-        assert paths.vectors_dir == Path("/data/data/vectors")
         assert paths.server_state_file == Path("/data/state/server.json")
         assert paths.logs_dir == Path("/data/state/logs")
         assert paths.server_log == Path("/data/state/logs/server.log")
@@ -111,7 +109,6 @@ class TestOSAPathsEnsureDirectories:
         assert paths.state_dir.exists()
         assert paths.cache_dir.exists()
         assert paths.logs_dir.exists()
-        assert paths.vectors_dir.exists()
 
     def test_ensure_directories_is_idempotent(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
