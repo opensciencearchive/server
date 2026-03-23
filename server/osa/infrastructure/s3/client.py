@@ -36,9 +36,42 @@ class S3Client:
         Session is created lazily in async context to ensure the
         async credential chain (Pod Identity, IRSA) resolves correctly.
         """
+        import os
+
         import aioboto3
 
+        cred_uri = os.environ.get("AWS_CONTAINER_CREDENTIALS_FULL_URI")
+        token_file = os.environ.get("AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE")
+        region = os.environ.get("AWS_REGION")
+
+        logger.info(
+            "S3 _client(): cred_uri=%s, token_file=%s (exists=%s), region=%s, "
+            "aiobotocore=%s, botocore=%s",
+            cred_uri,
+            token_file,
+            os.path.exists(token_file) if token_file else "N/A",
+            region,
+            __import__("aiobotocore").__version__,
+            __import__("botocore").__version__,
+        )
+
         session = aioboto3.Session()
+
+        # Log resolved credentials before making API call
+        try:
+            creds = await session._session.get_credentials()
+            if creds:
+                resolved = await creds.get_frozen_credentials()
+                logger.info(
+                    "S3 credentials resolved: method=%s, access_key=%s...",
+                    getattr(creds, "method", "unknown"),
+                    resolved.access_key[:8] if resolved.access_key else "NONE",
+                )
+            else:
+                logger.error("S3 credentials resolved to None")
+        except Exception as e:
+            logger.error("S3 credential resolution failed: %s", e)
+
         kwargs: dict[str, str] = {}
         if self._endpoint_url:
             kwargs["endpoint_url"] = self._endpoint_url
