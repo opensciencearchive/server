@@ -6,183 +6,72 @@
 
 <p align="center">
   <strong>A domain-agnostic archive for AI-ready scientific data</strong>
+  <br /><br />
+  <a href="https://github.com/opensciencearchive/server/issues"><img src="https://img.shields.io/github/issues/opensciencearchive/server?style=flat-square" alt="Issues" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square" alt="License" /></a>
 </p>
 
-> **⚠️ Under active development** — OSA is not yet ready for production use. APIs, data formats, and configuration may change without notice.
-
-
-<p align="center">
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#development">Development</a> •
-  <a href="#project-structure">Structure</a> •
-  <a href="#troubleshooting">Troubleshooting</a>
-</p>
+> **⚠️ Under active development** — OSA is pre-release software. APIs, data formats, and configuration will change without notice. Not yet suitable for production use or external contributions.
 
 ---
 
-OSA makes it easy to stand up [PDB](https://www.rcsb.org/)-level data infrastructure for any scientific domain — validated, searchable, and AI-ready.
+## What is OSA?
 
-## Quick Start
+OSA is both an **open protocol** and its **reference implementation** for scientific data deposition, validation, publication, discovery, and export — standing up [PDB](https://www.rcsb.org/)-level data infrastructure for any scientific domain.
 
-### Self-Hosted Deployment
+<table>
+<tr>
+<td width="50%">
 
-Deploy the complete OSA stack with a single command:
+**Convention-driven submissions**
+Conventions bundle a metadata schema, validators, and file requirements into a single submission target.
 
-**Requirements:** Docker Desktop 4.x+ or Docker Engine 24.x+
+**Pluggable validation**
+Validators are OCI containers with a filesystem I/O contract. No network by default. Domain experts define quality checks; OSA runs them.
 
-```bash
-git clone https://github.com/opensciencearchive/server.git
-cd server
-docker compose -f deploy/docker-compose.yml up
+</td>
+<td width="50%">
+
+**Structured Resource Names**
+Globally unique, node-scoped identifiers with clear versioning.
+`urn:osa:{domain}:{type}:{id}[@{version}]`
+
+**Federation-ready**
+Nodes identified by DNS domain. Records flow between nodes via import, fork, and mirror — preserving provenance.
+
+</td>
+</tr>
+</table>
+
+### Canonical Write Path
+
+```
+Deposition  ─→  Validation  ─→  Curation  ─→  Record  ─→  Search & Export
+   draft          OCI hooks      approve/       immutable     indexed,
+   metadata       structured     reject         versioned     exportable
+   + files        checks                        published
 ```
 
-Access the web interface at `http://localhost:8080`
+## Status
 
-### Environment Configuration
-
-Copy and customize the environment template:
-
-```bash
-cp deploy/.env.example deploy/.env
-```
-
-Key variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `POSTGRES_PASSWORD` | `osa` | Database password |
-| `WEB_PORT` | `8080` | External port for web interface |
-| `LOG_LEVEL` | `INFO` | Application log level |
-
-## Development
-
-### Full-Stack Development
-
-Start all services with hot-reload enabled:
-
-```bash
-just dev
-```
-
-Or using docker compose directly:
-
-```bash
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up
-```
-
-**What's running:**
-- Web UI: http://localhost:3000 (hot-reload)
-- API Server: http://localhost:8000 (auto-restart on changes)
-- PostgreSQL: localhost:5432
-
-### Individual Service Development
-
-**Frontend only:**
-
-```bash
-just web-dev
-# Or: cd web && pnpm dev
-```
-
-**Backend only:**
-
-```bash
-just server-dev
-# Or: cd server && just dev
-```
-
-### Available Commands
-
-| Command | Description |
-|---------|-------------|
-| `just up` | Start production deployment |
-| `just down` | Stop all services |
-| `just logs` | View service logs |
-| `just dev` | Full-stack development with hot-reload |
-| `just web-dev` | Frontend development server |
-| `just web-build` | Production build of frontend |
-| `just web-lint` | Lint frontend code |
-| `just server-dev` | Backend development server |
-| `just status` | Show service status |
+OSA is in **early development**. The core write path (deposition through record publication) is functional. Search, export, and federation are in progress. The web UI is minimal.
 
 ## Project Structure
 
 ```
 osa/
 ├── server/                  # Python backend (FastAPI)
-│   ├── osa/                 # Application code
-│   ├── tests/               # Test suite
-│   ├── migrations/          # Database migrations
-│   ├── sources/             # Data source plugins
-│   ├── Dockerfile
-│   ├── pyproject.toml
-│   └── Justfile             # Server-specific commands
+│   ├── osa/
+│   │   ├── domain/          # DDD bounded contexts
+│   │   ├── application/     # API routes, DI wiring
+│   │   └── infrastructure/  # Adapters (DB, K8s, S3)
+│   ├── tests/               # Unit + integration tests
+│   ├── migrations/          # Alembic migrations
+│   └── sources/             # Data source plugins
 ├── web/                     # Next.js frontend
-│   ├── src/                 # Application code
-│   ├── public/              # Static assets
-│   ├── Dockerfile
-│   └── package.json
-├── deploy/                  # Deployment configuration
-│   ├── docker-compose.yml   # Production orchestration
-│   ├── docker-compose.dev.yml # Development overrides
-│   └── .env.example         # Environment template
-└── Justfile                 # Root orchestration commands
-```
-
-## Troubleshooting
-
-### Port conflicts
-
-If port 8080 is already in use:
-
-```bash
-# Option 1: Change the port in deploy/.env
-echo "WEB_PORT=3001" >> deploy/.env
-docker compose -f deploy/docker-compose.yml up
-
-# Option 2: Stop the conflicting service
-lsof -i :8080
-```
-
-### Database connection issues
-
-Ensure the database container is healthy before starting other services:
-
-```bash
-docker compose -f deploy/docker-compose.yml ps
-```
-
-The `db` service should show `healthy` status. If not:
-
-```bash
-# Check database logs
-docker compose -f deploy/docker-compose.yml logs db
-
-# Restart just the database
-docker compose -f deploy/docker-compose.yml restart db
-```
-
-### Container build failures
-
-If builds fail, try cleaning and rebuilding:
-
-```bash
-# Clean up Docker resources
-just clean
-
-# Rebuild from scratch
-docker compose -f deploy/docker-compose.yml build --no-cache
-docker compose -f deploy/docker-compose.yml up
-```
-
-### Hot-reload not working
-
-For WSL2 users, hot-reload should work automatically (WATCHFILES_FORCE_POLLING is enabled). If it doesn't:
-
-```bash
-# Restart the dev environment
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml down
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up --build
+│   └── src/                 # React components, pages
+├── deploy/                  # Docker Compose orchestration
+└── docs/                    # Protocol documentation
 ```
 
 ## License
