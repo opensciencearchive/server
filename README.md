@@ -70,8 +70,7 @@ osa/
 │   └── sources/             # Data source plugins
 ├── web/                     # Next.js frontend
 │   └── src/                 # React components, pages
-├── deploy/                  # Docker Compose orchestration
-└── docs/                    # Protocol documentation
+└── deploy/                  # Docker Compose orchestration
 ```
 
 ## License
