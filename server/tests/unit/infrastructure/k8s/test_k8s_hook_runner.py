@@ -270,7 +270,7 @@ class TestJobSpecGeneration:
         )
 
         mounts = spec.spec.template.spec.containers[0].volume_mounts
-        files_mount = next((m for m in mounts if m.mount_path == "/osa/in/files"), None)
+        files_mount = next((m for m in mounts if m.mount_path == "/osa/files"), None)
         assert files_mount is not None
         assert files_mount.read_only is True
 

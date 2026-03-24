@@ -270,7 +270,7 @@ class K8sHookRunner(HookRunner):
             relative_files = self._relative_path(files_dir)
             mounts.append(
                 V1VolumeMount(
-                    name="data", mount_path="/osa/in/files", sub_path=relative_files, read_only=True
+                    name="data", mount_path="/osa/files", sub_path=relative_files, read_only=True
                 )
             )
 
@@ -290,6 +290,7 @@ class K8sHookRunner(HookRunner):
             env=[
                 V1EnvVar(name="OSA_IN", value="/osa/in"),
                 V1EnvVar(name="OSA_OUT", value="/osa/out"),
+                V1EnvVar(name="OSA_FILES", value="/osa/files"),
                 V1EnvVar(name="OSA_HOOK_NAME", value=hook.name),
             ],
             resources=V1ResourceRequirements(
