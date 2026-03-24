@@ -56,4 +56,4 @@ class FeatureService(Service):
                     record_srn=record_srn,
                     rows=features,
                 )
-                logger.debug(f"Inserted {count} features for hook={hook_name} record={record_srn}")
+                logger.info(f"Inserted {count} features for hook={hook_name} record={record_srn}")

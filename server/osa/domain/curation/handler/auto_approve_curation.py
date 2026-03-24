@@ -30,7 +30,7 @@ class AutoApproveCuration(EventHandler[ValidationCompleted]):
             logger.info(f"Curation required for {event.deposition_srn}, not auto-approving")
             return
 
-        logger.debug(f"Auto-approving deposition: {event.deposition_srn}")
+        logger.info(f"Auto-approving deposition: {event.deposition_srn}")
 
         # Emit DepositionApproved
         approved = DepositionApproved(
@@ -44,4 +44,4 @@ class AutoApproveCuration(EventHandler[ValidationCompleted]):
 
         await self.outbox.append(approved)
 
-        logger.debug(f"Deposition approved: {event.deposition_srn}")
+        logger.info(f"Deposition approved: {event.deposition_srn}")

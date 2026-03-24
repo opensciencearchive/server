@@ -22,7 +22,7 @@ class ValidateDeposition(EventHandler[DepositionSubmittedEvent]):
 
     async def handle(self, event: DepositionSubmittedEvent) -> None:
         """Run hooks and emit ValidationCompleted or ValidationFailed."""
-        logger.debug(f"Validating deposition: {event.deposition_id}")
+        logger.info(f"Validating deposition: {event.deposition_id}")
 
         try:
             run, hook_results = await self.validation_service.validate_deposition(
@@ -64,4 +64,4 @@ class ValidateDeposition(EventHandler[DepositionSubmittedEvent]):
                 files_dir=event.files_dir,
             )
             await self.outbox.append(completed)
-            logger.debug(f"Validation completed for: {event.deposition_id}")
+            logger.info(f"Validation completed for: {event.deposition_id}")

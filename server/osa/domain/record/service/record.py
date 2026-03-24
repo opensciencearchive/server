@@ -60,7 +60,7 @@ class RecordService(Service):
         files_dir: str = "",
     ) -> Record:
         """Create and persist a Record from an approved deposition."""
-        logger.debug(f"Creating record for approved deposition: {deposition_srn}")
+        logger.info(f"Creating record for approved deposition: {deposition_srn}")
 
         record_srn = RecordSRN(
             domain=self.node_domain,
@@ -76,7 +76,7 @@ class RecordService(Service):
         )
 
         await self.record_repo.save(record)
-        logger.debug(f"Record persisted: {record_srn}")
+        logger.info(f"Record persisted: {record_srn}")
 
         published = RecordPublished(
             id=EventId(uuid4()),
@@ -89,5 +89,5 @@ class RecordService(Service):
         )
         await self.outbox.append(published)
 
-        logger.debug(f"RecordPublished event emitted: {record_srn}")
+        logger.info(f"RecordPublished event emitted: {record_srn}")
         return record
