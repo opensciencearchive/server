@@ -194,7 +194,7 @@ class TestJobSpecGeneration:
 
         pod_spec = spec.spec.template.spec
         assert pod_spec.dns_policy == "None"
-        assert pod_spec.dns_config.nameservers == []
+        assert pod_spec.dns_config.nameservers == ["127.0.0.1"]
 
     def test_labels(self):
         runner = _make_runner()

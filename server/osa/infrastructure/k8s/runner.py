@@ -318,7 +318,7 @@ class K8sHookRunner(HookRunner):
                 seccomp_profile=V1SeccompProfile(type="RuntimeDefault"),
             ),
             dns_policy="None",
-            dns_config=V1PodDNSConfig(nameservers=[]),
+            dns_config=V1PodDNSConfig(nameservers=["127.0.0.1"]),
             containers=[container],
             volumes=volumes,
             image_pull_secrets=[
