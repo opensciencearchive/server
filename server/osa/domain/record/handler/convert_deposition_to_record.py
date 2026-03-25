@@ -1,8 +1,10 @@
 """ConvertDepositionToRecord - creates records when depositions are approved."""
 
 from osa.domain.curation.event.deposition_approved import DepositionApproved
+from osa.domain.record.model.draft import RecordDraft
 from osa.domain.record.service import RecordService
 from osa.domain.shared.event import EventHandler
+from osa.domain.shared.model.source import DepositionSource
 
 
 class ConvertDepositionToRecord(EventHandler[DepositionApproved]):
@@ -14,11 +16,11 @@ class ConvertDepositionToRecord(EventHandler[DepositionApproved]):
     service: RecordService
 
     async def handle(self, event: DepositionApproved) -> None:
-        """Delegate to RecordService to create and publish the record."""
-        await self.service.publish_record(
-            deposition_srn=event.deposition_srn,
+        """Build a RecordDraft from DepositionApproved and publish."""
+        draft = RecordDraft(
+            source=DepositionSource(id=str(event.deposition_srn)),
             metadata=event.metadata,
             convention_srn=event.convention_srn,
-            hooks=event.hooks,
-            files_dir=event.files_dir,
+            expected_features=event.expected_features,
         )
+        await self.service.publish_record(draft)

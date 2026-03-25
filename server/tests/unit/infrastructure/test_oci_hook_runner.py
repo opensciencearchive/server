@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from osa.domain.shared.model.srn import DepositionSRN
 from osa.domain.shared.model.hook import (
     ColumnDef,
     HookDefinition,
@@ -201,7 +200,7 @@ class TestContainerLifecycle:
         hook = _make_hook()
         inputs = HookInputs(
             record_json={"srn": "test"},
-            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
+            run_id="test-run",
         )
 
         output_dir = tmp_path / "output"
@@ -227,7 +226,7 @@ class TestContainerLifecycle:
         hook = _make_hook()
         inputs = HookInputs(
             record_json={"srn": "test"},
-            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
+            run_id="test-run",
         )
 
         output_dir = tmp_path / "output"
@@ -250,7 +249,7 @@ class TestContainerLifecycle:
         hook = _make_hook()
         inputs = HookInputs(
             record_json={"srn": "test"},
-            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
+            run_id="test-run",
         )
 
         output_dir = tmp_path / "output"
@@ -280,7 +279,7 @@ class TestContainerLifecycle:
         hook = _make_hook(timeout=1)  # 1 second timeout
         inputs = HookInputs(
             record_json={"srn": "test"},
-            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
+            run_id="test-run",
         )
 
         output_dir = tmp_path / "output"
@@ -301,13 +300,14 @@ class TestContainerLifecycle:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
-        inputs = HookInputs(
-            record_json={"srn": "test"},
-            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
-        )
 
         work_dir = tmp_path / "hook_work"
         work_dir.mkdir()
+
+        inputs = HookInputs(
+            record_json={"srn": "test"},
+            run_id="test-run",
+        )
 
         # Pre-create rejection progress in the output subdir (where the runner reads from)
         container_output = work_dir / "output"
@@ -336,7 +336,7 @@ class TestContainerConfig:
         hook = _make_hook(memory="4g", cpu="4.0")
         inputs = HookInputs(
             record_json={"srn": "test"},
-            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
+            run_id="test-run",
         )
 
         output_dir = tmp_path / "output"
@@ -370,7 +370,7 @@ class TestContainerConfig:
         hook = _make_hook()
         inputs = HookInputs(
             record_json={"srn": "test"},
-            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
+            run_id="test-run",
         )
 
         output_dir = tmp_path / "output"
@@ -400,7 +400,7 @@ class TestContainerConfig:
         files_dir.mkdir()
         inputs = HookInputs(
             record_json={"srn": "test"},
-            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
+            run_id="test-run",
             files_dir=files_dir,
         )
 
@@ -436,7 +436,7 @@ class TestContainerConfig:
         hook = _make_hook()
         inputs = HookInputs(
             record_json={"srn": "test"},
-            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
+            run_id="test-run",
             files_dir=None,
         )
 
@@ -465,7 +465,7 @@ class TestContainerConfig:
         hook = _make_hook()
         inputs = HookInputs(
             record_json={"srn": "test"},
-            deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
+            run_id="test-run",
         )
 
         output_dir = tmp_path / "output"

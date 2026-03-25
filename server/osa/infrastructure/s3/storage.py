@@ -172,10 +172,19 @@ class S3StorageAdapter(FileStoragePort):
 
     # ── FeatureStoragePort ───────────────────────────────────────────
 
+    def get_hook_output_root(self, source_type: str, source_id: str) -> str:
+        """Resolve the hook output root path for a given source type and id."""
+        if source_type == "deposition":
+            srn = DepositionSRN.parse(source_id)
+            safe_id = self._safe_id(srn)
+            return f"{self._data_mount_path}/depositions/{safe_id}"
+        raise ValueError(f"Unknown source type: {source_type}")
+
     async def read_hook_features(
-        self, deposition_id: DepositionSRN, hook_name: str
+        self, hook_output_dir: str, feature_name: str
     ) -> list[dict[str, Any]]:
-        key = f"{self._dep_prefix(deposition_id)}/hooks/{hook_name}/output/features.json"
+        prefix = relative_path(Path(hook_output_dir), self._data_mount_path)
+        key = f"{prefix}/hooks/{feature_name}/output/features.json"
         try:
             data_bytes = await self._s3.get_object(key)
         except Exception:
@@ -187,6 +196,7 @@ class S3StorageAdapter(FileStoragePort):
             return [data]
         return []
 
-    async def hook_features_exist(self, deposition_id: DepositionSRN, hook_name: str) -> bool:
-        key = f"{self._dep_prefix(deposition_id)}/hooks/{hook_name}/output/features.json"
+    async def hook_features_exist(self, hook_output_dir: str, feature_name: str) -> bool:
+        prefix = relative_path(Path(hook_output_dir), self._data_mount_path)
+        key = f"{prefix}/hooks/{feature_name}/output/features.json"
         return await self._s3.head_object(key)

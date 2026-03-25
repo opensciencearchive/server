@@ -8,7 +8,8 @@ import pytest
 from osa.domain.record.model.aggregate import Record
 from osa.domain.record.query.get_record import GetRecord, GetRecordHandler, RecordDetail
 from osa.domain.record.service.record import RecordService
-from osa.domain.shared.model.srn import DepositionSRN, Domain, RecordSRN
+from osa.domain.shared.model.source import DepositionSource
+from osa.domain.shared.model.srn import ConventionSRN, Domain, RecordSRN
 from osa.infrastructure.persistence.adapter.feature_reader import PostgresFeatureReader
 
 
@@ -34,7 +35,6 @@ class TestPostgresFeatureReader:
     ) -> None:
         srn = RecordSRN.parse("urn:osa:localhost:rec:abc@1")
 
-        # First call: catalog query
         catalog_result = MagicMock()
         catalog_result.mappings.return_value.all.return_value = [
             _make_catalog_row(
@@ -47,8 +47,6 @@ class TestPostgresFeatureReader:
             )
         ]
 
-        # Second call: UNION ALL query returning {hook_name, row_data} mappings
-        # row_data now excludes auto columns (jsonb_build_object only includes data cols)
         feature_result = MagicMock()
         feature_result.mappings.return_value = [
             {
@@ -129,7 +127,6 @@ class TestPostgresFeatureReader:
             )
         ]
 
-        # UNION ALL returns no rows when record has no feature data
         feature_result = MagicMock()
         feature_result.mappings.return_value = []
 
@@ -153,8 +150,6 @@ class TestPostgresFeatureReader:
             ),
         ]
 
-        # Single UNION ALL result containing rows from both tables
-        # row_data now excludes auto columns
         feature_result = MagicMock()
         feature_result.mappings.return_value = [
             {
@@ -180,7 +175,8 @@ class TestPostgresFeatureReader:
 def _make_record() -> Record:
     return Record(
         srn=RecordSRN.parse("urn:osa:localhost:rec:abc@1"),
-        deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:dep1"),
+        source=DepositionSource(id="urn:osa:localhost:dep:dep1"),
+        convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0"),
         metadata={"title": "Test"},
         published_at=datetime.now(UTC),
     )
@@ -240,6 +236,7 @@ class TestGetRecordHandlerFeatureEnrichment:
         result: RecordDetail = await handler.run(GetRecord(srn=record.srn))
 
         assert result.srn == record.srn
-        assert result.deposition_srn == record.deposition_srn
+        assert result.source == record.source
+        assert result.convention_srn == record.convention_srn
         assert result.metadata == record.metadata
         mock_service.get.assert_called_once_with(record.srn)

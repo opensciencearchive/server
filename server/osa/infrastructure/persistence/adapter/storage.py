@@ -53,12 +53,17 @@ class FilesystemStorageAdapter(FileStoragePort):
         output_dir.mkdir(parents=True, exist_ok=True)
         return output_dir
 
+    def get_hook_output_root(self, source_type: str, source_id: str) -> str:
+        """Resolve the root directory for a given source type and id."""
+        if source_type == "deposition":
+            srn = DepositionSRN.parse(source_id)
+            return str(self._dep_dir(srn))
+        raise ValueError(f"Unknown source type: {source_type}")
+
     async def read_hook_features(
-        self, deposition_id: DepositionSRN, hook_name: str
+        self, hook_output_dir: str, feature_name: str
     ) -> list[dict[str, Any]]:
-        features_file = (
-            self._dep_dir(deposition_id) / "hooks" / hook_name / "output" / "features.json"
-        )
+        features_file = Path(hook_output_dir) / "hooks" / feature_name / "output" / "features.json"
         if not features_file.exists():
             return []
         data = json.loads(features_file.read_text())
@@ -68,10 +73,8 @@ class FilesystemStorageAdapter(FileStoragePort):
             return [data]
         return []
 
-    async def hook_features_exist(self, deposition_id: DepositionSRN, hook_name: str) -> bool:
-        features_file = (
-            self._dep_dir(deposition_id) / "hooks" / hook_name / "output" / "features.json"
-        )
+    async def hook_features_exist(self, hook_output_dir: str, feature_name: str) -> bool:
+        features_file = Path(hook_output_dir) / "hooks" / feature_name / "output" / "features.json"
         return features_file.exists()
 
     async def save_file(

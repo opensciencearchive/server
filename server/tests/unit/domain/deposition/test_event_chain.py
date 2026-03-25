@@ -1,7 +1,7 @@
-"""Unit tests verifying the event chain: DepositionSubmitted → Validate → Approve → Record."""
+"""Unit tests verifying the event chain: DepositionSubmitted -> Validate -> Approve -> Record."""
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, Mock
 from uuid import uuid4
 
 import pytest
@@ -21,6 +21,7 @@ from osa.domain.shared.model.hook import (
     OciConfig,
     TableFeatureSpec,
 )
+from osa.domain.shared.model.source import DepositionSource
 from osa.domain.shared.model.srn import (
     ConventionSRN,
     DepositionSRN,
@@ -79,7 +80,6 @@ def _make_submitted_event(
         metadata={"title": "Test"},
         convention_srn=_make_conv_srn(),
         hooks=hooks or [],
-        files_dir="/data/files/test-dep",
     )
 
 
@@ -136,7 +136,6 @@ class TestValidateDepositionPassesEventData:
             convention_srn=_make_conv_srn(),
             metadata={"title": "Test"},
             hooks=hooks,
-            files_dir="/data/files/test-dep",
         )
 
 
@@ -220,29 +219,29 @@ class TestAutoApproveCurationEmitsApproved:
 class TestConvertDepositionToRecord:
     @pytest.mark.asyncio
     async def test_publishes_record(self):
+        from osa.domain.curation.event.deposition_approved import DepositionApproved
+        from osa.domain.record.model.draft import RecordDraft
+
         service = AsyncMock()
         handler = ConvertDepositionToRecord(service=service)
 
-        from osa.domain.curation.event.deposition_approved import DepositionApproved
-
-        hooks = [_make_hook_definition()]
         event = DepositionApproved(
             id=EventId(uuid4()),
             deposition_srn=_make_dep_srn(),
             metadata={"title": "Test"},
             convention_srn=_make_conv_srn(),
-            hooks=hooks,
-            files_dir="/data/files/test-dep",
+            expected_features=["pocket_detect"],
         )
         await handler.handle(event)
 
-        service.publish_record.assert_called_once_with(
-            deposition_srn=_make_dep_srn(),
-            metadata={"title": "Test"},
-            convention_srn=_make_conv_srn(),
-            hooks=hooks,
-            files_dir="/data/files/test-dep",
-        )
+        service.publish_record.assert_called_once()
+        draft = service.publish_record.call_args[0][0]
+        assert isinstance(draft, RecordDraft)
+        assert isinstance(draft.source, DepositionSource)
+        assert draft.source.id == str(_make_dep_srn())
+        assert draft.convention_srn == _make_conv_srn()
+        assert draft.expected_features == ["pocket_detect"]
+        assert draft.metadata == {"title": "Test"}
 
 
 class TestInsertRecordFeatures:
@@ -250,23 +249,29 @@ class TestInsertRecordFeatures:
     async def test_delegates_to_feature_service(self):
         """InsertRecordFeatures delegates to feature_service.insert_features_for_record."""
         feature_service = AsyncMock()
+        feature_storage = Mock()
+        feature_storage.get_hook_output_root.return_value = "/fake/output/dir"
 
         handler = InsertRecordFeatures(
             feature_service=feature_service,
+            feature_storage=feature_storage,
         )
 
-        hooks = [_make_hook_definition()]
         event = RecordPublished(
             id=EventId(uuid4()),
             record_srn=_make_record_srn(),
-            deposition_srn=_make_dep_srn(),
+            source=DepositionSource(id=str(_make_dep_srn())),
             metadata={"title": "Test"},
-            hooks=hooks,
+            convention_srn=_make_conv_srn(),
+            expected_features=["pocket_detect"],
         )
         await handler.handle(event)
 
+        feature_storage.get_hook_output_root.assert_called_once_with(
+            "deposition", str(_make_dep_srn())
+        )
         feature_service.insert_features_for_record.assert_called_once_with(
-            deposition_srn=_make_dep_srn(),
+            hook_output_dir="/fake/output/dir",
             record_srn=str(_make_record_srn()),
-            hooks=hooks,
+            expected_features=["pocket_detect"],
         )

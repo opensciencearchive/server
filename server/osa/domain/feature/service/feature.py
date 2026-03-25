@@ -6,7 +6,6 @@ from typing import Any
 from osa.domain.feature.port.feature_store import FeatureStore
 from osa.domain.feature.port.storage import FeatureStoragePort
 from osa.domain.shared.model.hook import HookDefinition
-from osa.domain.shared.model.srn import DepositionSRN
 from osa.domain.shared.service import Service
 
 logger = logging.getLogger(__name__)
@@ -33,27 +32,33 @@ class FeatureService(Service):
 
     async def insert_features_for_record(
         self,
-        deposition_srn: DepositionSRN,
+        hook_output_dir: str,
         record_srn: str,
-        hooks: list[HookDefinition] | None = None,
+        expected_features: list[str] | None = None,
     ) -> None:
-        """Read hook features and insert into feature tables.
+        """Read hook features from the given directory and insert into feature tables.
 
-        If hooks are provided (from enriched event), iterate those.
+        Warns (does not raise) when an expected feature is missing — the record
+        is already published, blocking other features would be worse.
         """
-        if not hooks:
+        if not expected_features:
             return
 
-        for hook in hooks:
-            hook_name = hook.name
-            if not await self.feature_storage.hook_features_exist(deposition_srn, hook_name):
+        for feature_name in expected_features:
+            if not await self.feature_storage.hook_features_exist(hook_output_dir, feature_name):
+                logger.warning(
+                    f"Expected feature '{feature_name}' not found in {hook_output_dir} "
+                    f"for record {record_srn}"
+                )
                 continue
 
-            features = await self.feature_storage.read_hook_features(deposition_srn, hook_name)
+            features = await self.feature_storage.read_hook_features(hook_output_dir, feature_name)
             if features:
                 count = await self.insert_features(
-                    hook_name=hook_name,
+                    hook_name=feature_name,
                     record_srn=record_srn,
                     rows=features,
                 )
-                logger.info(f"Inserted {count} features for hook={hook_name} record={record_srn}")
+                logger.info(
+                    f"Inserted {count} features for hook={feature_name} record={record_srn}"
+                )

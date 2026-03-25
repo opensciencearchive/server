@@ -3,16 +3,16 @@
 from datetime import datetime
 from typing import Any
 
-from osa.domain.record.model.value import IndexRef
 from osa.domain.shared.model.aggregate import Aggregate
-from osa.domain.shared.model.srn import DepositionSRN, RecordSRN
+from osa.domain.shared.model.source import RecordSource
+from osa.domain.shared.model.srn import ConventionSRN, RecordSRN
 
 
 class Record(Aggregate):
     """An immutable, versioned, published record."""
 
     srn: RecordSRN
-    deposition_srn: DepositionSRN
+    source: RecordSource
+    convention_srn: ConventionSRN
     metadata: dict[str, Any]
-    indexes: dict[str, IndexRef] = {}
     published_at: datetime

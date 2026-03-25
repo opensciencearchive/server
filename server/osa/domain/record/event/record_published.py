@@ -3,22 +3,21 @@
 from typing import Any
 
 from osa.domain.shared.event import Event, EventId
-from osa.domain.shared.model.hook import HookDefinition
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, RecordSRN
+from osa.domain.shared.model.source import RecordSource
+from osa.domain.shared.model.srn import ConventionSRN, RecordSRN
 
 
 class RecordPublished(Event):
     """Emitted when a record is published and ready for indexing.
 
-    Enriched with convention_srn, hooks, and files_dir so downstream
-    consumers (feature insertion, indexing) can operate without
-    querying deposition/convention repositories.
+    Enriched with source, convention_srn, and expected_features so downstream
+    consumers (feature insertion, indexing) can operate without querying
+    record/convention repositories.
     """
 
     id: EventId
     record_srn: RecordSRN
-    deposition_srn: DepositionSRN
+    source: RecordSource
+    convention_srn: ConventionSRN
     metadata: dict[str, Any]
-    convention_srn: ConventionSRN | None = None
-    hooks: list[HookDefinition] = []
-    files_dir: str = ""
+    expected_features: list[str] = []

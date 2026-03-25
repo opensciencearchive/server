@@ -15,7 +15,14 @@ from osa.domain.index.handler.vector_index_handler import VectorIndexHandler
 from osa.domain.index.model.registry import IndexRegistry
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.srn import DepositionSRN, Domain, LocalId, RecordSRN, RecordVersion
+from osa.domain.shared.model.srn import (
+    ConventionSRN,
+    DepositionSRN,
+    Domain,
+    LocalId,
+    RecordSRN,
+    RecordVersion,
+)
 
 
 class FakeBackend:
@@ -51,6 +58,12 @@ def make_record_published(
     metadata: dict | None = None,
 ) -> RecordPublished:
     """Create a RecordPublished event for testing."""
+    from osa.domain.shared.model.source import DepositionSource
+
+    dep_srn = DepositionSRN(
+        domain=Domain("test.example.com"),
+        id=LocalId(str(uuid4())),
+    )
     return RecordPublished(
         id=EventId(uuid4()),
         record_srn=RecordSRN(
@@ -58,10 +71,8 @@ def make_record_published(
             id=LocalId(record_id or str(uuid4())),
             version=RecordVersion(1),
         ),
-        deposition_srn=DepositionSRN(
-            domain=Domain("test.example.com"),
-            id=LocalId(str(uuid4())),
-        ),
+        source=DepositionSource(id=str(dep_srn)),
+        convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0"),
         metadata=metadata or {"title": "Test Record"},
     )
 

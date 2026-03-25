@@ -1,7 +1,6 @@
 from typing import Any
 
 from osa.domain.shared.event import Event, EventId
-from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, ValidationRunSRN
 from osa.domain.validation.model import RunStatus
 
@@ -16,5 +15,4 @@ class ValidationCompleted(Event):
     status: RunStatus
     hook_results: list[dict[str, Any]]
     metadata: dict[str, Any]
-    hooks: list[HookDefinition] = []
-    files_dir: str = ""
+    expected_features: list[str] = []

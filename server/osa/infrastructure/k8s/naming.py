@@ -1,9 +1,13 @@
 """K8s naming utilities: Job names (DNS-1035) and label values."""
 
+from __future__ import annotations
+
 import re
 import secrets
+from typing import TYPE_CHECKING
 
-from osa.domain.shared.model.srn import SRN
+if TYPE_CHECKING:
+    from osa.domain.shared.model.srn import SRN
 
 
 def sanitize_label(raw: str) -> str:
@@ -17,22 +21,25 @@ def sanitize_label(raw: str) -> str:
     return sanitized[:63].strip("-._")
 
 
-def label_value(srn: SRN) -> str:
-    """Convert an SRN to a K8s-safe label value.
+def label_value(value: str | SRN) -> str:
+    """Convert a string or SRN to a K8s-safe label value.
 
-    Strips the constant ``urn:osa:`` prefix to save space within the
-    63-char K8s label limit, then sanitizes for label compliance.
+    For SRN objects, strips the constant ``urn:osa:`` prefix to save space
+    within the 63-char K8s label limit. For plain strings, sanitizes directly.
 
     Examples:
+        label_value("run-abc123") → "run-abc123"
         label_value(DepositionSRN.parse("urn:osa:localhost:dep:abc123"))
         → "localhost.dep.abc123"
     """
-    # Format: urn:osa:{domain}:{type}:{id}[@version]
-    # Strip "urn:osa:" prefix — it's constant and wastes label budget
-    compact = f"{srn.domain.root}.{srn.type.value}.{srn.id.root}"
-    if srn.version is not None:
-        compact += f".{srn.version}"
-    return sanitize_label(compact)
+    from osa.domain.shared.model.srn import SRN
+
+    if isinstance(value, SRN):
+        compact = f"{value.domain.root}.{value.type.value}.{value.id.root}"
+        if value.version is not None:
+            compact += f".{value.version}"
+        return sanitize_label(compact)
+    return sanitize_label(value)
 
 
 def job_name(prefix: str, hook_name: str, deposition_srn: str) -> str:

@@ -7,21 +7,23 @@ import pytest
 
 from osa.domain.record.model.aggregate import Record
 from osa.domain.shared.error import NotFoundError
-from osa.domain.shared.model.srn import DepositionSRN, RecordSRN
+from osa.domain.shared.model.source import DepositionSource
+from osa.domain.shared.model.srn import ConventionSRN, RecordSRN
 
 
 def _make_record_srn() -> RecordSRN:
     return RecordSRN.parse("urn:osa:localhost:rec:test-rec@1")
 
 
-def _make_dep_srn() -> DepositionSRN:
-    return DepositionSRN.parse("urn:osa:localhost:dep:test-dep")
+def _make_conv_srn() -> ConventionSRN:
+    return ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
 
 
 def _make_record() -> Record:
     return Record(
         srn=_make_record_srn(),
-        deposition_srn=_make_dep_srn(),
+        source=DepositionSource(id="urn:osa:localhost:dep:test-dep"),
+        convention_srn=_make_conv_srn(),
         metadata={"title": "Test Protein"},
         published_at=datetime.now(UTC),
     )
@@ -41,7 +43,8 @@ class TestGetRecordHandler:
         result = await handler.run(GetRecord(srn=record.srn))
 
         assert result.srn == record.srn
-        assert result.deposition_srn == record.deposition_srn
+        assert result.source == record.source
+        assert result.convention_srn == record.convention_srn
         assert result.metadata == record.metadata
         service.get.assert_called_once_with(record.srn)
 
