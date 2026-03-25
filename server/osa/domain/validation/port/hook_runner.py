@@ -16,7 +16,7 @@ class HookInputs:
     """Inputs to pass to a hook container.
 
     Uses the unified batch contract: records is a list of HookRecord
-    (1 for depositions, N for harvests).
+    (1 for depositions, N for ingests).
     files_dirs maps record ID → directory containing that record's files.
     """
 

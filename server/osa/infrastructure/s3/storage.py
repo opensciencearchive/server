@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 class S3StorageAdapter(FileStoragePort):
     """S3-backed adapter satisfying all domain storage ports.
 
-    Implements FileStoragePort, SourceStoragePort, HookStoragePort,
+    Implements FileStoragePort, HookStoragePort,
     and FeatureStoragePort via structural subtyping — same as
     FilesystemStorageAdapter but using S3 API instead of POSIX calls.
 
@@ -116,7 +116,7 @@ class S3StorageAdapter(FileStoragePort):
         prefix = f"{self._dep_prefix(deposition_id)}/"
         await self._s3.delete_objects(prefix)
 
-    # ── SourceStoragePort ────────────────────────────────────────────
+    # ── Ingester storage ──────────────────────────────────────────────
 
     def get_source_staging_dir(self, convention_srn: ConventionSRN, run_id: str) -> Path:
         """Return path for PVC subpath computation (no I/O)."""
@@ -144,7 +144,7 @@ class S3StorageAdapter(FileStoragePort):
         source_id: str,
         deposition_srn: DepositionSRN,
     ) -> None:
-        """S3 server-side copy from source staging to deposition files prefix."""
+        """S3 server-side copy from ingester staging to deposition files prefix."""
         source_prefix = f"{relative_path(staging_dir, self._data_mount_path)}/{source_id}/"
 
         dest_prefix = self._files_prefix(deposition_srn)

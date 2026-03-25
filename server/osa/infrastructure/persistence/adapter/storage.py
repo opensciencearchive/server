@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class FilesystemStorageAdapter(FileStoragePort):
     """Local filesystem adapter satisfying all domain storage ports.
 
-    Implements FileStoragePort (deposition files), SourceStoragePort,
+    Implements FileStoragePort (deposition files),
     HookStoragePort, and FeatureStoragePort via structural subtyping.
     """
 

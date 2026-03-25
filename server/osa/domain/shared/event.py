@@ -209,14 +209,11 @@ class EventHandler(Generic[E], metaclass=_EventHandlerMeta):
         __claim_timeout__: Seconds before claim considered stale (default: 300.0)
 
     Example (single event):
-        class TriggerInitialSourceRun(EventHandler[ServerStarted]):
-            _config: Config
-            _outbox: Outbox
+        class HandleRecordPublished(EventHandler[RecordPublished]):
+            _service: IndexingService
 
-            async def handle(self, event: ServerStarted) -> None:
-                for source in self._config.sources:
-                    if source.initial_run and source.initial_run.enabled:
-                        await self._outbox.append(SourceRequested(...))
+            async def handle(self, event: RecordPublished) -> None:
+                await self._service.index(event.record_srn)
 
     Example (batch processing):
         class VectorIndexHandler(EventHandler[IndexRecord]):

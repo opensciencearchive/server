@@ -11,9 +11,8 @@ from osa.domain.shared.port import Port
 class FileStoragePort(Port, Protocol):
     """Storage operations scoped to the deposition domain.
 
-    Hook output, hook features, and source staging methods have been
-    moved to their respective domain ports (HookStoragePort,
-    FeatureStoragePort, SourceStoragePort).
+    Hook output and hook features methods have been moved to their
+    respective domain ports (HookStoragePort, FeatureStoragePort).
     """
 
     @abstractmethod

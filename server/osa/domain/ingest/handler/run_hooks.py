@@ -39,11 +39,11 @@ class RunHooks(EventHandler[IngesterBatchReady]):
             ConventionSRN.parse(ingest_run.convention_srn)
         )
 
-        # Read records from batch source dir
+        # Read records from batch ingester dir
         ingest_dir = self.paths.data_dir / "ingests" / _safe_srn(event.ingest_run_srn)
         batch_dir = ingest_dir / "batches" / str(event.batch_index)
-        source_dir = batch_dir / "source"
-        records_file = source_dir / "records.jsonl"
+        ingester_dir = batch_dir / "ingester"
+        records_file = ingester_dir / "records.jsonl"
 
         records: list[dict] = []
         if records_file.exists():
@@ -60,8 +60,8 @@ class RunHooks(EventHandler[IngesterBatchReady]):
         if not records:
             logger.warning("No records in batch %d for %s", event.batch_index, event.ingest_run_srn)
 
-        # Build files_dirs from source files
-        files_base = source_dir / "files"
+        # Build files_dirs from ingester files
+        files_base = ingester_dir / "files"
         files_dirs: dict[str, Path] = {}
         if files_base.exists():
             for record in records:

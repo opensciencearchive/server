@@ -41,7 +41,7 @@ class IngesterRunner(Protocol):
 
     async def run(
         self,
-        source: IngesterDefinition,
+        ingester: IngesterDefinition,
         inputs: IngesterInputs,
         files_dir: Path,
         work_dir: Path,

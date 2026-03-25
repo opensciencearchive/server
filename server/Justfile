@@ -36,6 +36,7 @@ test-cov:
 
 # Run linter and type checker
 lint:
+    @just fix
     uv run ruff check osa
     uv run ty check osa
 

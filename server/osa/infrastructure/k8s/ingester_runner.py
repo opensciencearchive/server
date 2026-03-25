@@ -54,7 +54,7 @@ class K8sIngesterRunner(IngesterRunner):
 
     async def run(
         self,
-        source: IngesterDefinition,
+        ingester: IngesterDefinition,
         inputs: IngesterInputs,
         files_dir: Path,
         work_dir: Path,
@@ -74,8 +74,8 @@ class K8sIngesterRunner(IngesterRunner):
         # Write input files to S3 (container reads them via PVC/S3 CSI)
         input_prefix = self._s3_prefix(work_dir, "input")
 
-        if inputs.config or source.config:
-            config = {**(source.config or {}), **(inputs.config or {})}
+        if inputs.config or ingester.config:
+            config = {**(ingester.config or {}), **(inputs.config or {})}
             await self._s3.put_object(f"{input_prefix}/config.json", json.dumps(config))
 
         if inputs.session:
@@ -84,7 +84,7 @@ class K8sIngesterRunner(IngesterRunner):
         return await self._run_job(
             batch_api,
             core_api,
-            source,
+            ingester,
             inputs,
             work_dir,
             files_dir,
@@ -95,21 +95,21 @@ class K8sIngesterRunner(IngesterRunner):
         self,
         batch_api: BatchV1Api,
         core_api: CoreV1Api,
-        source: IngesterDefinition,
+        ingester: IngesterDefinition,
         inputs: IngesterInputs,
         work_dir: Path,
         files_dir: Path,
         *,
         convention_srn: ConventionSRN | None = None,
     ) -> IngesterOutput:
-        """Core Job lifecycle for source execution."""
+        """Core Job lifecycle for ingester execution."""
         namespace = self._config.namespace
         job_name_to_watch = None
 
         try:
             # Check for existing Jobs
             existing = await self._check_existing_job(
-                batch_api, namespace, convention_srn, source.digest
+                batch_api, namespace, convention_srn, ingester.digest
             )
 
             if existing == "succeeded":
@@ -119,7 +119,7 @@ class K8sIngesterRunner(IngesterRunner):
                 job_name_to_watch = existing.split(":", 1)[1]
             else:
                 spec = self._build_job_spec(
-                    source,
+                    ingester,
                     work_dir=work_dir,
                     files_dir=files_dir,
                     inputs=inputs,
@@ -129,11 +129,11 @@ class K8sIngesterRunner(IngesterRunner):
 
                 await batch_api.create_namespaced_job(namespace, spec)
                 logger.info(
-                    "Created K8s source Job",
+                    "Created K8s ingester Job",
                     extra={
                         "job_name": job_name_to_watch,
                         "namespace": namespace,
-                        "image": f"{source.image}@{source.digest}",
+                        "image": f"{ingester.image}@{ingester.digest}",
                     },
                 )
 
@@ -145,7 +145,7 @@ class K8sIngesterRunner(IngesterRunner):
                 batch_api,
                 job_name_to_watch,
                 namespace,
-                timeout_seconds=source.limits.timeout_seconds + 30,
+                timeout_seconds=ingester.limits.timeout_seconds + 30,
             )
 
             if result == "succeeded":
@@ -161,7 +161,7 @@ class K8sIngesterRunner(IngesterRunner):
                 return output
 
             # Failed — diagnose and raise
-            await self._diagnose_and_raise(core_api, job_name_to_watch, namespace, source, result)
+            await self._diagnose_and_raise(core_api, job_name_to_watch, namespace, ingester, result)
             # unreachable but satisfies type checker
             raise ExternalServiceError("Source failed")
 
@@ -187,7 +187,7 @@ class K8sIngesterRunner(IngesterRunner):
         convention_srn: ConventionSRN | None,
         digest: str = "",
     ) -> str | None:
-        label_parts = ["osa.io/role=source"]
+        label_parts = ["osa.io/role=ingester"]
         if convention_srn is not None:
             label_parts.append(f"osa.io/convention={label_value(convention_srn)}")
         if digest:
@@ -208,7 +208,7 @@ class K8sIngesterRunner(IngesterRunner):
 
     def _build_job_spec(
         self,
-        source: IngesterDefinition,
+        ingester: IngesterDefinition,
         *,
         work_dir: Path,
         files_dir: Path,
@@ -234,15 +234,15 @@ class K8sIngesterRunner(IngesterRunner):
             V1VolumeMount,
         )
 
-        name = job_name("source", "src", str(convention_srn) if convention_srn else "unknown")
+        name = job_name("ingester", "ing", str(convention_srn) if convention_srn else "unknown")
         relative_work = self._relative_path(work_dir)
         input_subpath = f"{relative_work}/input"
         output_subpath = f"{relative_work}/output"
         relative_files = self._relative_path(files_dir)
 
         labels: dict[str, str] = {
-            "osa.io/role": "source",
-            "osa.io/digest": sanitize_label(source.digest),
+            "osa.io/role": "ingester",
+            "osa.io/digest": sanitize_label(ingester.digest),
         }
         if convention_srn is not None:
             labels["osa.io/convention"] = label_value(convention_srn)
@@ -278,13 +278,13 @@ class K8sIngesterRunner(IngesterRunner):
         ]
 
         container = V1Container(
-            name="source",
-            image=f"{source.image}@{source.digest}",
+            name="ingester",
+            image=f"{ingester.image}@{ingester.digest}",
             env=env,
             resources=V1ResourceRequirements(
                 limits={
-                    "memory": to_k8s_quantity(source.limits.memory),
-                    "cpu": source.limits.cpu,
+                    "memory": to_k8s_quantity(ingester.limits.memory),
+                    "cpu": ingester.limits.cpu,
                 },
             ),
             security_context=V1SecurityContext(
@@ -320,7 +320,7 @@ class K8sIngesterRunner(IngesterRunner):
             metadata=V1ObjectMeta(name=name, namespace=self._config.namespace, labels=labels),
             spec=V1JobSpec(
                 backoff_limit=0,
-                active_deadline_seconds=SCHEDULING_TIMEOUT + source.limits.timeout_seconds,
+                active_deadline_seconds=SCHEDULING_TIMEOUT + ingester.limits.timeout_seconds,
                 ttl_seconds_after_finished=self._config.job_ttl_seconds,
                 template=V1PodTemplateSpec(
                     metadata=V1ObjectMeta(labels=labels),
@@ -420,12 +420,14 @@ class K8sIngesterRunner(IngesterRunner):
         core_api: CoreV1Api,
         job_name: str,
         namespace: str,
-        source: IngesterDefinition,
+        ingester: IngesterDefinition,
         failure_info: str,
     ) -> None:
         """Determine failure reason and raise appropriate error."""
         if "DeadlineExceeded" in failure_info:
-            raise ExternalServiceError(f"Source timed out after {source.limits.timeout_seconds}s")
+            raise ExternalServiceError(
+                f"Ingester timed out after {ingester.limits.timeout_seconds}s"
+            )
 
         try:
             label_selector = f"job-name={job_name}"
@@ -457,4 +459,4 @@ class K8sIngesterRunner(IngesterRunner):
         except Exception as exc:
             if getattr(exc, "status", None) == 404:
                 return
-            logger.warning("Failed to clean up K8s source Job", extra={"job_name": job_name})
+            logger.warning("Failed to clean up K8s ingester Job", extra={"job_name": job_name})

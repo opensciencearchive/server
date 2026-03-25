@@ -21,12 +21,12 @@ from osa.infrastructure.runner_utils import (
 
 
 class OciIngesterRunner(IngesterRunner):
-    """Executes sources in OCI containers via aiodocker.
+    """Executes ingesters in OCI containers via aiodocker.
 
     Key differences from OciHookRunner:
-    - Network access enabled (sources call upstream APIs)
+    - Network access enabled (ingesters call upstream APIs)
     - Three bind mounts: $OSA_IN (ro), $OSA_OUT (rw), $OSA_FILES (rw)
-    - No ReadonlyRootfs (sources may need writable FS for pip cache, etc.)
+    - No ReadonlyRootfs (ingesters may need writable FS for pip cache, etc.)
     - Higher default limits (3600s timeout, 4g memory)
     - Output is records.jsonl (line-delimited JSON), not features.json
 
@@ -47,12 +47,12 @@ class OciIngesterRunner(IngesterRunner):
 
     async def run(
         self,
-        source: IngesterDefinition,
+        ingester: IngesterDefinition,
         inputs: IngesterInputs,
         files_dir: Path,
         work_dir: Path,
     ) -> IngesterOutput:
-        timeout = source.limits.timeout_seconds
+        timeout = ingester.limits.timeout_seconds
 
         from shutil import rmtree
 
@@ -68,8 +68,8 @@ class OciIngesterRunner(IngesterRunner):
         container_output = work_dir / "output"
         container_output.mkdir(parents=True, exist_ok=True)
         try:
-            if inputs.config or source.config:
-                config = {**(source.config or {}), **(inputs.config or {})}
+            if inputs.config or ingester.config:
+                config = {**(ingester.config or {}), **(inputs.config or {})}
                 (staging_dir / "config.json").write_text(json.dumps(config))
 
             if inputs.session:
@@ -80,9 +80,9 @@ class OciIngesterRunner(IngesterRunner):
             try:
 
                 async def _resolve_and_run():
-                    image_ref = await self._resolve_image(source.image, source.digest)
+                    image_ref = await self._resolve_image(ingester.image, ingester.digest)
                     return await self._run_container(
-                        image_ref, staging_dir, files_dir, container_output, source, inputs
+                        image_ref, staging_dir, files_dir, container_output, ingester, inputs
                     )
 
                 result = await asyncio.wait_for(
@@ -93,12 +93,12 @@ class OciIngesterRunner(IngesterRunner):
             except asyncio.TimeoutError:
                 duration = time.monotonic() - start_time
                 logfire.error(
-                    "Source timed out",
-                    image=source.image,
+                    "Ingester timed out",
+                    image=ingester.image,
                     timeout=timeout,
                     duration=duration,
                 )
-                raise ExternalServiceError(f"Source timed out after {timeout}s")
+                raise ExternalServiceError(f"Ingester timed out after {timeout}s")
         finally:
             rmtree(staging_dir, onexc=_force_remove)
 
@@ -108,7 +108,7 @@ class OciIngesterRunner(IngesterRunner):
         staging_dir: Path,
         files_dir: Path,
         output_dir: Path,
-        source: IngesterDefinition,
+        ingester: IngesterDefinition,
         inputs: IngesterInputs,
     ) -> IngesterOutput:
         container = None
@@ -137,11 +137,11 @@ class OciIngesterRunner(IngesterRunner):
                 "Env": env,
                 "HostConfig": {
                     "Binds": binds,
-                    "Memory": parse_memory(source.limits.memory),
-                    "MemorySwap": parse_memory(source.limits.memory),
-                    "NanoCpus": int(float(source.limits.cpu) * 1e9),
+                    "Memory": parse_memory(ingester.limits.memory),
+                    "MemorySwap": parse_memory(ingester.limits.memory),
+                    "NanoCpus": int(float(ingester.limits.cpu) * 1e9),
                     # No NetworkMode: "none" — sources need network access
-                    # No ReadonlyRootfs — sources may need writable FS
+                    # No ReadonlyRootfs — ingesters may need writable FS
                     "CapDrop": ["ALL"],
                     "SecurityOpt": ["no-new-privileges"],
                     "PidsLimit": 256,
@@ -159,19 +159,21 @@ class OciIngesterRunner(IngesterRunner):
             oom_killed = inspect_data.get("State", {}).get("OOMKilled", False)
 
             if oom_killed:
-                raise ExternalServiceError("Source killed by OOM")
+                raise ExternalServiceError("Ingester killed by OOM")
 
             if exit_code != 0:
                 logs = await container.log(stdout=True, stderr=True)
                 logs_str = "".join(logs) if logs else ""
-                raise ExternalServiceError(f"Source exited with code {exit_code}: {logs_str[:500]}")
+                raise ExternalServiceError(
+                    f"Ingester exited with code {exit_code}: {logs_str[:500]}"
+                )
 
             records = parse_records_file(output_dir)
             session = parse_session_file(output_dir)
             return IngesterOutput(records=records, session=session, files_dir=files_dir)
 
         except aiodocker.DockerError as e:
-            logfire.error("Docker error running source", error=str(e))
+            logfire.error("Docker error running ingester", error=str(e))
             raise ExternalServiceError(f"Docker error: {e}") from e
         finally:
             if container is not None:
@@ -210,6 +212,6 @@ class OciIngesterRunner(IngesterRunner):
             pass
 
         # Pull from registry as last resort
-        logfire.info("Pulling source image", image=image)
+        logfire.info("Pulling ingester image", image=image)
         await self._docker.images.pull(image)
         return image

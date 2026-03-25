@@ -123,7 +123,7 @@ def relative_path(path: Path, data_mount_path: str) -> str:
 
 
 def parse_records_file(output_dir: Path) -> list[dict[str, Any]]:
-    """Parse records.jsonl from source output directory."""
+    """Parse records.jsonl from ingester output directory."""
     import logfire
 
     records: list[dict[str, Any]] = []

@@ -50,7 +50,7 @@ class RunIngester(EventHandler[IngestStarted]):
 
         # Prepare scratch directory
         ingest_dir = self.paths.data_dir / "ingests" / self._safe_srn(event.ingest_run_srn)
-        batch_dir = ingest_dir / "batches" / str(batch_index) / "source"
+        batch_dir = ingest_dir / "batches" / str(batch_index) / "ingester"
         batch_dir.mkdir(parents=True, exist_ok=True)
 
         # Load session state for continuation
@@ -70,13 +70,13 @@ class RunIngester(EventHandler[IngestStarted]):
         files_dir.mkdir(parents=True, exist_ok=True)
 
         output = await self.ingester_runner.run(
-            source=convention.ingester,
+            ingester=convention.ingester,
             inputs=inputs,
             files_dir=files_dir,
             work_dir=batch_dir,
         )
 
-        # Write records.jsonl to batch source dir
+        # Write records.jsonl to batch ingester dir
         records_file = batch_dir / "records.jsonl"
         with records_file.open("w") as f:
             for record in output.records:

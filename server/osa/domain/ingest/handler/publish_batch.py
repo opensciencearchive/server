@@ -46,17 +46,17 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
             ConventionSRN.parse(ingest_run.convention_srn)
         )
 
-        # Read source records from batch dir
+        # Read ingester records from batch dir
         ingest_dir = self.paths.data_dir / "ingests" / _safe_srn(event.ingest_run_srn)
         batch_dir = ingest_dir / "batches" / str(event.batch_index)
-        source_records = _read_source_records(batch_dir / "source" / "records.jsonl")
+        ingester_records = _read_ingester_records(batch_dir / "ingester" / "records.jsonl")
 
         # Read hook outcomes for all hooks
         expected_features = [h.name for h in convention.hooks]
 
         # Determine which records passed all hooks
         passed_records = _get_passed_records(
-            source_records=source_records,
+            ingester_records=ingester_records,
             batch_dir=batch_dir,
             hooks=expected_features,
             feature_storage=self.feature_storage,
@@ -134,8 +134,8 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
             )
 
 
-def _read_source_records(records_file: Path) -> list[dict]:
-    """Read source records from JSONL file."""
+def _read_ingester_records(records_file: Path) -> list[dict]:
+    """Read ingester records from JSONL file."""
     records: list[dict] = []
     if not records_file.exists():
         return records
@@ -146,19 +146,19 @@ def _read_source_records(records_file: Path) -> list[dict]:
         try:
             records.append(json.loads(line))
         except json.JSONDecodeError:
-            logger.warning("Skipping malformed source record line")
+            logger.warning("Skipping malformed ingester record line")
     return records
 
 
 def _get_passed_records(
-    source_records: list[dict],
+    ingester_records: list[dict],
     batch_dir: Path,
     hooks: list[str],
     feature_storage: FeatureStoragePort,
 ) -> list[dict]:
     """Determine which records passed all hooks by reading features.jsonl."""
     if not hooks:
-        return source_records
+        return ingester_records
 
     # For simplicity, read the last hook's features.jsonl to get passed IDs
     # (hooks run sequentially, so the last hook's output has the final set)
@@ -180,7 +180,7 @@ def _get_passed_records(
         except json.JSONDecodeError:
             logger.warning("Skipping malformed features.jsonl line")
 
-    return [r for r in source_records if r.get("source_id", r.get("id", "")) in passed_ids]
+    return [r for r in ingester_records if r.get("source_id", r.get("id", "")) in passed_ids]
 
 
 def _safe_srn(srn: str) -> str:

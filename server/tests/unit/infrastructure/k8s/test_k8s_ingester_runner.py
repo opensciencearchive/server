@@ -1,4 +1,4 @@
-"""Unit tests for K8sIngesterRunner — Job spec differences, source lifecycle."""
+"""Unit tests for K8sIngesterRunner — Job spec differences, ingester lifecycle."""
 
 from pathlib import Path
 from typing import Any
@@ -16,8 +16,8 @@ from osa.infrastructure.k8s.ingester_runner import K8sIngesterRunner
 _CONV_SRN = ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
 
 
-def _make_source(
-    image: str = "ghcr.io/example/source:v1",
+def _make_ingester(
+    image: str = "ghcr.io/example/ingester:v1",
     digest: str = "sha256:abc123",
     timeout: int = 3600,
     memory: str = "4g",
@@ -68,9 +68,9 @@ class TestSourceJobSpec:
     def test_network_enabled(self):
         """Source Jobs have normal DNS policy (network access)."""
         runner = _make_runner()
-        source = _make_source()
+        ingester = _make_ingester()
         spec = runner._build_job_spec(
-            source,
+            ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
         )
@@ -80,9 +80,9 @@ class TestSourceJobSpec:
     def test_writable_rootfs(self):
         """Source containers do not have readOnlyRootFilesystem."""
         runner = _make_runner()
-        source = _make_source()
+        ingester = _make_ingester()
         spec = runner._build_job_spec(
-            source,
+            ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
         )
@@ -92,23 +92,23 @@ class TestSourceJobSpec:
     def test_higher_defaults(self):
         """Source Jobs use higher defaults (3600s, 4g)."""
         runner = _make_runner()
-        source = _make_source(timeout=3600, memory="4g")
+        ingester = _make_ingester(timeout=3600, memory="4g")
         spec = runner._build_job_spec(
-            source,
+            ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
         )
         resources = spec.spec.template.spec.containers[0].resources
         assert resources.limits["memory"] == "4Gi"
-        # activeDeadlineSeconds = scheduling_timeout + source timeout
+        # activeDeadlineSeconds = scheduling_timeout + ingester timeout
         assert spec.spec.active_deadline_seconds == 120 + 3600
 
     def test_three_volume_mounts(self):
         """Source Jobs have input, output, and files mounts."""
         runner = _make_runner()
-        source = _make_source()
+        ingester = _make_ingester()
         spec = runner._build_job_spec(
-            source,
+            ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
         )
@@ -121,9 +121,9 @@ class TestSourceJobSpec:
     def test_files_mount_writable(self):
         """Source files mount is writable."""
         runner = _make_runner()
-        source = _make_source()
+        ingester = _make_ingester()
         spec = runner._build_job_spec(
-            source,
+            ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
         )
@@ -133,9 +133,9 @@ class TestSourceJobSpec:
 
     def test_env_vars(self):
         runner = _make_runner()
-        source = _make_source()
+        ingester = _make_ingester()
         spec = runner._build_job_spec(
-            source,
+            ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
             inputs=IngesterInputs(convention_srn=_CONV_SRN, limit=100, offset=50),
@@ -152,10 +152,10 @@ class TestSourceJobSpec:
         from datetime import datetime, UTC
 
         runner = _make_runner()
-        source = _make_source()
+        ingester = _make_ingester()
         since = datetime(2026, 1, 1, tzinfo=UTC)
         spec = runner._build_job_spec(
-            source,
+            ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
             inputs=IngesterInputs(convention_srn=_CONV_SRN, since=since),
@@ -164,35 +164,35 @@ class TestSourceJobSpec:
         env_dict = {e.name: e.value for e in env}
         assert "OSA_SINCE" in env_dict
 
-    def test_source_role_label(self):
+    def test_ingester_role_label(self):
         runner = _make_runner()
-        source = _make_source()
+        ingester = _make_ingester()
         spec = runner._build_job_spec(
-            source,
+            ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
         )
         labels = spec.spec.template.metadata.labels
-        assert labels["osa.io/role"] == "source"
+        assert labels["osa.io/role"] == "ingester"
 
     def test_human_readable_name(self):
         runner = _make_runner()
-        source = _make_source()
+        ingester = _make_ingester()
         spec = runner._build_job_spec(
-            source,
+            ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
             convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:conv1@1.0.0"),
         )
         name = spec.metadata.name
-        assert name.startswith("osa-source-")
+        assert name.startswith("osa-ingester-")
         assert len(name) <= 63
 
     def test_convention_srn_in_labels(self):
         runner = _make_runner()
-        source = _make_source()
+        ingester = _make_ingester()
         spec = runner._build_job_spec(
-            source,
+            ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
             convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:conv1@1.0.0"),
@@ -239,7 +239,7 @@ class TestSourceLifecycle:
         completed_job.status.failed = None
         batch_api.read_namespaced_job.return_value = completed_job
 
-        source = _make_source()
+        ingester = _make_ingester()
         work_dir = tmp_path / "sources" / "localhost_conv1" / "staging" / "run1"
         files_dir = work_dir / "files"
 
@@ -262,7 +262,7 @@ class TestSourceLifecycle:
         result = await runner._run_job(
             batch_api,
             core_api,
-            source,
+            ingester,
             inputs,
             work_dir,
             files_dir,
@@ -304,7 +304,7 @@ class TestSourceLifecycle:
         failed_job.status.failed = 1
         batch_api.read_namespaced_job.return_value = failed_job
 
-        source = _make_source()
+        ingester = _make_ingester()
         work_dir = tmp_path / "sources" / "localhost_conv1" / "staging" / "run1"
         work_dir.mkdir(parents=True)
         files_dir = work_dir / "files"
@@ -315,7 +315,7 @@ class TestSourceLifecycle:
             await runner._run_job(
                 batch_api,
                 core_api,
-                source,
+                ingester,
                 inputs,
                 work_dir,
                 files_dir,
@@ -364,7 +364,7 @@ class TestSourceLifecycle:
 
         core_api.list_namespaced_pod.side_effect = [pod_list, oom_pod_list]
 
-        source = _make_source()
+        ingester = _make_ingester()
         work_dir = tmp_path / "sources" / "localhost_conv1" / "staging" / "run1"
         work_dir.mkdir(parents=True)
         files_dir = work_dir / "files"
@@ -375,7 +375,7 @@ class TestSourceLifecycle:
             await runner._run_job(
                 batch_api,
                 core_api,
-                source,
+                ingester,
                 inputs,
                 work_dir,
                 files_dir,
@@ -421,7 +421,7 @@ class TestConventionSrnFromInputs:
         completed_job.status.failed = None
         batch_api.read_namespaced_job.return_value = completed_job
 
-        source = _make_source()
+        ingester = _make_ingester()
         work_dir = tmp_path / "sources" / "run1"
         output_dir = work_dir / "output"
         output_dir.mkdir(parents=True)
@@ -436,7 +436,7 @@ class TestConventionSrnFromInputs:
             patch("kubernetes_asyncio.client.BatchV1Api", return_value=batch_api),
             patch("kubernetes_asyncio.client.CoreV1Api", return_value=core_api),
         ):
-            await runner.run(source, inputs, files_dir, work_dir)
+            await runner.run(ingester, inputs, files_dir, work_dir)
 
         # Verify convention_srn from inputs ends up in the Job labels
         call_args = batch_api.create_namespaced_job.call_args
