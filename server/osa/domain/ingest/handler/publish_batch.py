@@ -22,7 +22,7 @@ from osa.domain.shared.model.source import IngestSource
 from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.outbox import Outbox
 from osa.domain.feature.port.storage import FeatureStoragePort
-from osa.util.paths import OSAPaths
+from osa.infrastructure.storage.layout import StorageLayout
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
     record_service: RecordService
     feature_storage: FeatureStoragePort
     outbox: Outbox
-    paths: OSAPaths
+    layout: StorageLayout
 
     async def handle(self, event: HookBatchCompleted) -> None:
         ingest_run = await self.ingest_repo.get(event.ingest_run_srn)
@@ -47,9 +47,11 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
         )
 
         # Read ingester records from batch dir
-        ingest_dir = self.paths.data_dir / "ingests" / _safe_srn(event.ingest_run_srn)
-        batch_dir = ingest_dir / "batches" / str(event.batch_index)
-        ingester_records = _read_ingester_records(batch_dir / "ingester" / "records.jsonl")
+        batch_dir = self.layout.ingest_batch_dir(event.ingest_run_srn, event.batch_index)
+        ingester_dir = self.layout.ingest_batch_ingester_dir(
+            event.ingest_run_srn, event.batch_index
+        )
+        ingester_records = _read_ingester_records(ingester_dir / "records.jsonl")
 
         # Read hook outcomes for all hooks
         expected_features = [h.name for h in convention.hooks]
@@ -62,6 +64,7 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
             feature_storage=self.feature_storage,
         )
 
+        published_count = 0
         if not passed_records:
             logger.info("No passing records in batch %d", event.batch_index)
         else:
@@ -82,16 +85,18 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
                     )
                 )
 
-            # Bulk publish
+            # Bulk publish — ON CONFLICT DO NOTHING skips duplicates,
+            # so published may be shorter than drafts
             published = await self.record_service.bulk_publish(drafts)
             published_srns = [str(r.srn) for r in published]
             published_count = len(published)
 
             logger.info(
-                "Published %d records from batch %d of %s",
+                "Published %d records from batch %d of %s (%d duplicates skipped)",
                 published_count,
                 event.batch_index,
                 event.ingest_run_srn,
+                len(drafts) - published_count,
             )
 
             # Emit IngestBatchPublished for feature insertion
@@ -108,11 +113,11 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
                     )
                 )
 
-        # Update counters atomically — use published_count or 0
-        count = len(passed_records) if passed_records else 0
+        # Update counters atomically — use actual published_count (not passed_records)
+        # to avoid over-counting when ON CONFLICT DO NOTHING skips duplicates
         updated = await self.ingest_repo.increment_completed(
             event.ingest_run_srn,
-            published_count=count,
+            published_count=published_count,
         )
 
         # Check completion condition
@@ -156,32 +161,41 @@ def _get_passed_records(
     hooks: list[str],
     feature_storage: FeatureStoragePort,
 ) -> list[dict]:
-    """Determine which records passed all hooks by reading features.jsonl."""
+    """Determine which records passed ALL hooks by intersecting features.jsonl across hooks.
+
+    Each hook processes the full batch independently. A record must appear in
+    every hook's features.jsonl to be considered passed. Records rejected or
+    errored by any hook are excluded.
+    """
     if not hooks:
         return ingester_records
 
-    # For simplicity, read the last hook's features.jsonl to get passed IDs
-    # (hooks run sequentially, so the last hook's output has the final set)
-    last_hook = hooks[-1]
-    features_file = batch_dir / "hooks" / last_hook / "output" / "features.jsonl"
-    if not features_file.exists():
+    passed_ids: set[str] | None = None
+
+    for hook_name in hooks:
+        features_file = batch_dir / "hooks" / hook_name / "output" / "features.jsonl"
+        if not features_file.exists():
+            return []  # If any hook produced no features file, nothing passed
+
+        hook_passed: set[str] = set()
+        for line in features_file.open():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                record_id = data.get("id")
+                if record_id:
+                    hook_passed.add(record_id)
+            except json.JSONDecodeError:
+                logger.warning("Skipping malformed features.jsonl line in hook %s", hook_name)
+
+        if passed_ids is None:
+            passed_ids = hook_passed
+        else:
+            passed_ids &= hook_passed
+
+    if not passed_ids:
         return []
 
-    passed_ids: set[str] = set()
-    for line in features_file.open():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-            record_id = data.get("id")
-            if record_id:
-                passed_ids.add(record_id)
-        except json.JSONDecodeError:
-            logger.warning("Skipping malformed features.jsonl line")
-
     return [r for r in ingester_records if r.get("source_id", r.get("id", "")) in passed_ids]
-
-
-def _safe_srn(srn: str) -> str:
-    return srn.replace(":", "_").replace("@", "_")

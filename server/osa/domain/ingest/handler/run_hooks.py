@@ -14,7 +14,7 @@ from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.outbox import Outbox
 from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
-from osa.util.paths import OSAPaths
+from osa.infrastructure.storage.layout import StorageLayout
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class RunHooks(EventHandler[IngesterBatchReady]):
     convention_service: ConventionService
     hook_runner: HookRunner
     outbox: Outbox
-    paths: OSAPaths
+    layout: StorageLayout
 
     async def handle(self, event: IngesterBatchReady) -> None:
         ingest_run = await self.ingest_repo.get(event.ingest_run_srn)
@@ -40,9 +40,9 @@ class RunHooks(EventHandler[IngesterBatchReady]):
         )
 
         # Read records from batch ingester dir
-        ingest_dir = self.paths.data_dir / "ingests" / _safe_srn(event.ingest_run_srn)
-        batch_dir = ingest_dir / "batches" / str(event.batch_index)
-        ingester_dir = batch_dir / "ingester"
+        ingester_dir = self.layout.ingest_batch_ingester_dir(
+            event.ingest_run_srn, event.batch_index
+        )
         records_file = ingester_dir / "records.jsonl"
 
         records: list[dict] = []
@@ -72,7 +72,9 @@ class RunHooks(EventHandler[IngesterBatchReady]):
 
         # Run each hook sequentially
         for hook in convention.hooks:
-            hook_output_dir = batch_dir / "hooks" / hook.name
+            hook_output_dir = self.layout.ingest_batch_hook_dir(
+                event.ingest_run_srn, event.batch_index, hook.name
+            )
             hook_output_dir.mkdir(parents=True, exist_ok=True)
 
             inputs = HookInputs(
@@ -83,7 +85,7 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                     )
                     for r in records
                 ],
-                run_id=f"{_safe_srn(event.ingest_run_srn)}_batch{event.batch_index}",
+                run_id=f"{event.ingest_run_srn}_batch{event.batch_index}",
                 files_dirs=files_dirs,
                 config=None,
             )
@@ -105,8 +107,3 @@ class RunHooks(EventHandler[IngesterBatchReady]):
             event.ingest_run_srn,
             len(records),
         )
-
-
-def _safe_srn(srn: str) -> str:
-    """Convert SRN to filesystem-safe string."""
-    return srn.replace(":", "_").replace("@", "_")

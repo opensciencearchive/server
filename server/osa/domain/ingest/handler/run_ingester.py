@@ -13,7 +13,7 @@ from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.ingester_runner import IngesterInputs, IngesterRunner
-from osa.util.paths import OSAPaths
+from osa.infrastructure.storage.layout import StorageLayout
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class RunIngester(EventHandler[IngestStarted]):
     convention_service: ConventionService
     ingester_runner: IngesterRunner
     outbox: Outbox
-    paths: OSAPaths
+    layout: StorageLayout
 
     async def handle(self, event: IngestStarted) -> None:
         ingest_run = await self.ingest_repo.get(event.ingest_run_srn)
@@ -49,12 +49,11 @@ class RunIngester(EventHandler[IngestStarted]):
         batch_index = ingest_run.batches_sourced
 
         # Prepare scratch directory
-        ingest_dir = self.paths.data_dir / "ingests" / self._safe_srn(event.ingest_run_srn)
-        batch_dir = ingest_dir / "batches" / str(batch_index) / "ingester"
+        batch_dir = self.layout.ingest_batch_ingester_dir(event.ingest_run_srn, batch_index)
         batch_dir.mkdir(parents=True, exist_ok=True)
 
         # Load session state for continuation
-        session_file = ingest_dir / "session.json"
+        session_file = self.layout.ingest_session_file(event.ingest_run_srn)
         session = None
         if session_file.exists():
             session = json.loads(session_file.read_text())
@@ -84,6 +83,7 @@ class RunIngester(EventHandler[IngestStarted]):
 
         # Save session for continuation
         if output.session:
+            session_file.parent.mkdir(parents=True, exist_ok=True)
             session_file.write_text(json.dumps(output.session))
 
         has_more = output.session is not None and len(output.records) > 0
@@ -122,8 +122,3 @@ class RunIngester(EventHandler[IngestStarted]):
                     batch_size=ingest_run.batch_size,
                 )
             )
-
-    @staticmethod
-    def _safe_srn(srn: str) -> str:
-        """Convert SRN to filesystem-safe string."""
-        return srn.replace(":", "_").replace("@", "_")

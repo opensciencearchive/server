@@ -10,12 +10,18 @@ from osa.domain.ingest.service.ingest import IngestService
 from osa.domain.shared.model.srn import Domain
 from osa.domain.shared.outbox import Outbox
 from osa.infrastructure.persistence.repository.ingest import PostgresIngestRunRepository
+from osa.infrastructure.storage.layout import StorageLayout
 from osa.util.di.base import Provider
 from osa.util.di.scope import Scope
+from osa.util.paths import OSAPaths
 
 
 class IngestProvider(Provider):
-    """Provides IngestService, IngestRunRepository, and StartIngestHandler."""
+    """Provides IngestService, IngestRunRepository, StorageLayout, and StartIngestHandler."""
+
+    @provide(scope=Scope.APP)
+    def get_storage_layout(self, paths: OSAPaths) -> StorageLayout:
+        return StorageLayout(paths.data_dir)
 
     @provide(scope=Scope.UOW)
     def get_ingest_repo(self, session: AsyncSession) -> IngestRunRepository:
