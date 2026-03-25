@@ -4,7 +4,7 @@ Replace deposition_srn + indexes with source (JSONB) + convention_srn.
 No data migration needed — no production data exists.
 
 Revision ID: source_agnostic_records
-Revises: consumer_group_delivery
+Revises: add_device_authorizations
 Create Date: 2026-03-24
 
 """
