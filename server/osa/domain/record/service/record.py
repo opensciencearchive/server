@@ -1,4 +1,4 @@
-"""RecordService - orchestrates record creation from approved depositions."""
+"""RecordService - orchestrates record creation from any source."""
 
 from __future__ import annotations
 
@@ -9,13 +9,11 @@ from uuid import uuid4
 
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.record.model.aggregate import Record
+from osa.domain.record.model.draft import RecordDraft
 from osa.domain.record.port.repository import RecordRepository
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.srn import (
-    ConventionSRN,
-    DepositionSRN,
     Domain,
     LocalId,
     RecordSRN,
@@ -31,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 class RecordService(Service):
-    """Creates and persists Record aggregates from approved depositions."""
+    """Creates and persists Record aggregates from any source."""
 
     record_repo: RecordRepository
     outbox: Outbox
@@ -51,16 +49,9 @@ class RecordService(Service):
             raise NotFoundError(f"Record not found: {srn}")
         return record
 
-    async def publish_record(
-        self,
-        deposition_srn: DepositionSRN,
-        metadata: dict[str, Any],
-        convention_srn: ConventionSRN | None = None,
-        hooks: list[HookDefinition] | None = None,
-        files_dir: str = "",
-    ) -> Record:
-        """Create and persist a Record from an approved deposition."""
-        logger.info(f"Creating record for approved deposition: {deposition_srn}")
+    async def publish_record(self, draft: RecordDraft) -> Record:
+        """Create and persist a Record from a draft."""
+        logger.info(f"Creating record from {draft.source.type} source: {draft.source.id}")
 
         record_srn = RecordSRN(
             domain=self.node_domain,
@@ -70,8 +61,9 @@ class RecordService(Service):
 
         record = Record(
             srn=record_srn,
-            deposition_srn=deposition_srn,
-            metadata=metadata,
+            source=draft.source,
+            convention_srn=draft.convention_srn,
+            metadata=draft.metadata,
             published_at=datetime.now(UTC),
         )
 
@@ -81,11 +73,10 @@ class RecordService(Service):
         published = RecordPublished(
             id=EventId(uuid4()),
             record_srn=record_srn,
-            deposition_srn=deposition_srn,
-            metadata=metadata,
-            convention_srn=convention_srn,
-            hooks=hooks or [],
-            files_dir=files_dir,
+            source=draft.source,
+            convention_srn=draft.convention_srn,
+            metadata=draft.metadata,
+            expected_features=draft.expected_features,
         )
         await self.outbox.append(published)
 

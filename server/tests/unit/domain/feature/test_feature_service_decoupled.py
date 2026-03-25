@@ -58,7 +58,7 @@ class TestDecoupledFeatureService:
 
     @pytest.mark.asyncio
     async def test_insert_features_for_record_uses_event_data(self):
-        """insert_features_for_record accepts hooks directly."""
+        """insert_features_for_record accepts hook_output_dir + expected_features directly."""
         feature_store = AsyncMock()
         feature_store.insert_features.return_value = 3
         feature_storage = AsyncMock()
@@ -74,12 +74,11 @@ class TestDecoupledFeatureService:
             feature_storage=feature_storage,
         )
 
-        hook = _make_hook_definition()
         await service.insert_features_for_record(
-            deposition_srn=_make_dep_srn(),
+            hook_output_dir="/fake/output/dir",
             record_srn="urn:osa:localhost:rec:test@1",
-            hooks=[hook],
+            expected_features=["pocketeer"],
         )
 
-        feature_storage.hook_features_exist.assert_called_once_with(_make_dep_srn(), "pocketeer")
+        feature_storage.hook_features_exist.assert_called_once_with("/fake/output/dir", "pocketeer")
         feature_store.insert_features.assert_called_once()

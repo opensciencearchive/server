@@ -11,7 +11,15 @@ from osa.domain.index.handler.fanout_to_index_backends import FanOutToIndexBacke
 from osa.domain.index.model.registry import IndexRegistry
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.srn import DepositionSRN, Domain, LocalId, RecordSRN, RecordVersion
+from osa.domain.shared.model.source import DepositionSource
+from osa.domain.shared.model.srn import (
+    ConventionSRN,
+    DepositionSRN,
+    Domain,
+    LocalId,
+    RecordSRN,
+    RecordVersion,
+)
 
 
 class FakeBackend:
@@ -87,7 +95,8 @@ class TestFanOutToIndexBackends:
         event = RecordPublished(
             id=EventId(uuid4()),
             record_srn=sample_record_srn,
-            deposition_srn=sample_deposition_srn,
+            source=DepositionSource(id=str(sample_deposition_srn)),
+            convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0"),
             metadata=sample_metadata,
         )
 
@@ -126,7 +135,8 @@ class TestFanOutToIndexBackends:
         event = RecordPublished(
             id=EventId(uuid4()),
             record_srn=sample_record_srn,
-            deposition_srn=sample_deposition_srn,
+            source=DepositionSource(id=str(sample_deposition_srn)),
+            convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0"),
             metadata=sample_metadata,
         )
 
@@ -154,7 +164,8 @@ class TestFanOutToIndexBackends:
         event = RecordPublished(
             id=EventId(uuid4()),
             record_srn=sample_record_srn,
-            deposition_srn=sample_deposition_srn,
+            source=DepositionSource(id=str(sample_deposition_srn)),
+            convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0"),
             metadata=sample_metadata,
         )
 

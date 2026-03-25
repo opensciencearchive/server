@@ -51,6 +51,8 @@ def _make_service(
     hs = hook_storage or MagicMock()
     if not hasattr(hs, "get_hook_output_dir") or not callable(hs.get_hook_output_dir):
         hs.get_hook_output_dir = MagicMock(return_value=Path("/tmp/hooks/test"))
+    if not hasattr(hs, "get_files_dir") or not callable(hs.get_files_dir):
+        hs.get_files_dir = MagicMock(return_value=Path("/tmp/files/test"))
     return ValidationService(
         run_repo=run_repo or AsyncMock(),
         hook_runner=hook_runner or AsyncMock(),
@@ -62,7 +64,8 @@ def _make_service(
 def _make_inputs() -> HookInputs:
     return HookInputs(
         record_json={"srn": "urn:osa:localhost:dep:test123", "metadata": {"name": "test"}},
-        deposition_srn=DepositionSRN.parse("urn:osa:localhost:dep:test123"),
+        run_id="localhost_test123",
+        files_dir=Path("/tmp/staging/files"),
     )
 
 
@@ -149,6 +152,7 @@ class TestValidationServiceRunHooks:
         hook_runner.run.return_value = _make_hook_result()
         hook_storage = MagicMock()
         hook_storage.get_hook_output_dir.return_value = Path("/cold/hooks/pocket_detect")
+        hook_storage.get_files_dir = MagicMock(return_value=Path("/tmp/files/test"))
 
         service = _make_service(hook_runner=hook_runner, hook_storage=hook_storage)
         run = await service.create_run(inputs=_make_inputs())

@@ -343,6 +343,9 @@ class TestDepositionServiceDeleteFile:
 class TestDepositionServiceSubmit:
     @pytest.mark.asyncio
     async def test_submit_with_enough_files(self):
+        from pathlib import Path
+        from unittest.mock import MagicMock
+
         dep = _make_deposition(
             files=[
                 DepositionFile(name="a.csv", size=10, checksum="x", uploaded_at=datetime.now(UTC))
@@ -354,8 +357,12 @@ class TestDepositionServiceSubmit:
         conv_repo = AsyncMock()
         conv_repo.get.return_value = conv
         outbox = AsyncMock()
+        file_storage = MagicMock()
+        file_storage.get_files_dir.return_value = Path("/data/depositions/test-dep/files")
 
-        service = _make_service(dep_repo=dep_repo, conv_repo=conv_repo, outbox=outbox)
+        service = _make_service(
+            dep_repo=dep_repo, conv_repo=conv_repo, outbox=outbox, file_storage=file_storage
+        )
         result = await service.submit(dep.srn)
         assert result.status == DepositionStatus.IN_VALIDATION
         outbox.append.assert_called_once()

@@ -1,6 +1,6 @@
 """Unit tests for InsertRecordFeatures event handler and FeatureService.insert_features_for_record."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -9,47 +9,31 @@ from osa.domain.feature.handler.insert_record_features import InsertRecordFeatur
 from osa.domain.feature.service.feature import FeatureService
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.hook import (
-    ColumnDef,
-    HookDefinition,
-    OciConfig,
-    TableFeatureSpec,
-)
+from osa.domain.shared.model.source import DepositionSource, HarvestSource
 from osa.domain.shared.model.srn import (
-    DepositionSRN,
+    ConventionSRN,
     RecordSRN,
 )
-
-
-def _make_dep_srn() -> DepositionSRN:
-    return DepositionSRN.parse("urn:osa:localhost:dep:test-dep")
 
 
 def _make_record_srn() -> RecordSRN:
     return RecordSRN.parse("urn:osa:localhost:rec:test-rec@1")
 
 
-def _make_hook_definition(name: str = "pocket_detect") -> HookDefinition:
-    return HookDefinition(
-        name=name,
-        runtime=OciConfig(
-            image="ghcr.io/example/hook",
-            digest="sha256:abc123",
-        ),
-        feature=TableFeatureSpec(
-            cardinality="many",
-            columns=[ColumnDef(name="score", json_type="number", required=True)],
-        ),
-    )
+def _make_conv_srn() -> ConventionSRN:
+    return ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
 
 
-def _make_event(hooks: list[HookDefinition] | None = None) -> RecordPublished:
+def _make_event(
+    expected_features: list[str] | None = None,
+) -> RecordPublished:
     return RecordPublished(
         id=EventId(uuid4()),
         record_srn=_make_record_srn(),
-        deposition_srn=_make_dep_srn(),
+        source=DepositionSource(id="urn:osa:localhost:dep:test-dep"),
         metadata={"title": "Test"},
-        hooks=hooks or [],
+        convention_srn=_make_conv_srn(),
+        expected_features=expected_features or [],
     )
 
 
@@ -65,9 +49,14 @@ def _make_feature_service(
 
 def _make_handler(
     feature_service: FeatureService | AsyncMock | None = None,
+    feature_storage: MagicMock | None = None,
 ) -> InsertRecordFeatures:
+    storage = feature_storage or MagicMock()
+    if not feature_storage:
+        storage.get_hook_output_root = MagicMock(return_value="/fake/output/dir")
     return InsertRecordFeatures(
         feature_service=feature_service or AsyncMock(),
+        feature_storage=storage,
     )
 
 
@@ -78,14 +67,15 @@ class TestInsertRecordFeaturesHandler:
         feature_service = AsyncMock()
         handler = _make_handler(feature_service=feature_service)
 
-        hooks = [_make_hook_definition()]
-        event = _make_event(hooks=hooks)
+        event = _make_event(
+            expected_features=["pocket_detect"],
+        )
         await handler.handle(event)
 
         feature_service.insert_features_for_record.assert_called_once_with(
-            deposition_srn=event.deposition_srn,
+            hook_output_dir="/fake/output/dir",
             record_srn=str(event.record_srn),
-            hooks=event.hooks,
+            expected_features=["pocket_detect"],
         )
 
 
@@ -105,9 +95,10 @@ class TestFeatureServiceInsertFeaturesForRecord:
             feature_storage=feature_storage,
         )
 
-        hooks = [_make_hook_definition()]
         await service.insert_features_for_record(
-            _make_dep_srn(), str(_make_record_srn()), hooks=hooks
+            hook_output_dir="/fake/output/dir",
+            record_srn=str(_make_record_srn()),
+            expected_features=["pocket_detect"],
         )
 
         feature_store.insert_features.assert_called_once_with(
@@ -117,8 +108,8 @@ class TestFeatureServiceInsertFeaturesForRecord:
         )
 
     @pytest.mark.asyncio
-    async def test_skips_hooks_without_features_file(self):
-        """Hooks that didn't produce features.json are skipped."""
+    async def test_skips_features_without_features_file(self):
+        """Features that didn't produce features.json are skipped with a warning."""
         feature_storage = AsyncMock()
         feature_storage.hook_features_exist.return_value = False
 
@@ -129,9 +120,10 @@ class TestFeatureServiceInsertFeaturesForRecord:
             feature_storage=feature_storage,
         )
 
-        hooks = [_make_hook_definition()]
         await service.insert_features_for_record(
-            _make_dep_srn(), str(_make_record_srn()), hooks=hooks
+            hook_output_dir="/fake/output/dir",
+            record_srn=str(_make_record_srn()),
+            expected_features=["pocket_detect"],
         )
 
         feature_storage.read_hook_features.assert_not_called()
@@ -139,7 +131,7 @@ class TestFeatureServiceInsertFeaturesForRecord:
 
     @pytest.mark.asyncio
     async def test_skips_empty_feature_list(self):
-        """Hooks that produced empty features.json are skipped."""
+        """Features that produced empty features.json are skipped."""
         feature_storage = AsyncMock()
         feature_storage.hook_features_exist.return_value = True
         feature_storage.read_hook_features.return_value = []
@@ -151,16 +143,17 @@ class TestFeatureServiceInsertFeaturesForRecord:
             feature_storage=feature_storage,
         )
 
-        hooks = [_make_hook_definition()]
         await service.insert_features_for_record(
-            _make_dep_srn(), str(_make_record_srn()), hooks=hooks
+            hook_output_dir="/fake/output/dir",
+            record_srn=str(_make_record_srn()),
+            expected_features=["pocket_detect"],
         )
 
         feature_store.insert_features.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_handles_multiple_hooks(self):
-        """Processes all hooks in the event payload."""
+    async def test_handles_multiple_features(self):
+        """Processes all expected features."""
         feature_storage = AsyncMock()
         feature_storage.hook_features_exist.return_value = True
         feature_storage.read_hook_features.side_effect = [
@@ -176,32 +169,17 @@ class TestFeatureServiceInsertFeaturesForRecord:
             feature_storage=feature_storage,
         )
 
-        hooks = [_make_hook_definition("hook_a"), _make_hook_definition("hook_b")]
         await service.insert_features_for_record(
-            _make_dep_srn(), str(_make_record_srn()), hooks=hooks
+            hook_output_dir="/fake/output/dir",
+            record_srn=str(_make_record_srn()),
+            expected_features=["hook_a", "hook_b"],
         )
 
         assert feature_store.insert_features.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_no_hooks_is_noop(self):
-        """No-op when hooks list is empty."""
-        feature_store = AsyncMock()
-        feature_storage = AsyncMock()
-
-        service = _make_feature_service(
-            feature_store=feature_store,
-            feature_storage=feature_storage,
-        )
-
-        await service.insert_features_for_record(_make_dep_srn(), str(_make_record_srn()), hooks=[])
-
-        feature_storage.hook_features_exist.assert_not_called()
-        feature_store.insert_features.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_none_hooks_is_noop(self):
-        """No-op when hooks is None."""
+    async def test_no_features_is_noop(self):
+        """No-op when expected_features list is empty."""
         feature_store = AsyncMock()
         feature_storage = AsyncMock()
 
@@ -211,8 +189,43 @@ class TestFeatureServiceInsertFeaturesForRecord:
         )
 
         await service.insert_features_for_record(
-            _make_dep_srn(), str(_make_record_srn()), hooks=None
+            hook_output_dir="/fake/output/dir",
+            record_srn=str(_make_record_srn()),
+            expected_features=[],
         )
 
         feature_storage.hook_features_exist.assert_not_called()
         feature_store.insert_features.assert_not_called()
+
+
+class TestInsertRecordFeaturesHarvestSource:
+    """US2: InsertRecordFeatures works identically for harvest-sourced records."""
+
+    @pytest.mark.asyncio
+    async def test_harvest_source_uses_source_fields(self):
+        """Handler uses source type and id from event regardless of source type."""
+        feature_service = AsyncMock()
+        storage = MagicMock()
+        storage.get_hook_output_root.return_value = "/fake/harvest/dir"
+        handler = _make_handler(feature_service=feature_service, feature_storage=storage)
+
+        event = RecordPublished(
+            id=EventId(uuid4()),
+            record_srn=_make_record_srn(),
+            source=HarvestSource(
+                id="run-123-pdb-456",
+                harvest_run_srn="urn:osa:localhost:val:run123",
+                upstream_source="pdb",
+            ),
+            metadata={"title": "Harvested"},
+            convention_srn=_make_conv_srn(),
+            expected_features=["pocket_detect"],
+        )
+        await handler.handle(event)
+
+        storage.get_hook_output_root.assert_called_once_with("harvest", "run-123-pdb-456")
+        feature_service.insert_features_for_record.assert_called_once_with(
+            hook_output_dir="/fake/harvest/dir",
+            record_srn=str(_make_record_srn()),
+            expected_features=["pocket_detect"],
+        )

@@ -3,9 +3,13 @@
 from datetime import datetime
 from typing import Any
 
+from pydantic import TypeAdapter
+
 from osa.domain.record.model.aggregate import Record
-from osa.domain.record.model.value import IndexRef
-from osa.domain.shared.model.srn import DepositionSRN, RecordSRN
+from osa.domain.shared.model.source import RecordSource
+from osa.domain.shared.model.srn import ConventionSRN, RecordSRN
+
+_source_adapter = TypeAdapter(RecordSource)
 
 
 def row_to_record(row: dict[str, Any]) -> Record:
@@ -14,29 +18,23 @@ def row_to_record(row: dict[str, Any]) -> Record:
     if isinstance(published_at, str):
         published_at = datetime.fromisoformat(published_at)
 
-    # Deserialize indexes
-    raw_indexes = row.get("indexes", {}) or {}
-    indexes: dict[str, IndexRef] = {
-        key: IndexRef.model_validate(value) for key, value in raw_indexes.items()
-    }
+    source = _source_adapter.validate_python(row["source"])
 
     return Record(
         srn=RecordSRN.parse(row["srn"]),
-        deposition_srn=DepositionSRN.parse(row["deposition_srn"]),
+        source=source,
+        convention_srn=ConventionSRN.parse(row["convention_srn"]),
         metadata=row.get("metadata", {}),
-        indexes=indexes,
         published_at=published_at,
     )
 
 
 def record_to_dict(record: Record) -> dict[str, Any]:
     """Convert Record aggregate to database dict."""
-    indexes_dict = {key: ref.model_dump(mode="json") for key, ref in record.indexes.items()}
-
     return {
         "srn": str(record.srn),
-        "deposition_srn": str(record.deposition_srn),
+        "convention_srn": str(record.convention_srn),
+        "source": _source_adapter.dump_python(record.source, mode="json"),
         "metadata": record.metadata,
-        "indexes": indexes_dict,
         "published_at": record.published_at,
     }

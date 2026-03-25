@@ -3,7 +3,6 @@
 from typing import Any
 
 from osa.domain.shared.event import Event, EventId
-from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
 
 
@@ -17,6 +16,5 @@ class DepositionApproved(Event):
     id: EventId
     deposition_srn: DepositionSRN
     metadata: dict[str, Any]
-    convention_srn: ConventionSRN | None = None
-    hooks: list[HookDefinition] = []
-    files_dir: str = ""
+    convention_srn: ConventionSRN
+    expected_features: list[str] = []

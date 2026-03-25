@@ -15,3 +15,8 @@ class HookStoragePort(Port, Protocol):
     def get_hook_output_dir(self, deposition_srn: DepositionSRN, hook_name: str) -> Path:
         """Return the durable output directory for a hook's results."""
         ...
+
+    @abstractmethod
+    def get_files_dir(self, deposition_id: DepositionSRN) -> Path:
+        """Return the directory containing data files for a deposition."""
+        ...

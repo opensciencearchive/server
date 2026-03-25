@@ -194,15 +194,12 @@ class DepositionService(Service):
         dep.submit()
         await self.deposition_repo.save(dep)
 
-        files_dir = self.file_storage.get_files_dir(dep.srn)
-
         event = DepositionSubmittedEvent(
             id=EventId(uuid4()),
             deposition_id=srn,
             metadata=dep.metadata,
             convention_srn=dep.convention_srn,
             hooks=convention.hooks,
-            files_dir=str(files_dir),
         )
         await self.outbox.append(event)
         return dep

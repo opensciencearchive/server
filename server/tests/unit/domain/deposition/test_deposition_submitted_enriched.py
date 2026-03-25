@@ -1,7 +1,6 @@
 """Unit tests for enriched DepositionSubmittedEvent.
 
-Tests for User Story 3: Cross-domain decoupling.
-Verifies the event carries convention_srn, hooks, and files_dir.
+Verifies the event carries convention_srn and hooks.
 """
 
 from uuid import uuid4
@@ -49,7 +48,6 @@ class TestDepositionSubmittedEnriched:
             metadata={"title": "Test"},
             convention_srn=_make_conv_srn(),
             hooks=[_make_hook_definition()],
-            files_dir="/data/files/test-dep",
         )
         assert event.convention_srn == _make_conv_srn()
 
@@ -62,20 +60,7 @@ class TestDepositionSubmittedEnriched:
             metadata={"title": "Test"},
             convention_srn=_make_conv_srn(),
             hooks=[hook],
-            files_dir="/data/files/test-dep",
         )
         assert len(event.hooks) == 1
         assert event.hooks[0].name == "pocketeer"
         assert event.hooks[0].runtime.digest == "sha256:abc123"
-
-    def test_carries_files_dir(self):
-        """Event has files_dir field."""
-        event = DepositionSubmittedEvent(
-            id=EventId(uuid4()),
-            deposition_id=_make_dep_srn(),
-            metadata={"title": "Test"},
-            convention_srn=_make_conv_srn(),
-            hooks=[],
-            files_dir="/data/files/test-dep",
-        )
-        assert event.files_dir == "/data/files/test-dep"

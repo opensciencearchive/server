@@ -67,7 +67,7 @@ class TestDecoupledValidationService:
 
     @pytest.mark.asyncio
     async def test_validate_deposition_uses_event_data(self):
-        """validate_deposition accepts hooks/files_dir/metadata directly."""
+        """validate_deposition accepts hooks/metadata directly."""
         run_repo = AsyncMock()
         run_repo.save = AsyncMock()
         hook_runner = AsyncMock()
@@ -78,6 +78,7 @@ class TestDecoupledValidationService:
         )
         hook_storage = MagicMock()
         hook_storage.get_hook_output_dir.return_value = Path("/tmp/hooks/pocketeer")
+        hook_storage.get_files_dir.return_value = Path("/data/files/test-dep")
 
         service = ValidationService(
             run_repo=run_repo,
@@ -92,7 +93,6 @@ class TestDecoupledValidationService:
             convention_srn=_make_conv_srn(),
             metadata={"pdb_id": "4HHB"},
             hooks=[hook],
-            files_dir="/data/files/test-dep",
         )
 
         assert run.status == RunStatus.COMPLETED

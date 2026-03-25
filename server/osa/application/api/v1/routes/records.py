@@ -38,7 +38,8 @@ async def get_record(
     return RecordResponse(
         record={
             "srn": str(result.srn),
-            "deposition_srn": str(result.deposition_srn),
+            "source": result.source.model_dump(),
+            "convention_srn": str(result.convention_srn),
             "metadata": result.metadata,
             "published_at": result.published_at.isoformat(),
             "features": result.features,

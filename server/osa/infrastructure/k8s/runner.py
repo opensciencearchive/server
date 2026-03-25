@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 from osa.config import K8sConfig
 from osa.domain.shared.error import InfrastructureError
 from osa.domain.shared.model.hook import HookDefinition
-from osa.domain.shared.model.srn import DepositionSRN
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.infrastructure.k8s.errors import classify_api_error
@@ -83,7 +82,6 @@ class K8sHookRunner(HookRunner):
             hook,
             inputs,
             work_dir,
-            deposition_srn=inputs.deposition_srn,
         )
 
     async def _run_job(
@@ -93,8 +91,6 @@ class K8sHookRunner(HookRunner):
         hook: HookDefinition,
         inputs: HookInputs,
         work_dir: Path,
-        *,
-        deposition_srn: DepositionSRN,
     ) -> HookResult:
         """Core Job lifecycle: check orphans → create → schedule → execute → parse → cleanup."""
         namespace = self._config.namespace
@@ -105,7 +101,7 @@ class K8sHookRunner(HookRunner):
 
         try:
             existing = await self._check_existing_job(
-                batch_api, namespace, hook.name, deposition_srn
+                batch_api, namespace, hook.name, inputs.run_id
             )
 
             if existing == "succeeded":
@@ -120,7 +116,7 @@ class K8sHookRunner(HookRunner):
                 spec = self._build_job_spec(
                     hook,
                     work_dir,
-                    deposition_srn=deposition_srn,
+                    run_id=inputs.run_id,
                     files_dir=inputs.files_dir,
                 )
                 job_name_to_watch = spec.metadata.name
@@ -133,7 +129,7 @@ class K8sHookRunner(HookRunner):
                         "namespace": namespace,
                         "image": f"{hook.runtime.image}@{hook.runtime.digest}",
                         "hook_name": hook.name,
-                        "deposition_srn": deposition_srn,
+                        "run_id": inputs.run_id,
                     },
                 )
 
@@ -192,7 +188,7 @@ class K8sHookRunner(HookRunner):
         batch_api: BatchV1Api,
         namespace: str,
         hook_name: str,
-        deposition_srn: DepositionSRN,
+        run_id: str,
     ) -> str | None:
         """Check for existing Jobs with matching labels.
 
@@ -201,7 +197,7 @@ class K8sHookRunner(HookRunner):
             "active:{job_name}" if a running Job exists
             None if no Job or only failed Jobs exist
         """
-        label_selector = f"osa.io/hook={hook_name},osa.io/deposition={label_value(deposition_srn)}"
+        label_selector = f"osa.io/hook={hook_name},osa.io/run-id={label_value(run_id)}"
         try:
             job_list = await batch_api.list_namespaced_job(namespace, label_selector=label_selector)
         except Exception as exc:
@@ -220,7 +216,7 @@ class K8sHookRunner(HookRunner):
         hook: HookDefinition,
         work_dir: Path,
         *,
-        deposition_srn: DepositionSRN,
+        run_id: str,
         files_dir: Path | None = None,
     ) -> V1Job:
         """Build a K8s Job manifest for a hook execution."""
@@ -245,7 +241,7 @@ class K8sHookRunner(HookRunner):
             V1VolumeMount,
         )
 
-        name = job_name("hook", hook.name, str(deposition_srn))
+        name = job_name("hook", hook.name, run_id)
         relative_work = self._relative_path(work_dir)
         input_subpath = f"{relative_work}/input"
         output_subpath = f"{relative_work}/output"
@@ -253,7 +249,7 @@ class K8sHookRunner(HookRunner):
         labels = {
             "osa.io/role": "hook",
             "osa.io/hook": hook.name,
-            "osa.io/deposition": label_value(deposition_srn),
+            "osa.io/run-id": label_value(run_id),
         }
 
         mounts = [

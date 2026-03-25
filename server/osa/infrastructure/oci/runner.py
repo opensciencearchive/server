@@ -90,7 +90,7 @@ class OciHookRunner(HookRunner):
                 logfire.error(
                     "Hook timed out",
                     hook=hook.name,
-                    deposition_srn=inputs.deposition_srn,
+                    run_id=inputs.run_id,
                     timeout=timeout,
                 )
                 return HookResult(

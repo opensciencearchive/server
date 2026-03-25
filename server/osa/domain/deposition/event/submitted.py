@@ -8,8 +8,8 @@ from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
 class DepositionSubmittedEvent(Event):
     """Emitted when a deposition is submitted for validation.
 
-    Enriched with convention_srn, hooks, and files_dir so the
-    validation domain can operate without querying deposition repos.
+    Enriched with convention_srn and hooks so the validation domain
+    can operate without querying deposition repos.
     """
 
     id: EventId
@@ -17,4 +17,3 @@ class DepositionSubmittedEvent(Event):
     metadata: dict[str, Any]
     convention_srn: ConventionSRN
     hooks: list[HookDefinition] = []
-    files_dir: str = ""

@@ -32,14 +32,12 @@ class AutoApproveCuration(EventHandler[ValidationCompleted]):
 
         logger.info(f"Auto-approving deposition: {event.deposition_srn}")
 
-        # Emit DepositionApproved
         approved = DepositionApproved(
             id=EventId(uuid4()),
             deposition_srn=event.deposition_srn,
             metadata=event.metadata,
             convention_srn=event.convention_srn,
-            hooks=event.hooks,
-            files_dir=event.files_dir,
+            expected_features=event.expected_features,
         )
 
         await self.outbox.append(approved)

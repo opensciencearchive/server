@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.record.model.aggregate import Record
 from osa.domain.record.port.repository import RecordRepository
-from osa.domain.shared.model.srn import DepositionSRN, RecordSRN
+from osa.domain.shared.model.srn import RecordSRN
 from osa.infrastructure.persistence.mappers.record import record_to_dict, row_to_record
 from osa.infrastructure.persistence.tables import records_table
 
@@ -30,9 +30,12 @@ class PostgresRecordRepository(RecordRepository):
         row = result.mappings().first()
         return row_to_record(dict(row)) if row else None
 
-    async def find_by_deposition(self, deposition_srn: DepositionSRN) -> Record | None:
-        """Find the record created from a deposition."""
-        stmt = select(records_table).where(records_table.c.deposition_srn == str(deposition_srn))
+    async def find_by_source(self, source_type: str, source_id: str) -> Record | None:
+        """Find a record by source type and id."""
+        stmt = select(records_table).where(
+            records_table.c.source["type"].as_string() == source_type,
+            records_table.c.source["id"].as_string() == source_id,
+        )
         result = await self.session.execute(stmt)
         row = result.mappings().first()
         return row_to_record(dict(row)) if row else None

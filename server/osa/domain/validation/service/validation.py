@@ -3,7 +3,6 @@
 import logging
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from osa.domain.shared.model.hook import HookDefinition
@@ -101,14 +100,15 @@ class ValidationService(Service):
         convention_srn: ConventionSRN,
         metadata: dict[str, Any],
         hooks: list[HookDefinition],
-        files_dir: str,
     ) -> tuple[ValidationRun, list[HookResult]]:
         """Full validation workflow using enriched event data."""
         record_json = {"srn": str(deposition_srn), "metadata": metadata}
+        run_id = f"{deposition_srn.domain.root}_{deposition_srn.id.root}"
+        files_dir = self.hook_storage.get_files_dir(deposition_srn)
         inputs = HookInputs(
             record_json=record_json,
-            deposition_srn=deposition_srn,
-            files_dir=Path(files_dir) if files_dir else None,
+            run_id=run_id,
+            files_dir=files_dir,
         )
 
         run = await self.create_run(inputs=inputs)
