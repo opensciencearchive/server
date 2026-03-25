@@ -30,16 +30,6 @@ class PostgresRecordRepository(RecordRepository):
         row = result.mappings().first()
         return row_to_record(dict(row)) if row else None
 
-    async def find_by_source(self, source_type: str, source_id: str) -> Record | None:
-        """Find a record by source type and id."""
-        stmt = select(records_table).where(
-            records_table.c.source["type"].as_string() == source_type,
-            records_table.c.source["id"].as_string() == source_id,
-        )
-        result = await self.session.execute(stmt)
-        row = result.mappings().first()
-        return row_to_record(dict(row)) if row else None
-
     async def count(self) -> int:
         """Count total records in the database."""
         stmt = select(func.count()).select_from(records_table)

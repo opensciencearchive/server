@@ -73,15 +73,10 @@ records_table = Table(
 
 Index("idx_records_convention_srn", records_table.c.convention_srn)
 Index(
-    "uq_records_convention_source",
-    records_table.c.convention_srn,
+    "uq_records_source",
     records_table.c.source["type"].as_string(),
     records_table.c.source["id"].as_string(),
     unique=True,
-)
-Index(
-    "idx_records_source_type",
-    records_table.c.source["type"].as_string(),
 )
 Index("idx_records_published_at", records_table.c.published_at)
 Index(

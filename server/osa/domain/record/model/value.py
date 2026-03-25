@@ -1,1 +1,0 @@
-"""Record domain value objects."""

@@ -16,7 +16,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "source_agnostic_records"
-down_revision: Union[str, Sequence[str], None] = "consumer_group_delivery"
+down_revision: Union[str, Sequence[str], None] = "add_device_authorizations"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -46,26 +46,19 @@ def upgrade() -> None:
         ["convention_srn"],
     )
     op.create_index(
-        "uq_records_convention_source",
+        "uq_records_source",
         "records",
         [
-            "convention_srn",
             sa.text("(source->>'type')"),
             sa.text("(source->>'id')"),
         ],
         unique=True,
     )
-    op.create_index(
-        "idx_records_source_type",
-        "records",
-        [sa.text("(source->>'type')")],
-    )
 
 
 def downgrade() -> None:
     # Drop new indexes
-    op.drop_index("idx_records_source_type", table_name="records")
-    op.drop_index("uq_records_convention_source", table_name="records")
+    op.drop_index("uq_records_source", table_name="records")
     op.drop_index("idx_records_convention_srn", table_name="records")
 
     # Drop new columns
