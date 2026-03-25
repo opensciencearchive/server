@@ -13,10 +13,10 @@ import aiodocker
 from dishka import activate, provide
 
 from osa.config import Config
-from osa.domain.source.port.source_runner import SourceRunner
+from osa.domain.shared.port.ingester_runner import IngesterRunner
 from osa.domain.validation.port.hook_runner import HookRunner
+from osa.infrastructure.oci.ingester_runner import OciIngesterRunner
 from osa.infrastructure.oci.runner import OciHookRunner
-from osa.infrastructure.oci.source_runner import OciSourceRunner
 from osa.infrastructure.s3.client import S3Client
 from osa.util.di.base import Provider
 from osa.util.di.markers import K8S
@@ -62,12 +62,12 @@ class RunnerProvider(Provider):
         return OciHookRunner(docker=docker, host_data_dir=config.host_data_dir)
 
     @provide(scope=Scope.UOW)
-    def get_source_runner_oci(
+    def get_ingester_runner_oci(
         self,
         docker: aiodocker.Docker,
         config: Config,
-    ) -> SourceRunner:
-        return OciSourceRunner(docker=docker, host_data_dir=config.host_data_dir)
+    ) -> IngesterRunner:
+        return OciIngesterRunner(docker=docker, host_data_dir=config.host_data_dir)
 
     # ------------------------------------------------------------------
     # K8s backend (activated when config.runner.backend == "k8s")
@@ -133,12 +133,12 @@ class RunnerProvider(Provider):
         return K8sHookRunner(api_client=k8s_api_client, config=config.runner.k8s, s3=s3)
 
     @provide(when=K8S, scope=Scope.UOW)
-    def get_source_runner_k8s(
+    def get_ingester_runner_k8s(
         self,
         k8s_api_client: ApiClient,
         config: Config,
         s3: S3Client,
-    ) -> SourceRunner:
-        from osa.infrastructure.k8s.source_runner import K8sSourceRunner
+    ) -> IngesterRunner:
+        from osa.infrastructure.k8s.ingester_runner import K8sIngesterRunner
 
-        return K8sSourceRunner(api_client=k8s_api_client, config=config.runner.k8s, s3=s3)
+        return K8sIngesterRunner(api_client=k8s_api_client, config=config.runner.k8s, s3=s3)

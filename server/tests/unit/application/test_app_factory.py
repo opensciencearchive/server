@@ -19,14 +19,14 @@ from osa.application.api.rest.app import create_app
 from osa.application.di import create_container
 from osa.domain.shared.event import Event, EventHandler, EventId
 from osa.domain.shared.model.hook import HookDefinition
-from osa.domain.shared.model.source import SourceDefinition
+from osa.domain.shared.model.source import IngesterDefinition
 from osa.domain.shared.model.subscription_registry import SubscriptionRegistry
-from osa.domain.source.port.source_runner import SourceInputs, SourceOutput, SourceRunner
+from osa.domain.shared.port.ingester_runner import IngesterInputs, IngesterOutput, IngesterRunner
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.infrastructure.event.di import HandlerTypes, _CORE_HANDLERS
 from osa.infrastructure.oci.runner import OciHookRunner
-from osa.infrastructure.oci.source_runner import OciSourceRunner
+from osa.infrastructure.oci.ingester_runner import OciIngesterRunner
 from osa.util.di.base import Provider
 from osa.util.di.scope import Scope
 
@@ -49,17 +49,17 @@ class StubHookRunner:
         return HookResult(hook_name=hook.name, status=HookStatus.PASSED, duration_seconds=0.0)
 
 
-class StubSourceRunner:
-    """Stub SourceRunner for testing provider overrides."""
+class StubIngesterRunner:
+    """Stub IngesterRunner for testing provider overrides."""
 
     async def run(
         self,
-        source: SourceDefinition,
-        inputs: SourceInputs,
+        source: IngesterDefinition,
+        inputs: IngesterInputs,
         files_dir: Path,
         work_dir: Path,
-    ) -> SourceOutput:
-        return SourceOutput(records=[], session=None, files_dir=files_dir)
+    ) -> IngesterOutput:
+        return IngesterOutput(records=[], session=None, files_dir=files_dir)
 
 
 class StubRunnerProvider(Provider):
@@ -70,8 +70,8 @@ class StubRunnerProvider(Provider):
         return StubHookRunner()
 
     @provide(scope=Scope.UOW, override=True)
-    def get_source_runner(self) -> SourceRunner:
-        return StubSourceRunner()
+    def get_ingester_runner(self) -> IngesterRunner:
+        return StubIngesterRunner()
 
 
 # ---------------------------------------------------------------------------
@@ -110,12 +110,12 @@ class TestProviderOverrides:
         async def resolve():
             async with container(scope=Scope.UOW) as uow:
                 hook = await uow.get(HookRunner)
-                source = await uow.get(SourceRunner)
-                return hook, source
+                ingester = await uow.get(IngesterRunner)
+                return hook, ingester
 
-        hook_runner, source_runner = asyncio.run(resolve())
+        hook_runner, ingester_runner = asyncio.run(resolve())
         assert isinstance(hook_runner, StubHookRunner)
-        assert isinstance(source_runner, StubSourceRunner)
+        assert isinstance(ingester_runner, StubIngesterRunner)
 
     def test_default_runners_without_override(self):
         """Without extra providers, default OCI runners are used."""
@@ -124,12 +124,12 @@ class TestProviderOverrides:
         async def resolve():
             async with container(scope=Scope.UOW) as uow:
                 hook = await uow.get(HookRunner)
-                source = await uow.get(SourceRunner)
-                return hook, source
+                ingester = await uow.get(IngesterRunner)
+                return hook, ingester
 
-        hook_runner, source_runner = asyncio.run(resolve())
+        hook_runner, ingester_runner = asyncio.run(resolve())
         assert isinstance(hook_runner, OciHookRunner)
-        assert isinstance(source_runner, OciSourceRunner)
+        assert isinstance(ingester_runner, OciIngesterRunner)
 
 
 # ---------------------------------------------------------------------------

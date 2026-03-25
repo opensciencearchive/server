@@ -12,6 +12,7 @@ from osa.domain.deposition.model.value import DepositionFile
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.error import InfrastructureError
 from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+from osa.domain.validation.model.batch_outcome import BatchRecordOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,8 @@ class FilesystemStorageAdapter(FileStoragePort):
         if source_type == "deposition":
             srn = DepositionSRN.parse(source_id)
             return str(self._dep_dir(srn))
+        if source_type == "ingest":
+            return str(self.base_path / "ingests" / source_id)
         raise ValueError(f"Unknown source type: {source_type}")
 
     async def read_hook_features(
@@ -189,3 +192,43 @@ class FilesystemStorageAdapter(FileStoragePort):
         # Clean up empty source_id directory
         if source_files_dir.exists():
             source_files_dir.rmdir()
+
+    async def read_batch_outcomes(
+        self, output_dir: str, hook_name: str
+    ) -> dict[str, BatchRecordOutcome]:
+        """Read JSONL batch outputs from the filesystem, streaming line-by-line."""
+        hook_output = Path(output_dir) / "hooks" / hook_name / "output"
+        outcomes: dict[str, BatchRecordOutcome] = {}
+
+        for filename, status_key, field_map in [
+            ("features.jsonl", "passed", {"features": "features"}),
+            ("rejections.jsonl", "rejected", {"reason": "reason"}),
+            ("errors.jsonl", "errored", {"error": "error", "retryable": "retryable"}),
+        ]:
+            path = hook_output / filename
+            if not path.exists():
+                continue
+            with path.open() as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        logger.warning("Skipping malformed JSON line in %s", filename)
+                        continue
+                    record_id = data.get("id")
+                    if not record_id:
+                        logger.warning("Skipping JSONL line without 'id' in %s", filename)
+                        continue
+                    kwargs: dict[str, Any] = {
+                        "record_id": record_id,
+                        "status": status_key,
+                    }
+                    for src, dst in field_map.items():
+                        if src in data:
+                            kwargs[dst] = data[src]
+                    outcomes[record_id] = BatchRecordOutcome(**kwargs)
+
+        return outcomes

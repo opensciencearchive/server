@@ -49,6 +49,37 @@ class RecordService(Service):
             raise NotFoundError(f"Record not found: {srn}")
         return record
 
+    async def bulk_publish(self, drafts: list[RecordDraft]) -> list[Record]:
+        """Bulk-publish records from an ingest batch.
+
+        Uses save_many() for multi-row INSERT with ON CONFLICT DO NOTHING.
+        Does NOT emit per-record RecordPublished events — the caller emits
+        a single IngestBatchPublished event instead (AD-3).
+        """
+        if not drafts:
+            return []
+
+        records: list[Record] = []
+        for draft in drafts:
+            record_srn = RecordSRN(
+                domain=self.node_domain,
+                id=LocalId(str(uuid4())),
+                version=RecordVersion(1),
+            )
+            records.append(
+                Record(
+                    srn=record_srn,
+                    source=draft.source,
+                    convention_srn=draft.convention_srn,
+                    metadata=draft.metadata,
+                    published_at=datetime.now(UTC),
+                )
+            )
+
+        published = await self.record_repo.save_many(records)
+        logger.info("Bulk-published %d records (of %d drafts)", len(published), len(drafts))
+        return published
+
     async def publish_record(self, draft: RecordDraft) -> Record:
         """Create and persist a Record from a draft."""
         logger.info(f"Creating record from {draft.source.type} source: {draft.source.id}")

@@ -16,6 +16,7 @@ from osa.application.api.v1.routes import (
     depositions,
     discovery,
     events,
+    ingestions,
     health,
     ontologies,
     records,
@@ -117,6 +118,7 @@ def create_app(
     app_instance.include_router(schemas.router, prefix="/api/v1")
     app_instance.include_router(conventions.router, prefix="/api/v1")
     app_instance.include_router(depositions.router, prefix="/api/v1")
+    app_instance.include_router(ingestions.router, prefix="/api/v1")
     app_instance.include_router(validation.router, prefix="/api/v1")
     app_instance.include_router(discovery.router, prefix="/api/v1")
 

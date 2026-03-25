@@ -54,13 +54,18 @@ class OciHookRunner(HookRunner):
         container_output = work_dir / "output"
         container_output.mkdir(parents=True, exist_ok=True)
         try:
-            (staging_dir / "record.json").write_text(json.dumps(inputs.record_json))
-            # Pre-create files mountpoint so nested bind works with ReadonlyRootfs
-            (staging_dir / "files").mkdir(exist_ok=True)
+            # Write records.jsonl (unified batch contract)
+            with (staging_dir / "records.jsonl").open("w") as f:
+                for record in inputs.records:
+                    f.write(json.dumps(record.model_dump()) + "\n")
 
             if inputs.config or hook.runtime.config:
                 config = {**hook.runtime.config, **(inputs.config or {})}
                 (staging_dir / "config.json").write_text(json.dumps(config))
+
+            # Create files directory structure: $OSA_FILES/{id}/ per record
+            files_base = staging_dir / "files"
+            files_base.mkdir(exist_ok=True)
 
             start_time = time.monotonic()
 
@@ -69,7 +74,12 @@ class OciHookRunner(HookRunner):
                 async def _resolve_and_run():
                     image_ref = await self._resolve_image(hook.runtime.image, hook.runtime.digest)
                     return await self._run_container(
-                        image_ref, staging_dir, inputs.files_dir, container_output, hook
+                        image_ref,
+                        staging_dir,
+                        inputs.files_dirs,
+                        container_output,
+                        hook,
+                        files_base,
                     )
 
                 result = await asyncio.wait_for(
@@ -106,19 +116,26 @@ class OciHookRunner(HookRunner):
         self,
         image_ref: str,
         staging_dir: Path,
-        files_dir: Path | None,
+        files_dirs: dict[str, Path],
         output_dir: Path,
         hook: HookDefinition,
+        files_base: Path,
     ) -> dict:
         container = None
         try:
-            # Nested bind-mounts: staging at /osa/in:ro, files at /osa/in/files:ro
+            # Bind mounts: staging at /osa/in:ro, files at /osa/files:ro, output at /osa/out:rw
             binds = [
                 f"{self._host_path(staging_dir)}:/osa/in:ro",
                 f"{self._host_path(output_dir)}:/osa/out:rw",
             ]
-            if files_dir and files_dir.exists():
-                binds.append(f"{self._host_path(files_dir)}:/osa/in/files:ro")
+
+            # Mount per-record file directories under /osa/files/{id}/
+            if files_dirs:
+                for record_id, fdir in files_dirs.items():
+                    if fdir and fdir.exists():
+                        binds.append(f"{self._host_path(fdir)}:/osa/files/{record_id}:ro")
+            elif files_base.exists():
+                binds.append(f"{self._host_path(files_base)}:/osa/files:ro")
 
             # todo: use pydantic
             config = {
@@ -126,6 +143,7 @@ class OciHookRunner(HookRunner):
                 "Env": [
                     "OSA_IN=/osa/in",
                     "OSA_OUT=/osa/out",
+                    "OSA_FILES=/osa/files",
                     f"OSA_HOOK_NAME={hook.name}",
                 ],
                 "User": "65534:65534",

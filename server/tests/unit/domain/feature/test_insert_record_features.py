@@ -9,7 +9,7 @@ from osa.domain.feature.handler.insert_record_features import InsertRecordFeatur
 from osa.domain.feature.service.feature import FeatureService
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.source import DepositionSource, HarvestSource
+from osa.domain.shared.model.source import DepositionSource, IngestSource
 from osa.domain.shared.model.srn import (
     ConventionSRN,
     RecordSRN,
@@ -198,34 +198,34 @@ class TestFeatureServiceInsertFeaturesForRecord:
         feature_store.insert_features.assert_not_called()
 
 
-class TestInsertRecordFeaturesHarvestSource:
-    """US2: InsertRecordFeatures works identically for harvest-sourced records."""
+class TestInsertRecordFeaturesIngestSource:
+    """US2: InsertRecordFeatures works identically for ingest-sourced records."""
 
     @pytest.mark.asyncio
-    async def test_harvest_source_uses_source_fields(self):
+    async def test_ingest_source_uses_source_fields(self):
         """Handler uses source type and id from event regardless of source type."""
         feature_service = AsyncMock()
         storage = MagicMock()
-        storage.get_hook_output_root.return_value = "/fake/harvest/dir"
+        storage.get_hook_output_root.return_value = "/fake/ingest/dir"
         handler = _make_handler(feature_service=feature_service, feature_storage=storage)
 
         event = RecordPublished(
             id=EventId(uuid4()),
             record_srn=_make_record_srn(),
-            source=HarvestSource(
+            source=IngestSource(
                 id="run-123-pdb-456",
-                harvest_run_srn="urn:osa:localhost:val:run123",
+                ingest_run_srn="urn:osa:localhost:val:run123",
                 upstream_source="pdb",
             ),
-            metadata={"title": "Harvested"},
+            metadata={"title": "Ingested"},
             convention_srn=_make_conv_srn(),
             expected_features=["pocket_detect"],
         )
         await handler.handle(event)
 
-        storage.get_hook_output_root.assert_called_once_with("harvest", "run-123-pdb-456")
+        storage.get_hook_output_root.assert_called_once_with("ingest", "run-123-pdb-456")
         feature_service.insert_features_for_record.assert_called_once_with(
-            hook_output_dir="/fake/harvest/dir",
+            hook_output_dir="/fake/ingest/dir",
             record_srn=str(_make_record_srn()),
             expected_features=["pocket_detect"],
         )

@@ -11,7 +11,7 @@ from osa.domain.record.port.repository import RecordRepository
 from osa.domain.record.service.record import RecordService
 from osa.domain.shared.model.source import (
     DepositionSource,
-    HarvestSource,
+    IngestSource,
 )
 from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, Domain, LocalId
 from osa.domain.shared.outbox import Outbox
@@ -124,24 +124,24 @@ class TestRecordService:
         assert record.srn.version.root == 1
 
 
-class TestRecordServiceHarvestSource:
-    """US2: Verify harvest-sourced records publish correctly."""
+class TestRecordServiceIngestSource:
+    """US2: Verify ingest-sourced records publish correctly."""
 
     @pytest.mark.asyncio
-    async def test_publish_with_harvest_source(
+    async def test_publish_with_ingest_source(
         self,
         mock_record_repo: RecordRepository,
         mock_outbox: Outbox,
         node_domain: Domain,
     ):
-        """HarvestSource draft produces correct Record + RecordPublished event."""
+        """IngestSource draft produces correct Record + RecordPublished event."""
         draft = RecordDraft(
-            source=HarvestSource(
+            source=IngestSource(
                 id="run-123-pdb-456",
-                harvest_run_srn="urn:osa:localhost:val:run123",
+                ingest_run_srn="urn:osa:localhost:val:run123",
                 upstream_source="pdb",
             ),
-            metadata={"title": "Harvested Protein"},
+            metadata={"title": "Ingested Protein"},
             convention_srn=_make_conv_srn(),
             expected_features=["pocket_detect"],
         )
@@ -155,12 +155,12 @@ class TestRecordServiceHarvestSource:
 
         record = await service.publish_record(draft)
 
-        assert record.source.type == "harvest"
+        assert record.source.type == "ingest"
         assert record.source.upstream_source == "pdb"
         assert record.convention_srn == _make_conv_srn()
         mock_record_repo.save.assert_called_once()
 
         event = mock_outbox.append.call_args[0][0]
         assert isinstance(event, RecordPublished)
-        assert event.source.type == "harvest"
+        assert event.source.type == "ingest"
         assert event.expected_features == ["pocket_detect"]

@@ -5,7 +5,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from osa.domain.shared.model.source import (
     DepositionSource,
-    HarvestSource,
+    IngestSource,
     RecordSource,
 )
 
@@ -27,31 +27,31 @@ class TestDepositionSource:
         assert restored == src
 
 
-class TestHarvestSource:
-    def test_type_is_harvest(self):
-        src = HarvestSource(
+class TestIngestSource:
+    def test_type_is_ingest(self):
+        src = IngestSource(
             id="run-123-source-456",
-            harvest_run_srn="urn:osa:localhost:val:run123",
+            ingest_run_srn="urn:osa:localhost:val:run123",
             upstream_source="pdb",
         )
-        assert src.type == "harvest"
+        assert src.type == "ingest"
 
-    def test_requires_harvest_run_srn(self):
+    def test_requires_ingest_run_srn(self):
         with pytest.raises(ValidationError):
-            HarvestSource(id="run-123", upstream_source="pdb")
+            IngestSource(id="run-123", upstream_source="pdb")
 
     def test_requires_upstream_source(self):
         with pytest.raises(ValidationError):
-            HarvestSource(id="run-123", harvest_run_srn="urn:osa:localhost:val:run123")
+            IngestSource(id="run-123", ingest_run_srn="urn:osa:localhost:val:run123")
 
     def test_serialization_roundtrip(self):
-        src = HarvestSource(
+        src = IngestSource(
             id="run-123-source-456",
-            harvest_run_srn="urn:osa:localhost:val:run123",
+            ingest_run_srn="urn:osa:localhost:val:run123",
             upstream_source="pdb",
         )
         data = src.model_dump()
-        restored = HarvestSource.model_validate(data)
+        restored = IngestSource.model_validate(data)
         assert restored == src
 
 
@@ -61,16 +61,16 @@ class TestRecordSourceDiscriminator:
         src = adapter.validate_python({"type": "deposition", "id": "dep-abc"})
         assert isinstance(src, DepositionSource)
 
-    def test_deserializes_harvest(self):
+    def test_deserializes_ingest(self):
         data = {
-            "type": "harvest",
+            "type": "ingest",
             "id": "run-123",
-            "harvest_run_srn": "urn:osa:localhost:val:run1",
+            "ingest_run_srn": "urn:osa:localhost:val:run1",
             "upstream_source": "geo",
         }
         adapter = TypeAdapter(RecordSource)
         src = adapter.validate_python(data)
-        assert isinstance(src, HarvestSource)
+        assert isinstance(src, IngestSource)
         assert src.upstream_source == "geo"
 
     def test_rejects_unknown_type(self):
@@ -81,12 +81,12 @@ class TestRecordSourceDiscriminator:
     def test_json_roundtrip(self):
         """Serialize to JSON and back via the union type."""
         adapter = TypeAdapter(RecordSource)
-        src = HarvestSource(
+        src = IngestSource(
             id="run-1",
-            harvest_run_srn="urn:osa:localhost:val:run1",
+            ingest_run_srn="urn:osa:localhost:val:run1",
             upstream_source="pdb",
         )
         json_str = adapter.dump_json(src)
         restored = adapter.validate_json(json_str)
-        assert isinstance(restored, HarvestSource)
+        assert isinstance(restored, IngestSource)
         assert restored == src

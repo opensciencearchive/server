@@ -4,6 +4,7 @@ from abc import abstractmethod
 from typing import Any, Protocol
 
 from osa.domain.shared.port import Port
+from osa.domain.validation.model.batch_outcome import BatchRecordOutcome
 
 
 class FeatureStoragePort(Port, Protocol):
@@ -28,4 +29,17 @@ class FeatureStoragePort(Port, Protocol):
     @abstractmethod
     async def hook_features_exist(self, hook_output_dir: str, feature_name: str) -> bool:
         """Check whether features.json exists in a hook's output directory."""
+        ...
+
+    @abstractmethod
+    async def read_batch_outcomes(
+        self, output_dir: str, hook_name: str
+    ) -> dict[str, BatchRecordOutcome]:
+        """Read JSONL batch outputs (features/rejections/errors) for a hook.
+
+        Parses features.jsonl, rejections.jsonl, and errors.jsonl from the
+        hook's output directory. Each record appears in exactly one file.
+
+        Returns a dict keyed by record ID.
+        """
         ...

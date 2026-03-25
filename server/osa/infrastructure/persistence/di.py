@@ -17,7 +17,6 @@ from osa.domain.record.port.repository import RecordRepository
 from osa.domain.record.query.get_record import GetRecordHandler
 from osa.domain.record.service import RecordService
 from osa.infrastructure.persistence.adapter.feature_reader import PostgresFeatureReader
-from osa.domain.source.port.storage import SourceStoragePort
 from osa.domain.feature.port.storage import FeatureStoragePort
 from osa.domain.validation.port.storage import HookStoragePort
 from osa.domain.semantics.port.ontology_repository import OntologyRepository
@@ -131,10 +130,6 @@ class PersistenceProvider(Provider):
         from osa.infrastructure.s3.storage import S3StorageAdapter
 
         return S3StorageAdapter(s3=s3, data_mount_path=config.runner.k8s.data_mount_path)
-
-    @provide(scope=Scope.APP)
-    def get_source_storage(self, file_storage: FileStoragePort) -> SourceStoragePort:
-        return file_storage  # type: ignore[return-value]
 
     @provide(scope=Scope.APP)
     def get_hook_storage(self, file_storage: FileStoragePort) -> HookStoragePort:

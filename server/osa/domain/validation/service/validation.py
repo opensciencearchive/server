@@ -18,6 +18,7 @@ from osa.domain.validation.model import (
     RunStatus,
     ValidationRun,
 )
+from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.domain.validation.port.repository import ValidationRunRepository
@@ -101,14 +102,18 @@ class ValidationService(Service):
         metadata: dict[str, Any],
         hooks: list[HookDefinition],
     ) -> tuple[ValidationRun, list[HookResult]]:
-        """Full validation workflow using enriched event data."""
-        record_json = {"srn": str(deposition_srn), "metadata": metadata}
+        """Full validation workflow using enriched event data.
+
+        Uses the unified batch contract: constructs a 1-record batch for depositions.
+        """
+        record = HookRecord(id=str(deposition_srn), metadata=metadata)
         run_id = f"{deposition_srn.domain.root}_{deposition_srn.id.root}"
         files_dir = self.hook_storage.get_files_dir(deposition_srn)
+
         inputs = HookInputs(
-            record_json=record_json,
+            records=[record],
             run_id=run_id,
-            files_dir=files_dir,
+            files_dirs={str(deposition_srn): files_dir} if files_dir else {},
         )
 
         run = await self.create_run(inputs=inputs)

@@ -311,36 +311,7 @@ class WorkerPool:
 
     async def _build_schedules_from_conventions(self) -> list[ScheduleConfig]:
         """Query conventions with sources and build schedule configs."""
-        if self._container is None:
-            return []
-
-        from osa.domain.deposition.service.convention import ConventionService
-        from osa.domain.source.schedule import SourceSchedule as SourceScheduleType
-
-        configs: list[ScheduleConfig] = []
-        try:
-            async with self._container(scope=Scope.UOW, context={Identity: System()}) as scope:
-                convention_service = await scope.get(ConventionService)
-                conventions = await convention_service.list_conventions_with_source()
-
-                for conv in conventions:
-                    if conv.source is None or conv.source.schedule is None:
-                        continue
-                    configs.append(
-                        ScheduleConfig(
-                            schedule_type=SourceScheduleType,
-                            cron=conv.source.schedule.cron,
-                            id=f"source-{conv.srn}",
-                            params={
-                                "convention": str(conv.srn),
-                                "limit": conv.source.schedule.limit,
-                            },
-                        )
-                    )
-        except Exception as e:
-            logger.warning(f"Failed to build schedules from conventions: {e}")
-
-        return configs
+        return []
 
     async def stop(self, timeout: float = 30.0) -> None:
         """Stop all workers gracefully."""

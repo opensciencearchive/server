@@ -8,7 +8,7 @@ from osa.domain.semantics.model.value import FieldDefinition
 from osa.domain.shared.authorization.gate import public
 from osa.domain.shared.command import Command, CommandHandler, Result
 from osa.domain.shared.model.hook import HookDefinition
-from osa.domain.shared.model.source import SourceDefinition
+from osa.domain.shared.model.source import IngesterDefinition
 from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
 
 
@@ -21,7 +21,7 @@ class CreateConvention(Command):
     file_requirements: FileRequirements
     description: str | None = None
     hooks: list[HookDefinition] = []
-    source: SourceDefinition | None = None
+    ingester: IngesterDefinition | None = None
 
 
 class ConventionCreated(Result):
@@ -44,7 +44,7 @@ class CreateConventionHandler(CommandHandler[CreateConvention, ConventionCreated
             file_requirements=cmd.file_requirements,
             description=cmd.description,
             hooks=cmd.hooks,
-            source=cmd.source,
+            ingester=cmd.ingester,
         )
         return ConventionCreated(
             srn=convention.srn,

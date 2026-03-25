@@ -16,6 +16,7 @@ from osa.domain.deposition.model.value import DepositionFile
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.error import InfrastructureError, NotFoundError
 from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+from osa.domain.validation.model.batch_outcome import BatchRecordOutcome
 from osa.infrastructure.runner_utils import relative_path
 from osa.infrastructure.s3.client import S3Client
 
@@ -178,6 +179,8 @@ class S3StorageAdapter(FileStoragePort):
             srn = DepositionSRN.parse(source_id)
             safe_id = self._safe_id(srn)
             return f"{self._data_mount_path}/depositions/{safe_id}"
+        if source_type == "ingest":
+            return f"{self._data_mount_path}/ingests/{source_id}"
         raise ValueError(f"Unknown source type: {source_type}")
 
     async def read_hook_features(
@@ -200,3 +203,46 @@ class S3StorageAdapter(FileStoragePort):
         prefix = relative_path(Path(hook_output_dir), self._data_mount_path)
         key = f"{prefix}/hooks/{feature_name}/output/features.json"
         return await self._s3.head_object(key)
+
+    async def read_batch_outcomes(
+        self, output_dir: str, hook_name: str
+    ) -> dict[str, BatchRecordOutcome]:
+        """Read JSONL batch outputs from S3."""
+        prefix = relative_path(Path(output_dir), self._data_mount_path)
+        hook_prefix = f"{prefix}/hooks/{hook_name}/output"
+        outcomes: dict[str, BatchRecordOutcome] = {}
+
+        for filename, status_key, field_map in [
+            ("features.jsonl", "passed", {"features": "features"}),
+            ("rejections.jsonl", "rejected", {"reason": "reason"}),
+            ("errors.jsonl", "errored", {"error": "error", "retryable": "retryable"}),
+        ]:
+            key = f"{hook_prefix}/{filename}"
+            try:
+                data_bytes = await self._s3.get_object(key)
+            except Exception:
+                continue
+
+            for line in data_bytes.decode().split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.warning("Skipping malformed JSON line in %s", filename)
+                    continue
+                record_id = data.get("id")
+                if not record_id:
+                    logger.warning("Skipping JSONL line without 'id' in %s", filename)
+                    continue
+                kwargs: dict[str, Any] = {
+                    "record_id": record_id,
+                    "status": status_key,
+                }
+                for src, dst in field_map.items():
+                    if src in data:
+                        kwargs[dst] = data[src]
+                outcomes[record_id] = BatchRecordOutcome(**kwargs)
+
+        return outcomes

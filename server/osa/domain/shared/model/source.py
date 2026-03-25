@@ -1,4 +1,4 @@
-"""Shared source domain models used across deposition and source domains."""
+"""Shared source domain models used across deposition and ingest domains."""
 
 from typing import Annotated, Any, Literal, Union
 
@@ -7,23 +7,23 @@ from pydantic import Discriminator, Field, Tag, field_validator
 from osa.domain.shared.model.value import ValueObject
 
 
-class SourceLimits(ValueObject):
-    """Resource limits for source container execution."""
+class IngesterLimits(ValueObject):
+    """Resource limits for ingester container execution."""
 
     timeout_seconds: int = 3600
     memory: str = "512m"
     cpu: str = "0.25"
 
 
-class SourceScheduleConfig(ValueObject):
-    """Cron schedule for periodic source runs."""
+class IngesterScheduleConfig(ValueObject):
+    """Cron schedule for periodic ingester runs."""
 
     cron: str
     limit: int | None = None
 
 
 class InitialRunConfig(ValueObject):
-    """Configuration for the first source run on server startup."""
+    """Configuration for the first ingester run on server startup."""
 
     limit: int | None = None
 
@@ -51,11 +51,11 @@ class DepositionSource(_RecordSourceBase):
     type: Literal["deposition"] = "deposition"
 
 
-class HarvestSource(_RecordSourceBase):
-    """Record originated from an automated harvest run."""
+class IngestSource(_RecordSourceBase):
+    """Record originated from an automated ingest run."""
 
-    type: Literal["harvest"] = "harvest"
-    harvest_run_srn: str
+    type: Literal["ingest"] = "ingest"
+    ingest_run_srn: str
     upstream_source: str
 
 
@@ -68,21 +68,21 @@ def _record_source_discriminator(v: Any) -> str:
 RecordSource = Annotated[
     Union[
         Annotated[DepositionSource, Tag("deposition")],
-        Annotated[HarvestSource, Tag("harvest")],
+        Annotated[IngestSource, Tag("ingest")],
     ],
     Discriminator(_record_source_discriminator),
 ]
 
 
-# ── Source runner definitions ──
+# ── Ingester runner definitions ──
 
 
-class SourceDefinition(ValueObject):
-    """Complete specification for a source: image reference + config + limits."""
+class IngesterDefinition(ValueObject):
+    """Complete specification for an ingester: image reference + config + limits."""
 
     image: str
     digest: str
     config: dict[str, Any] | None = None
-    limits: SourceLimits = Field(default_factory=SourceLimits)
-    schedule: SourceScheduleConfig | None = None
+    limits: IngesterLimits = Field(default_factory=IngesterLimits)
+    schedule: IngesterScheduleConfig | None = None
     initial_run: InitialRunConfig | None = None

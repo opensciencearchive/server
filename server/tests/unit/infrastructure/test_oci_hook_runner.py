@@ -13,6 +13,7 @@ from osa.domain.shared.model.hook import (
     TableFeatureSpec,
 )
 from osa.domain.validation.model.hook_result import HookStatus, ProgressEntry
+from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.validation.port.hook_runner import HookInputs
 from osa.infrastructure.oci.runner import OciHookRunner
 from osa.infrastructure.runner_utils import (
@@ -199,7 +200,7 @@ class TestContainerLifecycle:
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
         inputs = HookInputs(
-            record_json={"srn": "test"},
+            records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
         )
 
@@ -225,7 +226,7 @@ class TestContainerLifecycle:
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
         inputs = HookInputs(
-            record_json={"srn": "test"},
+            records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
         )
 
@@ -248,7 +249,7 @@ class TestContainerLifecycle:
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
         inputs = HookInputs(
-            record_json={"srn": "test"},
+            records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
         )
 
@@ -278,7 +279,7 @@ class TestContainerLifecycle:
         runner = OciHookRunner(docker=docker)
         hook = _make_hook(timeout=1)  # 1 second timeout
         inputs = HookInputs(
-            record_json={"srn": "test"},
+            records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
         )
 
@@ -305,7 +306,7 @@ class TestContainerLifecycle:
         work_dir.mkdir()
 
         inputs = HookInputs(
-            record_json={"srn": "test"},
+            records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
         )
 
@@ -335,7 +336,7 @@ class TestContainerConfig:
         runner = OciHookRunner(docker=docker)
         hook = _make_hook(memory="4g", cpu="4.0")
         inputs = HookInputs(
-            record_json={"srn": "test"},
+            records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
         )
 
@@ -369,7 +370,7 @@ class TestContainerConfig:
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
         inputs = HookInputs(
-            record_json={"srn": "test"},
+            records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
         )
 
@@ -399,9 +400,9 @@ class TestContainerConfig:
         files_dir = tmp_path / "files"
         files_dir.mkdir()
         inputs = HookInputs(
-            record_json={"srn": "test"},
+            records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
-            files_dir=files_dir,
+            files_dirs={"test": files_dir},
         )
 
         work_dir = tmp_path / "hook_work"
@@ -413,7 +414,7 @@ class TestContainerConfig:
         config = call_args[0][0] if call_args[0] else call_args[1].get("config", {})
 
         binds = config["HostConfig"]["Binds"]
-        # Should have 3 binds: input:ro, output:rw, files:ro
+        # Should have 3 binds: input:ro, output:rw, files/{id}:ro
         assert len(binds) == 3
 
         # input/ and output/ are sibling dirs under work_dir
@@ -421,7 +422,7 @@ class TestContainerConfig:
         out_bind = [b for b in binds if b.endswith(":/osa/out:rw")][0]
         assert str(work_dir / "input") in in_bind
         assert str(work_dir / "output") in out_bind
-        assert any(b.endswith(":/osa/in/files:ro") for b in binds)
+        assert any(":/osa/files/test:ro" in b for b in binds)
 
     @pytest.mark.asyncio
     async def test_no_files_bind_when_no_files_dir(self, tmp_path: Path):
@@ -435,9 +436,8 @@ class TestContainerConfig:
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
         inputs = HookInputs(
-            record_json={"srn": "test"},
+            records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
-            files_dir=None,
         )
 
         output_dir = tmp_path / "output"
@@ -449,7 +449,10 @@ class TestContainerConfig:
         config = call_args[0][0] if call_args[0] else call_args[1].get("config", {})
 
         binds = config["HostConfig"]["Binds"]
-        assert len(binds) == 2  # staging + output only
+        # staging + output + empty files base dir
+        assert len(binds) == 3
+        # No per-record file mounts
+        assert not any(":/osa/files/" in b and ":ro" in b for b in binds if b.count("/") > 3)
 
     @pytest.mark.asyncio
     async def test_container_deleted_on_failure(self, tmp_path: Path):
@@ -464,7 +467,7 @@ class TestContainerConfig:
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
         inputs = HookInputs(
-            record_json={"srn": "test"},
+            records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
         )
 

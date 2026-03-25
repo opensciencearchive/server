@@ -1,22 +1,28 @@
 """Port for executing hooks in OCI containers."""
 
 from abc import abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.port import Port
+from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.validation.model.hook_result import HookResult
 
 
 @dataclass(frozen=True)
 class HookInputs:
-    """Inputs to pass to a hook container."""
+    """Inputs to pass to a hook container.
 
-    record_json: dict
+    Uses the unified batch contract: records is a list of HookRecord
+    (1 for depositions, N for harvests).
+    files_dirs maps record ID → directory containing that record's files.
+    """
+
+    records: list[HookRecord]
     run_id: str
-    files_dir: Path | None = None
+    files_dirs: dict[str, Path] = field(default_factory=dict)
     config: dict | None = None
 
 

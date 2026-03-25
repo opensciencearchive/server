@@ -14,6 +14,7 @@ from osa.domain.shared.model.hook import (
 from osa.domain.shared.model.srn import DepositionSRN, Domain
 from osa.domain.validation.model import RunStatus
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
+from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.validation.port.hook_runner import HookInputs
 from osa.domain.validation.service.validation import ValidationService
 
@@ -63,9 +64,9 @@ def _make_service(
 
 def _make_inputs() -> HookInputs:
     return HookInputs(
-        record_json={"srn": "urn:osa:localhost:dep:test123", "metadata": {"name": "test"}},
+        records=[HookRecord(id="urn:osa:localhost:dep:test123", metadata={"name": "test"})],
         run_id="localhost_test123",
-        files_dir=Path("/tmp/staging/files"),
+        files_dirs={"urn:osa:localhost:dep:test123": Path("/tmp/staging/files")},
     )
 
 

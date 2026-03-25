@@ -17,7 +17,7 @@ from osa.infrastructure.http.di import HttpProvider
 from osa.infrastructure.index.di import IndexProvider
 from osa.infrastructure.k8s.di import RunnerProvider
 from osa.infrastructure.persistence import PersistenceProvider
-from osa.infrastructure.source.di import SourceProvider
+from osa.infrastructure.ingest.di import IngestProvider
 from osa.util.di.scope import Scope
 from osa.util.paths import OSAPaths
 
@@ -44,7 +44,7 @@ def create_container(
         PersistenceProvider(),
         RunnerProvider(),
         IndexProvider(),
-        SourceProvider(),
+        IngestProvider(),
         EventProvider(extra_handlers=extra_handlers),
         HttpProvider(),
         DepositionProvider(),

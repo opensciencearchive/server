@@ -1,1 +1,0 @@
-"""Source infrastructure - source implementations."""
