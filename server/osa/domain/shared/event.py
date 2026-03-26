@@ -233,6 +233,7 @@ class EventHandler(Generic[E], metaclass=_EventHandlerMeta):
     __poll_interval__: ClassVar[float] = 0.5
     __max_retries__: ClassVar[int] = 3
     __claim_timeout__: ClassVar[float] = 300.0
+    __concurrency__: ClassVar[int] = 1
 
     async def handle(self, event: E) -> None:
         """Handle a single event. Override for single-event processing.

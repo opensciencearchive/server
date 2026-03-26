@@ -225,7 +225,8 @@ class Config(BaseSettings):
     name: str = "Open Science Archive"
     version: str = "0.0.1"
     description: str = "An open platform for depositing scientific data"
-    domain: str = "localhost"  # Node domain for SRN construction
+    domain: str = "localhost"  # Node identity for SRN construction (DNS name)
+    base_url: str = ""  # Public URL where users reach the server (e.g. http://localhost:8000)
 
     # These are BaseModel, so env_nested_delimiter handles their env vars
     frontend: Frontend = Frontend()
@@ -243,15 +244,26 @@ class Config(BaseSettings):
         "env_nested_delimiter": "__",  # Allows OSA_DATABASE__URL override
     }
 
-    @property
-    def base_url(self) -> str:
-        """Public base URL derived from domain. HTTPS unless localhost."""
-        scheme = "http" if self.domain == "localhost" else "https"
-        return f"{scheme}://{self.domain}"
+    @model_validator(mode="after")
+    def derive_base_url(self) -> Self:
+        """Derive base_url from domain if not explicitly set.
+
+        For non-localhost domains, HTTPS on port 443 is assumed.
+        For localhost, base_url must be set explicitly (port matters).
+        """
+        if self.base_url:
+            return self
+        if self.domain == "localhost":
+            raise ValueError(
+                "OSA_BASE_URL is required when domain is localhost "
+                "(e.g. OSA_BASE_URL=http://localhost:8000)"
+            )
+        self.base_url = f"https://{self.domain}"
+        return self
 
     @model_validator(mode="after")
     def derive_frontend_url(self) -> Self:
-        """Derive frontend URL from domain if still the default localhost value."""
+        """Derive frontend URL from base_url if still the default localhost value."""
         if self.frontend.url == "http://localhost:3000":
             self.frontend = Frontend(url=self.base_url)
         return self

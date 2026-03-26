@@ -29,6 +29,7 @@ class IngestService(Service):
         self,
         convention_srn: str,
         batch_size: int = 1000,
+        limit: int | None = None,
     ) -> IngestRun:
         """Create an ingest run for a convention.
 
@@ -61,6 +62,7 @@ class IngestService(Service):
             convention_srn=convention_srn,
             status=IngestStatus.PENDING,
             batch_size=batch_size,
+            limit=limit,
             started_at=now,
         )
 

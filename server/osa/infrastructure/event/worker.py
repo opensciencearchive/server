@@ -45,8 +45,10 @@ class Worker:
     enabling multiple handlers to independently process the same event.
     """
 
-    def __init__(self, handler_type: type[EventHandler[Any]]) -> None:
+    def __init__(self, handler_type: type[EventHandler[Any]], *, instance_id: int = 0) -> None:
         self._handler_type = handler_type
+        self._instance_id = instance_id
+        # All instances share the same consumer group so SKIP LOCKED distributes work
         self._consumer_group = handler_type.__name__
 
         # Read config from handler classvars
@@ -73,8 +75,10 @@ class Worker:
 
     @property
     def name(self) -> str:
-        """Worker name (handler class name)."""
-        return self._handler_type.__name__
+        """Worker name (handler class name + instance suffix if concurrent)."""
+        if self._instance_id == 0:
+            return self._handler_type.__name__
+        return f"{self._handler_type.__name__}-{self._instance_id}"
 
     @property
     def consumer_group(self) -> str:
@@ -237,13 +241,28 @@ class WorkerPool:
         return self._workers
 
     def register(self, handler_type: type[EventHandler[Any]]) -> Worker:
-        """Register an EventHandler type and create a Worker for it."""
-        worker = Worker(handler_type)
-        if self._container is not None:
-            worker.set_container(self._container)
-        self._workers.append(worker)
-        logger.debug(f"Registered handler '{handler_type.__name__}' as worker")
-        return worker
+        """Register an EventHandler type and create Worker(s) for it.
+
+        If the handler declares ``__concurrency__ = N``, spawns N workers
+        that share the same consumer group. Deliveries are distributed
+        across them via FOR UPDATE SKIP LOCKED.
+        """
+        concurrency = getattr(handler_type, "__concurrency__", 1)
+        first_worker = None
+        for i in range(concurrency):
+            worker = Worker(handler_type, instance_id=i)
+            if self._container is not None:
+                worker.set_container(self._container)
+            self._workers.append(worker)
+            if first_worker is None:
+                first_worker = worker
+        if concurrency > 1:
+            logger.debug(
+                f"Registered handler '{handler_type.__name__}' with {concurrency} concurrent workers"
+            )
+        else:
+            logger.debug(f"Registered handler '{handler_type.__name__}' as worker")
+        return first_worker  # type: ignore[return-value]
 
     def add_worker(self, worker: Worker) -> None:
         """Add a worker to the pool."""

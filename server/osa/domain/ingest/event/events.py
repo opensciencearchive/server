@@ -49,6 +49,7 @@ class IngestBatchPublished(Event):
     published_srns: list[str]
     published_count: int
     expected_features: list[str]
+    upstream_to_record_srn: dict[str, str]  # upstream source ID → published record SRN
 
 
 class IngestCompleted(Event):

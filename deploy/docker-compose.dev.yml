@@ -20,6 +20,7 @@ services:
       OSA_DATABASE__URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-osa}@db:5432/${POSTGRES_DB:-osa}
       OSA_DATA_DIR: /data
       OSA_CONFIG_FILE: /app/osa.yaml
+      OSA_BASE_URL: http://localhost:8000
       OSA_LOGGING__LEVEL: ${LOG_LEVEL:-DEBUG}
       WATCHFILES_FORCE_POLLING: "true"
     entrypoint: []

@@ -58,11 +58,25 @@ class RunIngester(EventHandler[IngestStarted]):
         if session_file.exists():
             session = json.loads(session_file.read_text())
 
+        # Compute effective limit for this batch
+        # If a total limit is set, don't request more than remaining
+        effective_batch_limit = ingest_run.batch_size
+        if ingest_run.limit is not None:
+            sourced_so_far = ingest_run.batches_sourced * ingest_run.batch_size
+            remaining = ingest_run.limit - sourced_so_far
+            if remaining <= 0:
+                # Already sourced enough — mark finished
+                await self.ingest_repo.increment_batches_sourced(
+                    event.ingest_run_srn, set_source_finished=True
+                )
+                return
+            effective_batch_limit = min(ingest_run.batch_size, remaining)
+
         # Run ingester container
         inputs = IngesterInputs(
             convention_srn=convention.srn,
             config=convention.ingester.config,
-            limit=ingest_run.batch_size,
+            limit=effective_batch_limit,
             session=session,
         )
         files_dir = batch_dir / "files"
@@ -87,6 +101,12 @@ class RunIngester(EventHandler[IngestStarted]):
             session_file.write_text(json.dumps(output.session))
 
         has_more = output.session is not None and len(output.records) > 0
+
+        # If total limit is set, check whether we've sourced enough
+        if has_more and ingest_run.limit is not None:
+            total_sourced = (ingest_run.batches_sourced + 1) * ingest_run.batch_size
+            if total_sourced >= ingest_run.limit:
+                has_more = False
 
         # Update counters atomically
         await self.ingest_repo.increment_batches_sourced(

@@ -66,6 +66,7 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("1000"),
         ),
+        sa.Column("record_limit", sa.Integer(), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint(

@@ -10,6 +10,7 @@ class StartIngest(Command):
 
     convention_srn: str
     batch_size: int = 1000
+    limit: int | None = None  # Max total records to ingest (None = unlimited)
 
 
 class IngestRunCreated(Result):
@@ -26,14 +27,17 @@ class StartIngestHandler(CommandHandler[StartIngest, IngestRunCreated]):
 
     __auth__ = at_least(Role.ADMIN)
 
+    from osa.domain.auth.model.principal import Principal
     from osa.domain.ingest.service.ingest import IngestService
 
+    principal: Principal
     service: IngestService
 
     async def run(self, cmd: StartIngest) -> IngestRunCreated:
         ingest_run = await self.service.start_ingest(
             convention_srn=cmd.convention_srn,
             batch_size=cmd.batch_size,
+            limit=cmd.limit,
         )
         return IngestRunCreated(
             srn=ingest_run.srn,

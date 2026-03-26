@@ -30,6 +30,7 @@ class PostgresIngestRunRepository(IngestRunRepository):
             "batches_completed": ingest_run.batches_completed,
             "published_count": ingest_run.published_count,
             "batch_size": ingest_run.batch_size,
+            "record_limit": ingest_run.limit,
             "started_at": ingest_run.started_at,
             "completed_at": ingest_run.completed_at,
         }
@@ -122,6 +123,7 @@ def _row_to_ingest_run(row: dict) -> IngestRun:
         batches_completed=row["batches_completed"],
         published_count=row["published_count"],
         batch_size=row["batch_size"],
+        limit=row.get("record_limit"),
         started_at=row["started_at"],
         completed_at=row.get("completed_at"),
     )

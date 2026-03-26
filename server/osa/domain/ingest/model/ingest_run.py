@@ -37,6 +37,7 @@ class IngestRun(Aggregate):
     batches_completed: int = 0
     published_count: int = 0
     batch_size: int = 1000
+    limit: int | None = None  # Max total records (None = unlimited)
     started_at: datetime
     completed_at: datetime | None = None
 

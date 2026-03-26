@@ -91,6 +91,11 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
             published_srns = [str(r.srn) for r in published]
             published_count = len(published)
 
+            # Build upstream ID → record SRN mapping for feature insertion
+            upstream_to_record_srn: dict[str, str] = {}
+            for record in published:
+                upstream_to_record_srn[record.source.upstream_source] = str(record.srn)
+
             logger.info(
                 "Published %d records from batch %d of %s (%d duplicates skipped)",
                 published_count,
@@ -110,6 +115,7 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
                         published_srns=published_srns,
                         published_count=published_count,
                         expected_features=expected_features,
+                        upstream_to_record_srn=upstream_to_record_srn,
                     )
                 )
 

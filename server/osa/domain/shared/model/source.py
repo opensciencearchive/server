@@ -11,7 +11,7 @@ class IngesterLimits(ValueObject):
     """Resource limits for ingester container execution."""
 
     timeout_seconds: int = 3600
-    memory: str = "512m"
+    memory: str = "1g"
     cpu: str = "0.25"
 
 

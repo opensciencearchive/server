@@ -37,14 +37,25 @@ class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
             # Read JSONL outcomes for this hook
             outcomes = await self.feature_storage.read_batch_outcomes(batch_output_dir, hook_name)
 
-            # Insert features for each published record that passed this hook
-            for record_id, outcome in outcomes.items():
+            # Insert features for each published record that passed this hook.
+            # Map upstream source ID → published record SRN so features
+            # are keyed by the record SRN, not the upstream ID.
+            for upstream_id, outcome in outcomes.items():
                 if outcome.status != "passed" or not outcome.features:
+                    continue
+
+                record_srn = event.upstream_to_record_srn.get(upstream_id)
+                if not record_srn:
+                    logger.warning(
+                        "No record SRN mapping for upstream ID %s in batch %d",
+                        upstream_id,
+                        event.batch_index,
+                    )
                     continue
 
                 count = await self.feature_service.insert_features(
                     hook_name=hook_name,
-                    record_srn=record_id,
+                    record_srn=record_srn,
                     rows=outcome.features,
                 )
                 total_inserted += count

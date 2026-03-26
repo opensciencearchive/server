@@ -318,6 +318,7 @@ ingest_runs_table = Table(
     Column("batches_completed", Integer, nullable=False, server_default=text("0")),
     Column("published_count", Integer, nullable=False, server_default=text("0")),
     Column("batch_size", Integer, nullable=False, server_default=text("1000")),
+    Column("record_limit", Integer, nullable=True),
     Column("started_at", DateTime(timezone=True), nullable=False),
     Column("completed_at", DateTime(timezone=True), nullable=True),
 )

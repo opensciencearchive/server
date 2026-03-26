@@ -35,6 +35,7 @@ os.environ.setdefault(
     "OSA_AUTH__JWT__SECRET",
     "test-secret-that-is-at-least-32-characters-long",
 )
+os.environ.setdefault("OSA_BASE_URL", "http://localhost:8000")
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 """PostgreSQL implementation of RecordRepository."""
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,9 +37,9 @@ class PostgresRecordRepository(RecordRepository):
             .values(values)
             .on_conflict_do_nothing(
                 index_elements=[
-                    records_table.c.source["type"].as_string(),
-                    records_table.c.source["id"].as_string(),
-                ]
+                    text("(source->>'type')"),
+                    text("(source->>'id')"),
+                ],
             )
             .returning(records_table.c.srn)
         )

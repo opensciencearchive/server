@@ -21,6 +21,7 @@ services:
     environment:
       OSA_DATABASE__URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-osa}@db:5432/${POSTGRES_DB:-osa}
       OSA_DATA_DIR: /data
+      OSA_BASE_URL: ${OSA_BASE_URL:-http://localhost:8000}
       OSA_LOGGING__LEVEL: ${LOG_LEVEL:-INFO}
       OSA_AUTH__JWT__SECRET: ${JWT_SECRET:-change-me-in-production-must-be-32-chars-long}
     depends_on:
