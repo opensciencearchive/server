@@ -5,6 +5,7 @@ from typing import Any, NewType
 
 from dishka import AsyncContainer, provide
 
+from osa.config import Config
 from osa.domain.curation.handler import AutoApproveCuration
 from osa.domain.deposition.handler import ReturnToDraft
 from osa.domain.feature.handler import (
@@ -131,12 +132,13 @@ class EventProvider(Provider):
         self,
         container: AsyncContainer,
         handler_types: HandlerTypes,
+        config: Config,
     ) -> WorkerPool:
         """WorkerPool with pull-based event handlers."""
         pool = WorkerPool(container=container, stale_claim_interval=60.0)
 
         for handler_type in handler_types:
-            pool.register(handler_type)
+            pool.register(handler_type, config=config)
 
         logger.info(f"WorkerPool created with {len(pool.workers)} workers")
         return pool

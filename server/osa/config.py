@@ -81,6 +81,7 @@ class WorkerConfig(BaseModel):
 
     poll_interval: float = 0.5  # Seconds between outbox polls
     batch_size: int = 100  # Maximum events to fetch per poll cycle
+    hook_concurrency: int = 8  # Number of concurrent hook workers
 
 
 class K8sConfig(BaseModel):

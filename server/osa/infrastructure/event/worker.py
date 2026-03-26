@@ -4,7 +4,10 @@ import asyncio
 import logging
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
-from typing import Any, NewType
+from typing import TYPE_CHECKING, Any, NewType
+
+if TYPE_CHECKING:
+    from osa.config import Config
 
 from apscheduler import AsyncScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -240,14 +243,30 @@ class WorkerPool:
         """List of managed workers."""
         return self._workers
 
-    def register(self, handler_type: type[EventHandler[Any]]) -> Worker:
+    def register(
+        self,
+        handler_type: type[EventHandler[Any]],
+        config: "Config | None" = None,
+    ) -> Worker:
         """Register an EventHandler type and create Worker(s) for it.
 
-        If the handler declares ``__concurrency__ = N``, spawns N workers
-        that share the same consumer group. Deliveries are distributed
-        across them via FOR UPDATE SKIP LOCKED.
+        Concurrency is determined by (in priority order):
+        1. Config override (e.g. ``config.worker.hook_concurrency`` for RunHooks)
+        2. Handler classvar ``__concurrency__``
+        3. Default of 1
+
+        Multiple workers share the same consumer group so deliveries are
+        distributed across them via FOR UPDATE SKIP LOCKED.
         """
         concurrency = getattr(handler_type, "__concurrency__", 1)
+
+        # Apply config overrides
+        if config is not None:
+            from osa.domain.ingest.handler.run_hooks import RunHooks
+
+            if handler_type is RunHooks:
+                concurrency = config.worker.hook_concurrency
+
         first_worker = None
         for i in range(concurrency):
             worker = Worker(handler_type, instance_id=i)
