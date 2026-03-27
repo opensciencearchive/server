@@ -1,12 +1,13 @@
+from logfire import LevelName
 import logging
 import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Annotated
 
 import yaml
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, field_validator, model_validator, StringConstraints
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 from typing_extensions import Self
 
@@ -63,7 +64,9 @@ class DatabaseConfig(BaseModel):
 class LoggingConfig(BaseModel):
     """Logging configuration (nested in Config, uses env_nested_delimiter)."""
 
-    level: str = "DEBUG"  # Root log level (DEBUG for development)
+    level: Annotated[LevelName, StringConstraints(to_lower=True)] = (
+        "debug"  # Root log level (DEBUG for development)
+    )
     format: str = "%(asctime)s %(levelname)-8s [%(name)s] %(message)s"
     date_format: str = "%Y-%m-%d %H:%M:%S"
 
@@ -379,5 +382,6 @@ def configure_logging(config: LoggingConfig) -> None:
     logging.getLogger("asyncio").setLevel(logging.WARNING)
     logging.getLogger("aiosqlite").setLevel(logging.WARNING)
     logging.getLogger("apscheduler").setLevel(logging.WARNING)  # Suppress job completion spam
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)  # Logfire handles HTTP logging
 
     logging.debug("Logging configured: level=%s, file=%s", config.level, config.file)

@@ -92,7 +92,7 @@ def test_oci_limits_defaults():
 
     limits = OciLimits()
     assert limits.timeout_seconds == 300
-    assert limits.memory == "512m"
+    assert limits.memory == "1g"
     assert limits.cpu == "0.5"
 
 
@@ -176,7 +176,7 @@ def test_hook_definition_default_limits():
         feature=TableFeatureSpec(cardinality="one", columns=[]),
     )
     assert hook_def.runtime.limits.timeout_seconds == 300
-    assert hook_def.runtime.limits.memory == "512m"
+    assert hook_def.runtime.limits.memory == "1g"
 
 
 def test_hook_definition_serialization_roundtrip():

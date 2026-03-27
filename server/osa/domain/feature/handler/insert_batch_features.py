@@ -1,14 +1,13 @@
 """InsertBatchFeatures — bulk feature insertion for ingest batches."""
 
-import logging
-
 from osa.domain.feature.port.storage import FeatureStoragePort
 from osa.domain.feature.service.feature import FeatureService
 from osa.domain.ingest.event.events import IngestBatchPublished
 from osa.domain.shared.event import EventHandler
+from osa.infrastructure.logging import get_logger
 from osa.infrastructure.storage.layout import StorageLayout
 
-logger = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 
 class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
@@ -32,6 +31,7 @@ class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
         )
 
         total_inserted = 0
+        skipped_dupes = 0
 
         for hook_name in event.expected_features:
             # Read JSONL outcomes for this hook
@@ -46,11 +46,10 @@ class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
 
                 record_srn = event.upstream_to_record_srn.get(upstream_id)
                 if not record_srn:
-                    logger.warning(
-                        "No record SRN mapping for upstream ID %s in batch %d",
-                        upstream_id,
-                        event.batch_index,
-                    )
+                    # Expected for cross-batch duplicates — the record was already
+                    # published in an earlier batch, so ON CONFLICT DO NOTHING
+                    # skipped it and features were already inserted then.
+                    skipped_dupes += 1
                     continue
 
                 count = await self.feature_service.insert_features(
@@ -60,10 +59,14 @@ class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
                 )
                 total_inserted += count
 
-        logger.info(
-            "Inserted %d feature rows for batch %d of %s (%d hooks)",
-            total_inserted,
-            event.batch_index,
-            event.ingest_run_srn,
-            len(event.expected_features),
+        short_id = event.ingest_run_srn.rsplit(":", 1)[-1][:8]
+        dupe_msg = f", {skipped_dupes} duplicates skipped" if skipped_dupes else ""
+        log.info(
+            "[{short_id}] batch {batch_index}: inserted {total_inserted} feature rows ({hook_count} hooks{dupe_msg})",
+            short_id=short_id,
+            batch_index=event.batch_index,
+            total_inserted=total_inserted,
+            hook_count=len(event.expected_features),
+            dupe_msg=dupe_msg,
+            ingest_run_srn=event.ingest_run_srn,
         )

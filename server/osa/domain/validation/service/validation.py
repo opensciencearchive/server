@@ -106,14 +106,15 @@ class ValidationService(Service):
 
         Uses the unified batch contract: constructs a 1-record batch for depositions.
         """
-        record = HookRecord(id=str(deposition_srn), metadata=metadata)
-        run_id = f"{deposition_srn.domain.root}_{deposition_srn.id.root}"
+        local_id = deposition_srn.id.root
+        record = HookRecord(id=local_id, metadata=metadata)
+        run_id = f"{deposition_srn.domain.root}_{local_id}"
         files_dir = self.hook_storage.get_files_dir(deposition_srn)
 
         inputs = HookInputs(
             records=[record],
             run_id=run_id,
-            files_dirs={str(deposition_srn): files_dir} if files_dir else {},
+            files_dirs={local_id: files_dir} if files_dir else {},
         )
 
         run = await self.create_run(inputs=inputs)

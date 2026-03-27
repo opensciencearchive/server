@@ -2,7 +2,7 @@
 
 Add ingest_runs table for bulk ingestion tracking.
 
-Revision ID: add_harvest_runs
+Revision ID: add_ingest_runs
 Revises: source_agnostic_records
 Create Date: 2026-03-25
 
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "add_harvest_runs"
+revision: str = "add_ingest_runs"
 down_revision: Union[str, Sequence[str], None] = "source_agnostic_records"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

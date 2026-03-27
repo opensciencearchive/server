@@ -115,11 +115,12 @@ class K8sHookRunner(HookRunner):
                 job_name_to_watch = existing.split(":", 1)[1]
             else:
                 # Create new Job (no existing or failed)
-                # For depositions (batch of 1), use the single record's files dir
+                # Mount the parent of all per-record file dirs — works for
+                # both depositions (one subdir) and ingests (N subdirs)
                 files_dir = None
                 if inputs.files_dirs:
-                    first_id = next(iter(inputs.files_dirs))
-                    files_dir = inputs.files_dirs[first_id]
+                    first_dir = next(iter(inputs.files_dirs.values()))
+                    files_dir = first_dir.parent
                 spec = self._build_job_spec(
                     hook,
                     work_dir,

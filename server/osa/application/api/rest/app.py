@@ -1,4 +1,5 @@
 import logging
+import sys
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -26,7 +27,7 @@ from osa.application.api.v1.routes import (
     validation,
 )
 from osa.application.di import create_container
-from osa.config import Config, configure_logging
+from osa.config import Config
 from osa.domain.shared.authorization.startup import validate_all_handlers
 from osa.domain.shared.error import OSAError
 from osa.domain.shared.event import EventHandler
@@ -81,9 +82,41 @@ def create_app(
     # Pydantic Settings populates from env vars at runtime
     config = Config()  # type: ignore[call-arg]
 
-    # Configure logging early
-    configure_logging(config.logging)
-    logger.info("Starting OSA server: %s v%s", config.name, config.version)
+    # Configure logfire as the single logging system
+    import logging as _logging
+
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+
+    from osa.infrastructure.logging import OSAConsoleExporter
+
+    logfire.configure(
+        send_to_logfire="if-token-present",
+        service_name=config.name,
+        console=False,  # Disable default console — we use OSAConsoleExporter
+        inspect_arguments=False,
+        additional_span_processors=[
+            SimpleSpanProcessor(
+                OSAConsoleExporter(
+                    output=sys.stderr,
+                    include_timestamp=True,
+                    min_log_level=config.logging.level,
+                )
+            ),
+        ],
+    )
+
+    # Route Python logging through logfire so old-style logger.info() calls
+    # appear in the same output stream
+    root = _logging.getLogger()
+    root.setLevel(config.logging.level.upper())
+    for h in root.handlers[:]:
+        root.removeHandler(h)
+    root.addHandler(logfire.LogfireLoggingHandler())
+
+    # Suppress duplicate access logs — logfire FastAPI instrumentation handles HTTP logging
+    _logging.getLogger("uvicorn.access").setLevel(_logging.WARNING)
+
+    logfire.info("Starting OSA server: {name} v{version}", name=config.name, version=config.version)
 
     # Validate all handlers have authorization declarations (fail fast)
     validate_all_handlers()
@@ -95,9 +128,11 @@ def create_app(
         lifespan=lifespan,
     )
 
-    # Instrument FastAPI for automatic tracing of HTTP requests
     logfire.instrument_httpx()
-    logfire.instrument_fastapi(app_instance)
+    logfire.instrument_fastapi(
+        app_instance,
+        excluded_urls="/api/v1/health",
+    )
 
     # Setup dependency injection
     container = create_container(

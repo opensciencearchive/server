@@ -112,9 +112,11 @@ class Worker:
         if self._container is None:
             raise RuntimeError("Container not set. Call set_container() first.")
 
+        import logfire
+
         self._shutdown = False
         self._task = asyncio.create_task(self._run(), name=f"worker-{self.name}")
-        logger.info(f"Worker '{self.name}' started")
+        logfire.info("worker started: {worker_name}", worker_name=self.name)
         return self._task
 
     def stop(self) -> None:

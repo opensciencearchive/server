@@ -77,7 +77,6 @@ class RecordService(Service):
             )
 
         published = await self.record_repo.save_many(records)
-        logger.info("Bulk-published %d records (of %d drafts)", len(published), len(drafts))
         return published
 
     async def publish_record(self, draft: RecordDraft) -> Record:

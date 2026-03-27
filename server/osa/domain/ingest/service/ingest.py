@@ -1,6 +1,5 @@
 """IngestService — orchestrates ingest lifecycle."""
 
-import logging
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -13,8 +12,9 @@ from osa.domain.shared.event import EventId
 from osa.domain.shared.model.srn import ConventionSRN, Domain
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
+from osa.infrastructure.logging import get_logger
 
-logger = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 
 class IngestService(Service):
@@ -77,5 +77,11 @@ class IngestService(Service):
             )
         )
 
-        logger.info("Ingest started: %s for convention %s", srn, convention_srn)
+        log.info(
+            "ingest started for {convention_srn}",
+            ingest_run_srn=srn,
+            convention_srn=convention_srn,
+            batch_size=batch_size,
+            limit=limit,
+        )
         return ingest_run

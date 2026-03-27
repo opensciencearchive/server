@@ -1,7 +1,6 @@
 """RunIngester — runs ingester container on IngestStarted or continuation."""
 
 import json
-import logging
 from uuid import uuid4
 
 from osa.domain.deposition.service.convention import ConventionService
@@ -13,15 +12,16 @@ from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.ingester_runner import IngesterInputs, IngesterRunner
+from osa.infrastructure.logging import get_logger
 from osa.infrastructure.storage.layout import StorageLayout
 
-logger = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 
 class RunIngester(EventHandler[IngestStarted]):
     """Runs ingester container and emits IngesterBatchReady per batch."""
 
-    __claim_timeout__ = 3600.0  # Ingester runs can be long
+    __claim_timeout__ = 3600.0
 
     ingest_repo: IngestRunRepository
     convention_service: ConventionService
@@ -34,7 +34,6 @@ class RunIngester(EventHandler[IngestStarted]):
         if ingest_run is None:
             raise NotFoundError(f"Ingest run not found: {event.ingest_run_srn}")
 
-        # Transition to RUNNING on first ingester pull
         if ingest_run.status == IngestStatus.PENDING:
             ingest_run.mark_running()
             await self.ingest_repo.save(ingest_run)
@@ -45,34 +44,27 @@ class RunIngester(EventHandler[IngestStarted]):
         if convention.ingester is None:
             raise NotFoundError(f"No ingester for convention {event.convention_srn}")
 
-        # Determine batch index from current batches_sourced
         batch_index = ingest_run.batches_sourced
 
-        # Prepare scratch directory
         batch_dir = self.layout.ingest_batch_ingester_dir(event.ingest_run_srn, batch_index)
         batch_dir.mkdir(parents=True, exist_ok=True)
 
-        # Load session state for continuation
         session_file = self.layout.ingest_session_file(event.ingest_run_srn)
         session = None
         if session_file.exists():
             session = json.loads(session_file.read_text())
 
-        # Compute effective limit for this batch
-        # If a total limit is set, don't request more than remaining
         effective_batch_limit = ingest_run.batch_size
         if ingest_run.limit is not None:
             sourced_so_far = ingest_run.batches_sourced * ingest_run.batch_size
             remaining = ingest_run.limit - sourced_so_far
             if remaining <= 0:
-                # Already sourced enough — mark finished
                 await self.ingest_repo.increment_batches_sourced(
                     event.ingest_run_srn, set_source_finished=True
                 )
                 return
             effective_batch_limit = min(ingest_run.batch_size, remaining)
 
-        # Run ingester container
         inputs = IngesterInputs(
             convention_srn=convention.srn,
             config=convention.ingester.config,
@@ -89,32 +81,27 @@ class RunIngester(EventHandler[IngestStarted]):
             work_dir=batch_dir,
         )
 
-        # Write records.jsonl to batch ingester dir
         records_file = batch_dir / "records.jsonl"
         with records_file.open("w") as f:
             for record in output.records:
                 f.write(json.dumps(record) + "\n")
 
-        # Save session for continuation
         if output.session:
             session_file.parent.mkdir(parents=True, exist_ok=True)
             session_file.write_text(json.dumps(output.session))
 
         has_more = output.session is not None and len(output.records) > 0
 
-        # If total limit is set, check whether we've sourced enough
         if has_more and ingest_run.limit is not None:
             total_sourced = (ingest_run.batches_sourced + 1) * ingest_run.batch_size
             if total_sourced >= ingest_run.limit:
                 has_more = False
 
-        # Update counters atomically
         await self.ingest_repo.increment_batches_sourced(
             event.ingest_run_srn,
             set_source_finished=not has_more,
         )
 
-        # Emit batch ready event
         await self.outbox.append(
             IngesterBatchReady(
                 id=EventId(uuid4()),
@@ -124,15 +111,16 @@ class RunIngester(EventHandler[IngestStarted]):
             )
         )
 
-        logger.info(
-            "Ingester batch %d ready for %s (%d records, has_more=%s)",
-            batch_index,
-            event.ingest_run_srn,
-            len(output.records),
-            has_more,
+        short_id = event.ingest_run_srn.rsplit(":", 1)[-1][:8]
+        log.info(
+            "[{short_id}] batch {batch_index}: pulled {record_count} records (has_more={has_more})",
+            short_id=short_id,
+            batch_index=batch_index,
+            record_count=len(output.records),
+            has_more=has_more,
+            ingest_run_srn=event.ingest_run_srn,
         )
 
-        # Emit continuation event for next batch
         if has_more:
             await self.outbox.append(
                 IngestStarted(
