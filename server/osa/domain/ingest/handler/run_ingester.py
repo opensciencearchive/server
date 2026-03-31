@@ -30,6 +30,10 @@ class RunIngester(EventHandler[IngestStarted]):
     layout: StorageLayout
 
     async def handle(self, event: IngestStarted) -> None:
+        """Run ingester for the given ingest run and emit IngesterBatchReady.
+
+        TODO: move this log into a service method.
+        """
         ingest_run = await self.ingest_repo.get(event.ingest_run_srn)
         if ingest_run is None:
             raise NotFoundError(f"Ingest run not found: {event.ingest_run_srn}")
@@ -44,7 +48,7 @@ class RunIngester(EventHandler[IngestStarted]):
         if convention.ingester is None:
             raise NotFoundError(f"No ingester for convention {event.convention_srn}")
 
-        batch_index = ingest_run.batches_sourced
+        batch_index = ingest_run.batches_ingested
 
         batch_dir = self.layout.ingest_batch_ingester_dir(event.ingest_run_srn, batch_index)
         batch_dir.mkdir(parents=True, exist_ok=True)
@@ -56,11 +60,11 @@ class RunIngester(EventHandler[IngestStarted]):
 
         effective_batch_limit = ingest_run.batch_size
         if ingest_run.limit is not None:
-            sourced_so_far = ingest_run.batches_sourced * ingest_run.batch_size
-            remaining = ingest_run.limit - sourced_so_far
+            ingested_so_far = ingest_run.batches_ingested * ingest_run.batch_size
+            remaining = ingest_run.limit - ingested_so_far
             if remaining <= 0:
-                await self.ingest_repo.increment_batches_sourced(
-                    event.ingest_run_srn, set_source_finished=True
+                await self.ingest_repo.increment_batches_ingested(
+                    event.ingest_run_srn, set_ingestion_finished=True
                 )
                 return
             effective_batch_limit = min(ingest_run.batch_size, remaining)
@@ -93,13 +97,13 @@ class RunIngester(EventHandler[IngestStarted]):
         has_more = output.session is not None and len(output.records) > 0
 
         if has_more and ingest_run.limit is not None:
-            total_sourced = (ingest_run.batches_sourced + 1) * ingest_run.batch_size
+            total_sourced = (ingest_run.batches_ingested + 1) * ingest_run.batch_size
             if total_sourced >= ingest_run.limit:
                 has_more = False
 
-        await self.ingest_repo.increment_batches_sourced(
+        await self.ingest_repo.increment_batches_ingested(
             event.ingest_run_srn,
-            set_source_finished=not has_more,
+            set_ingestion_finished=not has_more,
         )
 
         await self.outbox.append(

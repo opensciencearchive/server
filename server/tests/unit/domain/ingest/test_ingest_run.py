@@ -61,8 +61,8 @@ class TestCompletionCondition:
     def test_not_complete_when_source_not_finished(self) -> None:
         run = _make_run(
             status=IngestStatus.RUNNING,
-            source_finished=False,
-            batches_sourced=3,
+            ingestion_finished=False,
+            batches_ingested=3,
             batches_completed=3,
         )
         assert not run.is_complete
@@ -70,8 +70,8 @@ class TestCompletionCondition:
     def test_not_complete_when_batches_pending(self) -> None:
         run = _make_run(
             status=IngestStatus.RUNNING,
-            source_finished=True,
-            batches_sourced=3,
+            ingestion_finished=True,
+            batches_ingested=3,
             batches_completed=2,
         )
         assert not run.is_complete
@@ -79,8 +79,8 @@ class TestCompletionCondition:
     def test_complete_when_all_batches_done(self) -> None:
         run = _make_run(
             status=IngestStatus.RUNNING,
-            source_finished=True,
-            batches_sourced=3,
+            ingestion_finished=True,
+            batches_ingested=3,
             batches_completed=3,
         )
         assert run.is_complete
@@ -88,8 +88,8 @@ class TestCompletionCondition:
     def test_check_completion_transitions_status(self) -> None:
         run = _make_run(
             status=IngestStatus.RUNNING,
-            source_finished=True,
-            batches_sourced=2,
+            ingestion_finished=True,
+            batches_ingested=2,
             batches_completed=2,
         )
         now = datetime.now(UTC)
@@ -101,8 +101,8 @@ class TestCompletionCondition:
     def test_check_completion_noop_when_not_complete(self) -> None:
         run = _make_run(
             status=IngestStatus.RUNNING,
-            source_finished=True,
-            batches_sourced=3,
+            ingestion_finished=True,
+            batches_ingested=3,
             batches_completed=2,
         )
         completed = run.check_completion(datetime.now(UTC))
@@ -111,10 +111,10 @@ class TestCompletionCondition:
 
 
 class TestCounterIncrements:
-    def test_increment_batches_sourced(self) -> None:
+    def test_increment_batches_ingested(self) -> None:
         run = _make_run(status=IngestStatus.RUNNING)
-        run.increment_batches_sourced()
-        assert run.batches_sourced == 1
+        run.increment_batches_ingested()
+        assert run.batches_ingested == 1
 
     def test_record_batch_completed(self) -> None:
         run = _make_run(status=IngestStatus.RUNNING)
@@ -129,11 +129,11 @@ class TestCounterIncrements:
         assert run.batches_completed == 2
         assert run.published_count == 150
 
-    def test_mark_source_finished(self) -> None:
+    def test_mark_ingestion_finished(self) -> None:
         run = _make_run(status=IngestStatus.RUNNING)
-        assert not run.source_finished
-        run.mark_source_finished()
-        assert run.source_finished
+        assert not run.ingestion_finished
+        run.mark_ingestion_finished()
+        assert run.ingestion_finished
 
     def test_batch_size_default(self) -> None:
         run = _make_run()

@@ -31,10 +31,10 @@ class IngestRunRepository(Port, Protocol):
         ...
 
     @abstractmethod
-    async def increment_batches_sourced(
-        self, srn: str, *, set_source_finished: bool = False
+    async def increment_batches_ingested(
+        self, srn: str, *, set_ingestion_finished: bool = False
     ) -> IngestRun:
-        """Atomically increment batches_sourced and optionally set source_finished.
+        """Atomically increment batches_ingested and optionally set ingestion_finished.
 
         Returns the updated IngestRun with DB-authoritative counter values.
         """

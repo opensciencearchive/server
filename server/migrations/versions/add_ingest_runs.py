@@ -37,13 +37,13 @@ def upgrade() -> None:
             server_default=sa.text("'pending'"),
         ),
         sa.Column(
-            "source_finished",
+            "ingestion_finished",
             sa.Boolean(),
             nullable=False,
             server_default=sa.text("false"),
         ),
         sa.Column(
-            "batches_sourced",
+            "batches_ingested",
             sa.Integer(),
             nullable=False,
             server_default=sa.text("0"),

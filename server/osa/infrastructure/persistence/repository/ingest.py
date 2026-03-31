@@ -25,8 +25,8 @@ class PostgresIngestRunRepository(IngestRunRepository):
             "srn": ingest_run.srn,
             "convention_srn": ingest_run.convention_srn,
             "status": ingest_run.status.value,
-            "source_finished": ingest_run.source_finished,
-            "batches_sourced": ingest_run.batches_sourced,
+            "ingestion_finished": ingest_run.ingestion_finished,
+            "batches_ingested": ingest_run.batches_ingested,
             "batches_completed": ingest_run.batches_completed,
             "published_count": ingest_run.published_count,
             "batch_size": ingest_run.batch_size,
@@ -70,16 +70,16 @@ class PostgresIngestRunRepository(IngestRunRepository):
             return None
         return _row_to_ingest_run(dict(row))
 
-    async def increment_batches_sourced(
-        self, srn: str, *, set_source_finished: bool = False
+    async def increment_batches_ingested(
+        self, srn: str, *, set_ingestion_finished: bool = False
     ) -> IngestRun:
-        """Atomically increment batches_sourced."""
+        """Atomically increment batches_ingested."""
         t = ingest_runs_table
         values = {
-            "batches_sourced": t.c.batches_sourced + 1,
+            "batches_ingested": t.c.batches_ingested + 1,
         }
-        if set_source_finished:
-            values["source_finished"] = True
+        if set_ingestion_finished:
+            values["ingestion_finished"] = True
 
         stmt = update(t).where(t.c.srn == srn).values(**values).returning(*t.c)
         result = await self._session.execute(stmt)
@@ -118,8 +118,8 @@ def _row_to_ingest_run(row: dict) -> IngestRun:
         srn=row["srn"],
         convention_srn=row["convention_srn"],
         status=IngestStatus(row["status"]),
-        source_finished=row["source_finished"],
-        batches_sourced=row["batches_sourced"],
+        ingestion_finished=row["ingestion_finished"],
+        batches_ingested=row["batches_ingested"],
         batches_completed=row["batches_completed"],
         published_count=row["published_count"],
         batch_size=row["batch_size"],

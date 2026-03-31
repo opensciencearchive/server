@@ -32,8 +32,8 @@ class IngestRun(Aggregate):
     srn: str
     convention_srn: str
     status: IngestStatus = IngestStatus.PENDING
-    source_finished: bool = False
-    batches_sourced: int = 0
+    ingestion_finished: bool = False
+    batches_ingested: int = 0
     batches_completed: int = 0
     published_count: int = 0
     batch_size: int = 1000
@@ -54,11 +54,11 @@ class IngestRun(Aggregate):
         self.transition_to(IngestStatus.FAILED)
         self.completed_at = completed_at
 
-    def mark_source_finished(self) -> None:
-        self.source_finished = True
+    def mark_ingestion_finished(self) -> None:
+        self.ingestion_finished = True
 
-    def increment_batches_sourced(self) -> None:
-        self.batches_sourced += 1
+    def increment_batches_ingested(self) -> None:
+        self.batches_ingested += 1
 
     def record_batch_completed(self, published_count: int) -> None:
         """Record a completed batch with its published count.
@@ -72,7 +72,7 @@ class IngestRun(Aggregate):
     @property
     def is_complete(self) -> bool:
         """Check the completion condition: all sourced batches are completed."""
-        return self.source_finished and self.batches_sourced == self.batches_completed
+        return self.ingestion_finished and self.batches_ingested == self.batches_completed
 
     def check_completion(self, completed_at: datetime) -> bool:
         """Check completion condition and transition if met.
