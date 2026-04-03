@@ -53,14 +53,12 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                 ingest_run_srn=event.ingest_run_srn,
             )
 
-        # Build files_dirs from ingester files (Path locators)
+        # Build files_dirs from ingester files (Path locators for runner volume mounts)
         files_base = self.ingest_storage.batch_files_dir(event.ingest_run_srn, event.batch_index)
         files_dirs: dict[str, Path] = {}
-        if files_base.exists():
-            for record in records:
-                record_files = files_base / record.source_id
-                if record_files.exists():
-                    files_dirs[record.source_id] = record_files
+        for record in records:
+            if record.files:
+                files_dirs[record.source_id] = files_base / record.source_id
 
         # Convert to HookInputs with size hints and file dirs
         inputs = HookInputs(

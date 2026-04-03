@@ -38,9 +38,11 @@ class FilesystemIngestStorage:
         ingester_dir = self._layout.ingest_batch_ingester_dir(ingest_run_srn, batch_index)
         ingester_dir.mkdir(parents=True, exist_ok=True)
         records_file = ingester_dir / "records.jsonl"
-        with records_file.open("w") as f:
+        tmp = records_file.with_suffix(".tmp")
+        with tmp.open("w") as f:
             for record in records:
                 f.write(json.dumps(record) + "\n")
+        os.replace(tmp, records_file)
 
     async def read_records(self, ingest_run_srn: str, batch_index: int) -> list[dict[str, Any]]:
         ingester_dir = self._layout.ingest_batch_ingester_dir(ingest_run_srn, batch_index)

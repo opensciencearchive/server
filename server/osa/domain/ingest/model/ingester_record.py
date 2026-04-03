@@ -3,6 +3,8 @@
 import logging
 from typing import Any
 
+from pydantic import ValidationError
+
 from osa.domain.shared.model.value import ValueObject
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,6 @@ class IngesterRecord(ValueObject):
                         files=files,
                     )
                 )
-            except (KeyError, ValueError):
+            except (KeyError, ValueError, ValidationError):
                 logger.warning("Skipping malformed ingester record")
         return records

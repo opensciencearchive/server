@@ -3,12 +3,20 @@
 from pathlib import Path
 
 import pytest
+from botocore.exceptions import ClientError
 
 from osa.infrastructure.s3.ingest_storage import S3IngestStorage
 from osa.infrastructure.storage.layout import StorageLayout
 
 DATA_MOUNT = "/data/data"
 SRN = "urn:osa:localhost:ing:test-run-001"
+
+
+def _not_found_error(key: str) -> ClientError:
+    return ClientError(
+        {"Error": {"Code": "NoSuchKey", "Message": f"Not found: {key}"}},
+        "GetObject",
+    )
 
 
 class FakeS3Client:
@@ -23,7 +31,7 @@ class FakeS3Client:
 
     async def get_object(self, key: str) -> bytes:
         if key not in self._objects:
-            raise Exception(f"NoSuchKey: {key}")
+            raise _not_found_error(key)
         return self._objects[key]
 
 

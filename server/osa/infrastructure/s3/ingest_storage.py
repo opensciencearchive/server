@@ -5,11 +5,17 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from botocore.exceptions import ClientError
+
 from osa.infrastructure.runner_utils import relative_path
 from osa.infrastructure.s3.client import S3Client
 from osa.infrastructure.storage.layout import StorageLayout
 
 logger = logging.getLogger(__name__)
+
+
+def _is_not_found(exc: ClientError) -> bool:
+    return exc.response["Error"]["Code"] in ("404", "NoSuchKey")
 
 
 class S3IngestStorage:
@@ -36,8 +42,10 @@ class S3IngestStorage:
         try:
             data = await self._s3.get_object(key)
             return json.loads(data)
-        except Exception:
-            return None
+        except ClientError as exc:
+            if _is_not_found(exc):
+                return None
+            raise
 
     async def write_session(self, ingest_run_srn: str, session: dict[str, Any]) -> None:
         key = self._key(self._layout.ingest_session_file(ingest_run_srn))
@@ -56,8 +64,10 @@ class S3IngestStorage:
         key = f"{self._key(ingester_dir)}/records.jsonl"
         try:
             data = await self._s3.get_object(key)
-        except Exception:
-            return []
+        except ClientError as exc:
+            if _is_not_found(exc):
+                return []
+            raise
         records: list[dict[str, Any]] = []
         for line in data.decode().split("\n"):
             line = line.strip()
