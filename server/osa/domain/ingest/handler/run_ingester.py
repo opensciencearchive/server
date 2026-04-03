@@ -63,8 +63,11 @@ class RunIngester(EventHandler[IngestStarted]):
             ingested_so_far = ingest_run.batches_ingested * ingest_run.batch_size
             remaining = ingest_run.limit - ingested_so_far
             if remaining <= 0:
-                await self.ingest_repo.increment_batches_ingested(
-                    event.ingest_run_srn, set_ingestion_finished=True
+                log.warn(
+                    "Ignoring redelivered IngestStarted — limit already met (batches_ingested={batches_ingested}, limit={limit})",
+                    batches_ingested=ingest_run.batches_ingested,
+                    limit=ingest_run.limit,
+                    ingest_run_srn=event.ingest_run_srn,
                 )
                 return
             effective_batch_limit = min(ingest_run.batch_size, remaining)

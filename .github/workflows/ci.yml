@@ -203,11 +203,15 @@ jobs:
           OSA_AUTH__JWT__SECRET: test-secret-for-integration-tests-minimum-32-chars
           TEST: "1"
 
-  # Build & push Docker image (only on main, gated on all server checks)
+  # Build & push Docker image (main + PRs onto main, gated on all server checks)
   image:
     name: Server - Image
     needs: [changes, server-lint, server-typecheck, server-test, server-contract, server-integration]
-    if: github.ref == 'refs/heads/main' && needs.changes.outputs.server == 'true'
+    if: >-
+      needs.changes.outputs.server == 'true' && (
+        github.ref == 'refs/heads/main' ||
+        (github.event_name == 'pull_request' && github.base_ref == 'main')
+      )
     uses: ./.github/workflows/image.yml
     permissions:
       contents: read
