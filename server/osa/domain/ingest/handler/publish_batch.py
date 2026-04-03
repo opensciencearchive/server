@@ -13,6 +13,7 @@ from osa.domain.ingest.event.events import (
 from osa.domain.ingest.model.ingest_run import IngestStatus
 from osa.domain.ingest.model.ingester_record import IngesterRecord
 from osa.domain.ingest.port.repository import IngestRunRepository
+from osa.domain.ingest.port.storage import IngestStoragePort
 from osa.domain.record.model.draft import RecordDraft
 from osa.domain.record.service import RecordService
 from osa.domain.shared.error import NotFoundError
@@ -21,7 +22,6 @@ from osa.domain.shared.model.source import IngestSource
 from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.outbox import Outbox
 from osa.infrastructure.logging import get_logger
-from osa.infrastructure.storage.layout import StorageLayout
 
 log = get_logger(__name__)
 
@@ -34,7 +34,7 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
     record_service: RecordService
     feature_storage: FeatureStoragePort
     outbox: Outbox
-    layout: StorageLayout
+    ingest_storage: IngestStoragePort
 
     async def handle(self, event: HookBatchCompleted) -> None:
         ingest_run = await self.ingest_repo.get(event.ingest_run_srn)
@@ -45,12 +45,14 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
             ConventionSRN.parse(ingest_run.convention_srn)
         )
 
-        # Read ingester records from batch dir
-        batch_dir = self.layout.ingest_batch_dir(event.ingest_run_srn, event.batch_index)
-        ingester_dir = self.layout.ingest_batch_ingester_dir(
+        # Read ingester records via storage port (filesystem or S3)
+        raw_records = await self.ingest_storage.read_records(
             event.ingest_run_srn, event.batch_index
         )
-        ingester_records = IngesterRecord.from_jsonl(ingester_dir / "records.jsonl")
+        ingester_records = IngesterRecord.from_dicts(raw_records)
+
+        # batch_dir used as locator for hook outcome reads
+        batch_dir = str(self.ingest_storage.batch_dir(event.ingest_run_srn, event.batch_index))
 
         # Read hook outcomes for all hooks
         expected_features = [h.name for h in convention.hooks]
@@ -65,6 +67,7 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
         )
 
         # Log outcome breakdown per hook
+        short_id = event.ingest_run_srn.rsplit(":", 1)[-1][:8]
         total = len(ingester_records)
         for hook_name in expected_features:
             outcomes = await self.feature_storage.read_batch_outcomes(str(batch_dir), hook_name)
@@ -74,7 +77,6 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
             rejected = sum(1 for o in outcomes.values() if o.status == OutcomeStatus.REJECTED)
             errored = sum(1 for o in outcomes.values() if o.status == OutcomeStatus.ERRORED)
             missing = total - len(outcomes)
-            short_id = event.ingest_run_srn.rsplit(":", 1)[-1][:8]
             log.info(
                 "[{short_id}] batch {batch_index} hook={hook_name}: "
                 "{passed}/{total} passed, {rejected} rejected, {errored} errored, {missing} missing",

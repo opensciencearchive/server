@@ -63,7 +63,7 @@ class HookService(Service):
 
         if not remaining:
             # All records already checkpointed
-            self.hook_storage.write_batch_outcomes(work_dir, outcomes)
+            await self.hook_storage.write_batch_outcomes(work_dir, outcomes)
             return HookResult(
                 hook_name=hook.name,
                 status=HookStatus.PASSED,
@@ -92,7 +92,7 @@ class HookService(Service):
 
             if result.oom_killed:
                 # Checkpoint what we have so far
-                self.hook_storage.write_checkpoint(work_dir, outcomes)
+                await self.hook_storage.write_checkpoint(work_dir, outcomes)
 
                 remaining = _sort_by_size(r for r in records if r.id not in outcomes)
                 if not remaining:
@@ -117,7 +117,7 @@ class HookService(Service):
                             status=OutcomeStatus.ERRORED,
                             error=f"OOM after {MAX_OOM_RETRIES} retries (last limit: {current_hook.runtime.limits.memory})",
                         )
-                    self.hook_storage.write_batch_outcomes(work_dir, outcomes)
+                    await self.hook_storage.write_batch_outcomes(work_dir, outcomes)
                     return HookResult(
                         hook_name=hook.name,
                         status=HookStatus.OOM,
@@ -126,11 +126,11 @@ class HookService(Service):
                     )
             elif result.status == HookStatus.FAILED:
                 # Non-OOM failure — no retry
-                self.hook_storage.write_batch_outcomes(work_dir, outcomes)
+                await self.hook_storage.write_batch_outcomes(work_dir, outcomes)
                 return result
             elif result.status == HookStatus.REJECTED:
                 # Rejection — no retry, propagate status
-                self.hook_storage.write_batch_outcomes(work_dir, outcomes)
+                await self.hook_storage.write_batch_outcomes(work_dir, outcomes)
                 return HookResult(
                     hook_name=hook.name,
                     status=HookStatus.REJECTED,
@@ -142,7 +142,7 @@ class HookService(Service):
                 break
 
         # Finalize: write canonical output files
-        self.hook_storage.write_batch_outcomes(work_dir, outcomes)
+        await self.hook_storage.write_batch_outcomes(work_dir, outcomes)
         _cleanup_checkpoint(work_dir)
 
         return HookResult(

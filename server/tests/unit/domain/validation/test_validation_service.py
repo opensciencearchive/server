@@ -54,6 +54,9 @@ def _make_service(
         hs.get_hook_output_dir = MagicMock(return_value=Path("/tmp/hooks/test"))
     if not hasattr(hs, "get_files_dir") or not callable(hs.get_files_dir):
         hs.get_files_dir = MagicMock(return_value=Path("/tmp/files/test"))
+    # write_checkpoint and write_batch_outcomes are async
+    hs.write_checkpoint = AsyncMock()
+    hs.write_batch_outcomes = AsyncMock()
     return ValidationService(
         run_repo=run_repo or AsyncMock(),
         hook_runner=hook_runner or AsyncMock(),

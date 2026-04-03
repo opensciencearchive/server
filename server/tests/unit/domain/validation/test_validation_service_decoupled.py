@@ -79,6 +79,8 @@ class TestDecoupledValidationService:
         hook_storage = MagicMock()
         hook_storage.get_hook_output_dir.return_value = Path("/tmp/hooks/pocketeer")
         hook_storage.get_files_dir.return_value = Path("/data/files/test-dep")
+        hook_storage.write_checkpoint = AsyncMock()
+        hook_storage.write_batch_outcomes = AsyncMock()
 
         service = ValidationService(
             run_repo=run_repo,

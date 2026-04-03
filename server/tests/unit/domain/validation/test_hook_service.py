@@ -82,12 +82,12 @@ class FakeHookStorage:
     def get_files_dir(self, deposition_id: Any) -> Path:
         return Path("/fake/files")
 
-    def write_checkpoint(
+    async def write_checkpoint(
         self, work_dir: Path, outcomes: dict[HookRecordId, BatchRecordOutcome]
     ) -> None:
         self.checkpoints[str(work_dir)] = dict(outcomes)
 
-    def write_batch_outcomes(
+    async def write_batch_outcomes(
         self, work_dir: Path, outcomes: dict[HookRecordId, BatchRecordOutcome]
     ) -> None:
         self.written_outcomes[str(work_dir)] = dict(outcomes)

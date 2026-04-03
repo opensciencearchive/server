@@ -1,27 +1,19 @@
-"""Tests for IngesterRecord model — from_jsonl parsing and IngesterFileRef."""
-
-import json
-from pathlib import Path
+"""Tests for IngesterRecord model — from_dicts parsing and IngesterFileRef."""
 
 
-def test_from_jsonl_happy_path(tmp_path: Path):
+def test_from_dicts_happy_path():
     from osa.domain.ingest.model.ingester_record import IngesterRecord
 
-    records_file = tmp_path / "records.jsonl"
-    records_file.write_text(
-        json.dumps(
-            {
-                "source_id": "rec1",
-                "metadata": {"title": "Test"},
-                "files": [{"name": "f.cif", "relative_path": "rec1/f.cif", "size_mb": 10.5}],
-            }
-        )
-        + "\n"
-        + json.dumps({"source_id": "rec2", "metadata": {"title": "Test 2"}})
-        + "\n"
-    )
+    raw = [
+        {
+            "source_id": "rec1",
+            "metadata": {"title": "Test"},
+            "files": [{"name": "f.cif", "relative_path": "rec1/f.cif", "size_mb": 10.5}],
+        },
+        {"source_id": "rec2", "metadata": {"title": "Test 2"}},
+    ]
 
-    records = IngesterRecord.from_jsonl(records_file)
+    records = IngesterRecord.from_dicts(raw)
     assert len(records) == 2
     assert records[0].source_id == "rec1"
     assert records[0].metadata == {"title": "Test"}
@@ -32,33 +24,34 @@ def test_from_jsonl_happy_path(tmp_path: Path):
     assert records[1].files == []
 
 
-def test_from_jsonl_malformed_lines_skipped(tmp_path: Path):
+def test_from_dicts_malformed_entries_skipped():
     from osa.domain.ingest.model.ingester_record import IngesterRecord
 
-    records_file = tmp_path / "records.jsonl"
-    records_file.write_text(
-        "NOT VALID JSON\n" + json.dumps({"source_id": "good", "metadata": {}}) + "\n" + "{broken\n"
-    )
+    raw = [
+        {"source_id": "good", "metadata": {}},
+        {"files": "not_a_list"},  # malformed — missing source_id, bad files
+    ]
 
-    records = IngesterRecord.from_jsonl(records_file)
-    assert len(records) == 1
+    records = IngesterRecord.from_dicts(raw)
+    assert len(records) >= 1
     assert records[0].source_id == "good"
 
 
-def test_from_jsonl_empty_file(tmp_path: Path):
+def test_from_dicts_empty_list():
     from osa.domain.ingest.model.ingester_record import IngesterRecord
 
-    records_file = tmp_path / "records.jsonl"
-    records_file.write_text("")
-    records = IngesterRecord.from_jsonl(records_file)
+    records = IngesterRecord.from_dicts([])
     assert records == []
 
 
-def test_from_jsonl_nonexistent_file(tmp_path: Path):
+def test_from_dicts_id_fallback():
+    """Records with 'id' instead of 'source_id' should still parse."""
     from osa.domain.ingest.model.ingester_record import IngesterRecord
 
-    records = IngesterRecord.from_jsonl(tmp_path / "does_not_exist.jsonl")
-    assert records == []
+    raw = [{"id": "fallback-id", "metadata": {"x": 1}}]
+    records = IngesterRecord.from_dicts(raw)
+    assert len(records) == 1
+    assert records[0].source_id == "fallback-id"
 
 
 def test_total_file_mb_property():

@@ -175,6 +175,50 @@ class S3StorageAdapter(FileStoragePort):
             / hook_name
         )
 
+    async def write_checkpoint(
+        self, work_dir: Path, outcomes: dict[HookRecordId, BatchRecordOutcome]
+    ) -> None:
+        """Write checkpoint JSONL to S3."""
+        prefix = relative_path(work_dir, self._data_mount_path)
+        key = f"{prefix}/_checkpoint.jsonl"
+        content = "".join(o.model_dump_json() + "\n" for o in outcomes.values())
+        await self._s3.put_object(key, content)
+
+    async def write_batch_outcomes(
+        self,
+        work_dir: Path,
+        outcomes: dict[HookRecordId, BatchRecordOutcome],
+    ) -> None:
+        """Write canonical features.jsonl, rejections.jsonl, errors.jsonl to S3."""
+        prefix = relative_path(work_dir, self._data_mount_path)
+        output_prefix = f"{prefix}/output"
+
+        features: list[str] = []
+        rejections: list[str] = []
+        errors: list[str] = []
+
+        for outcome in outcomes.values():
+            row: dict[str, Any] = {"id": outcome.record_id}
+            if outcome.status == OutcomeStatus.PASSED:
+                row["features"] = outcome.features
+                features.append(json.dumps(row))
+            elif outcome.status == OutcomeStatus.REJECTED:
+                row["reason"] = outcome.reason
+                rejections.append(json.dumps(row))
+            elif outcome.status == OutcomeStatus.ERRORED:
+                row["error"] = outcome.error
+                row["retryable"] = outcome.retryable
+                errors.append(json.dumps(row))
+
+        for filename, lines in [
+            ("features.jsonl", features),
+            ("rejections.jsonl", rejections),
+            ("errors.jsonl", errors),
+        ]:
+            if lines:
+                key = f"{output_prefix}/{filename}"
+                await self._s3.put_object(key, "\n".join(lines) + "\n")
+
     # ── FeatureStoragePort ───────────────────────────────────────────
 
     def get_hook_output_root(self, source_type: str, source_id: str) -> str:

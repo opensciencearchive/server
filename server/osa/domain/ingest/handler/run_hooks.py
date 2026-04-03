@@ -7,6 +7,7 @@ from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.ingest.event.events import HookBatchCompleted, IngesterBatchReady
 from osa.domain.ingest.model.ingester_record import IngesterRecord
 from osa.domain.ingest.port.repository import IngestRunRepository
+from osa.domain.ingest.port.storage import IngestStoragePort
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.model.srn import ConventionSRN
@@ -15,7 +16,6 @@ from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.validation.port.hook_runner import HookInputs
 from osa.domain.validation.service.hook import HookService
 from osa.infrastructure.logging import get_logger
-from osa.infrastructure.storage.layout import StorageLayout
 
 log = get_logger(__name__)
 
@@ -29,7 +29,7 @@ class RunHooks(EventHandler[IngesterBatchReady]):
     convention_service: ConventionService
     hook_service: HookService
     outbox: Outbox
-    layout: StorageLayout
+    ingest_storage: IngestStoragePort
 
     async def handle(self, event: IngesterBatchReady) -> None:
         ingest_run = await self.ingest_repo.get(event.ingest_run_srn)
@@ -40,11 +40,11 @@ class RunHooks(EventHandler[IngesterBatchReady]):
             ConventionSRN.parse(ingest_run.convention_srn)
         )
 
-        # Read records from batch ingester dir
-        ingester_dir = self.layout.ingest_batch_ingester_dir(
+        # Read records via storage port (filesystem or S3)
+        raw_records = await self.ingest_storage.read_records(
             event.ingest_run_srn, event.batch_index
         )
-        records = IngesterRecord.from_jsonl(ingester_dir / "records.jsonl")
+        records = IngesterRecord.from_dicts(raw_records)
 
         if not records:
             log.warn(
@@ -53,8 +53,8 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                 ingest_run_srn=event.ingest_run_srn,
             )
 
-        # Build files_dirs from ingester files
-        files_base = ingester_dir / "files"
+        # Build files_dirs from ingester files (Path locators)
+        files_base = self.ingest_storage.batch_files_dir(event.ingest_run_srn, event.batch_index)
         files_dirs: dict[str, Path] = {}
         if files_base.exists():
             for record in records:
@@ -76,14 +76,12 @@ class RunHooks(EventHandler[IngesterBatchReady]):
             files_dirs=files_dirs,
         )
 
-        # Build work_dirs for each hook
+        # Build work_dirs for each hook via storage port
         work_dirs: dict[str, Path] = {}
         for hook in convention.hooks:
-            hook_dir = self.layout.ingest_batch_hook_dir(
+            work_dirs[hook.name] = self.ingest_storage.hook_work_dir(
                 event.ingest_run_srn, event.batch_index, hook.name
             )
-            hook_dir.mkdir(parents=True, exist_ok=True)
-            work_dirs[hook.name] = hook_dir
 
         # Run all hooks via HookService
         results = await self.hook_service.run_hooks_for_batch(

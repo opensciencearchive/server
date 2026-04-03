@@ -1,8 +1,6 @@
 """IngesterRecord — typed representation of a record from an ingester container."""
 
-import json
 import logging
-from pathlib import Path
 from typing import Any
 
 from osa.domain.shared.model.value import ValueObject
@@ -35,17 +33,11 @@ class IngesterRecord(ValueObject):
         return sum(f.size_mb for f in self.files)
 
     @classmethod
-    def from_jsonl(cls, path: Path) -> list["IngesterRecord"]:
-        """Parse records.jsonl into typed IngesterRecord objects."""
+    def from_dicts(cls, raw_records: list[dict[str, Any]]) -> list["IngesterRecord"]:
+        """Parse raw dicts (from JSONL) into typed IngesterRecord objects."""
         records: list[IngesterRecord] = []
-        if not path.exists():
-            return records
-        for line in path.open():
-            line = line.strip()
-            if not line:
-                continue
+        for data in raw_records:
             try:
-                data = json.loads(line)
                 files_raw = data.get("files", [])
                 files = [IngesterFileRef.model_validate(f) for f in files_raw]
                 records.append(
@@ -55,6 +47,6 @@ class IngesterRecord(ValueObject):
                         files=files,
                     )
                 )
-            except (json.JSONDecodeError, ValueError):
-                logger.warning("Skipping malformed ingester record line")
+            except (KeyError, ValueError):
+                logger.warning("Skipping malformed ingester record")
         return records

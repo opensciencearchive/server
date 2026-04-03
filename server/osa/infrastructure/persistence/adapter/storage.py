@@ -209,7 +209,7 @@ class FilesystemStorageAdapter(FileStoragePort):
 
         return outcomes
 
-    def write_checkpoint(
+    async def write_checkpoint(
         self, work_dir: Path, outcomes: dict[HookRecordId, BatchRecordOutcome]
     ) -> None:
         """Atomically write checkpoint JSONL via os.replace()."""
@@ -220,7 +220,7 @@ class FilesystemStorageAdapter(FileStoragePort):
                 f.write(outcome.model_dump_json() + "\n")
         os.replace(tmp_path, checkpoint_path)
 
-    def write_batch_outcomes(
+    async def write_batch_outcomes(
         self,
         work_dir: Path,
         outcomes: dict[HookRecordId, BatchRecordOutcome],

@@ -23,14 +23,14 @@ class HookStoragePort(Port, Protocol):
         ...
 
     @abstractmethod
-    def write_checkpoint(
+    async def write_checkpoint(
         self, work_dir: Path, outcomes: dict[HookRecordId, BatchRecordOutcome]
     ) -> None:
         """Atomically write checkpoint JSONL to work_dir/_checkpoint.jsonl."""
         ...
 
     @abstractmethod
-    def write_batch_outcomes(
+    async def write_batch_outcomes(
         self,
         work_dir: Path,
         outcomes: dict[HookRecordId, BatchRecordOutcome],
