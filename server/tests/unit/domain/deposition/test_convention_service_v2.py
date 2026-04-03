@@ -14,7 +14,7 @@ from osa.domain.shared.model.hook import (
     OciConfig,
     TableFeatureSpec,
 )
-from osa.domain.shared.model.source import SourceDefinition
+from osa.domain.shared.model.source import IngesterDefinition
 from osa.domain.shared.model.srn import Domain, SchemaSRN
 
 
@@ -60,8 +60,8 @@ def _make_hook_def(name: str = "detect_pockets") -> HookDefinition:
     )
 
 
-def _make_source_def() -> SourceDefinition:
-    return SourceDefinition(
+def _make_ingester_def() -> IngesterDefinition:
+    return IngesterDefinition(
         image="osa-sources/rcsb-pdb:latest",
         digest="sha256:abc123",
         config={"email": "test@example.com", "batch_size": 100},
@@ -129,31 +129,31 @@ class TestCreateConventionWithInlineSchema:
         assert result.schema_srn == schema_srn
 
     @pytest.mark.asyncio
-    async def test_convention_saves_source_definition(self):
+    async def test_convention_saves_ingester_definition(self):
         service = _make_service()
-        source = _make_source_def()
+        ingester = _make_ingester_def()
         result = await service.create_convention(
-            title="With Source",
+            title="With Ingester",
             version="1.0.0",
             schema=_make_field_defs(),
             file_requirements=_make_file_reqs(),
-            source=source,
+            ingester=ingester,
         )
-        assert result.source is not None
-        assert result.source.image == "osa-sources/rcsb-pdb:latest"
-        assert result.source.digest == "sha256:abc123"
-        assert result.source.config == {"email": "test@example.com", "batch_size": 100}
+        assert result.ingester is not None
+        assert result.ingester.image == "osa-sources/rcsb-pdb:latest"
+        assert result.ingester.digest == "sha256:abc123"
+        assert result.ingester.config == {"email": "test@example.com", "batch_size": 100}
 
     @pytest.mark.asyncio
-    async def test_convention_source_defaults_to_none(self):
+    async def test_convention_ingester_defaults_to_none(self):
         service = _make_service()
         result = await service.create_convention(
-            title="No Source",
+            title="No Ingester",
             version="1.0.0",
             schema=_make_field_defs(),
             file_requirements=_make_file_reqs(),
         )
-        assert result.source is None
+        assert result.ingester is None
 
     @pytest.mark.asyncio
     async def test_convention_with_hooks_emits_hooks_in_event(self):
@@ -182,7 +182,7 @@ class TestConventionRegisteredEvent:
             version="1.0.0",
             schema=_make_field_defs(),
             file_requirements=_make_file_reqs(),
-            source=_make_source_def(),
+            ingester=_make_ingester_def(),
         )
         outbox.append.assert_called_once()
         emitted = outbox.append.call_args[0][0]

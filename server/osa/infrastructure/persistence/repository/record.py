@@ -1,6 +1,7 @@
 """PostgreSQL implementation of RecordRepository."""
 
-from sqlalchemy import func, insert, select
+from sqlalchemy import func, select, text
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.record.model.aggregate import Record
@@ -22,6 +23,30 @@ class PostgresRecordRepository(RecordRepository):
         stmt = insert(records_table).values(**record_dict)
         await self.session.execute(stmt)
         await self.session.flush()
+
+    async def save_many(self, records: list[Record]) -> list[Record]:
+        """Multi-row INSERT with ON CONFLICT DO NOTHING.
+
+        Returns the records that were actually inserted (duplicates are skipped).
+        """
+        if not records:
+            return []
+        values = [record_to_dict(r) for r in records]
+        stmt = (
+            insert(records_table)
+            .values(values)
+            .on_conflict_do_nothing(
+                index_elements=[
+                    text("(source->>'type')"),
+                    text("(source->>'id')"),
+                ],
+            )
+            .returning(records_table.c.srn)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        inserted_srns = {row[0] for row in result.fetchall()}
+        return [r for r in records if str(r.srn) in inserted_srns]
 
     async def get(self, srn: RecordSRN) -> Record | None:
         """Get a record by SRN."""

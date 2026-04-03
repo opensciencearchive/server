@@ -4,16 +4,16 @@ import asyncio
 import json
 import os
 import stat
+import sys
 import time
 from pathlib import Path
 from shutil import rmtree
 
 import aiodocker
-import logfire
-
 from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
+from osa.infrastructure.logging import get_logger
 from osa.infrastructure.runner_utils import (
     detect_rejection,
     parse_memory,
@@ -25,6 +25,9 @@ def _force_remove(func, path, exc):
     """rmtree onexc handler: fix permissions left by Docker containers, then retry."""
     os.chmod(path, stat.S_IRWXU)
     func(path)
+
+
+log = get_logger(__name__)
 
 
 class OciHookRunner(HookRunner):
@@ -54,13 +57,18 @@ class OciHookRunner(HookRunner):
         container_output = work_dir / "output"
         container_output.mkdir(parents=True, exist_ok=True)
         try:
-            (staging_dir / "record.json").write_text(json.dumps(inputs.record_json))
-            # Pre-create files mountpoint so nested bind works with ReadonlyRootfs
-            (staging_dir / "files").mkdir(exist_ok=True)
+            # Write records.jsonl (unified batch contract)
+            with (staging_dir / "records.jsonl").open("w") as f:
+                for record in inputs.records:
+                    f.write(json.dumps(record.model_dump()) + "\n")
 
             if inputs.config or hook.runtime.config:
                 config = {**hook.runtime.config, **(inputs.config or {})}
                 (staging_dir / "config.json").write_text(json.dumps(config))
+
+            # Create files directory structure: $OSA_FILES/{id}/ per record
+            files_base = staging_dir / "files"
+            files_base.mkdir(exist_ok=True)
 
             start_time = time.monotonic()
 
@@ -69,7 +77,12 @@ class OciHookRunner(HookRunner):
                 async def _resolve_and_run():
                     image_ref = await self._resolve_image(hook.runtime.image, hook.runtime.digest)
                     return await self._run_container(
-                        image_ref, staging_dir, inputs.files_dir, container_output, hook
+                        image_ref,
+                        staging_dir,
+                        inputs.files_dirs,
+                        container_output,
+                        hook,
+                        files_base,
                     )
 
                 result = await asyncio.wait_for(
@@ -87,7 +100,7 @@ class OciHookRunner(HookRunner):
                 )
             except asyncio.TimeoutError:
                 duration = time.monotonic() - start_time
-                logfire.error(
+                log.error(
                     "Hook timed out",
                     hook=hook.name,
                     run_id=inputs.run_id,
@@ -106,19 +119,28 @@ class OciHookRunner(HookRunner):
         self,
         image_ref: str,
         staging_dir: Path,
-        files_dir: Path | None,
+        files_dirs: dict[str, Path],
         output_dir: Path,
         hook: HookDefinition,
+        files_base: Path,
     ) -> dict:
         container = None
         try:
-            # Nested bind-mounts: staging at /osa/in:ro, files at /osa/in/files:ro
+            # Bind mounts: staging at /osa/in:ro, files at /osa/files:ro, output at /osa/out:rw
             binds = [
                 f"{self._host_path(staging_dir)}:/osa/in:ro",
                 f"{self._host_path(output_dir)}:/osa/out:rw",
             ]
-            if files_dir and files_dir.exists():
-                binds.append(f"{self._host_path(files_dir)}:/osa/in/files:ro")
+
+            # Mount per-record file directories under /osa/files/{id}/
+            # Sanitize IDs to avoid colons breaking Docker's bind mount syntax
+            if files_dirs:
+                for record_id, fdir in files_dirs.items():
+                    if fdir and fdir.exists():
+                        safe_id = record_id.replace(":", "_").replace("@", "_")
+                        binds.append(f"{self._host_path(fdir)}:/osa/files/{safe_id}:ro")
+            elif files_base.exists():
+                binds.append(f"{self._host_path(files_base)}:/osa/files:ro")
 
             # todo: use pydantic
             config = {
@@ -126,6 +148,7 @@ class OciHookRunner(HookRunner):
                 "Env": [
                     "OSA_IN=/osa/in",
                     "OSA_OUT=/osa/out",
+                    "OSA_FILES=/osa/files",
                     f"OSA_HOOK_NAME={hook.name}",
                 ],
                 "User": "65534:65534",
@@ -154,9 +177,23 @@ class OciHookRunner(HookRunner):
             oom_killed = inspect_data.get("State", {}).get("OOMKilled", False)
 
             if oom_killed:
+                # Grab tail of container logs before deletion
+                try:
+                    tail_logs = await container.log(stdout=True, stderr=True, tail=3)
+                    tail_text = "".join(tail_logs).strip() if tail_logs else ""
+                except Exception:
+                    tail_text = ""
+                log.error(
+                    "OOM: hook={hook_name} limit={memory}",
+                    hook_name=hook.name,
+                    memory=hook.runtime.limits.memory,
+                )
+                if tail_text:
+                    for line in tail_text.splitlines():
+                        print(f"    OOM [{hook.name}] {line}", file=sys.stderr, flush=True)
                 return {
-                    "status": HookStatus.FAILED,
-                    "error_message": "Hook killed by OOM",
+                    "status": HookStatus.OOM,
+                    "error_message": f"Hook killed by OOM (limit: {hook.runtime.limits.memory})",
                 }
 
             # Parse progress file
@@ -186,13 +223,13 @@ class OciHookRunner(HookRunner):
             }
 
         except aiodocker.DockerError as e:
-            logfire.error("Docker error running hook", error=str(e))
+            log.error("Docker error running hook", error=str(e))
             return {
                 "status": HookStatus.FAILED,
                 "error_message": f"Docker error: {e}",
             }
         except Exception as e:
-            logfire.error("Unexpected error running hook", error=str(e))
+            log.error("Unexpected error running hook", error=str(e))
             return {
                 "status": HookStatus.FAILED,
                 "error_message": f"Unexpected error: {e}",
@@ -229,6 +266,6 @@ class OciHookRunner(HookRunner):
             pass
 
         # Pull from registry as last resort
-        logfire.info("Pulling hook image", image=image)
+        log.info("Pulling hook image", image=image)
         await self._docker.images.pull(image)
         return image

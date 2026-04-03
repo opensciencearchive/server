@@ -15,10 +15,10 @@ from osa.domain.shared.model.hook import (
     TableFeatureSpec,
 )
 from osa.domain.shared.model.source import (
+    IngesterDefinition,
+    IngesterLimits,
+    IngesterScheduleConfig,
     InitialRunConfig,
-    SourceDefinition,
-    SourceLimits,
-    SourceScheduleConfig,
 )
 from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
 from osa.infrastructure.persistence.repository.convention import (
@@ -32,7 +32,7 @@ def _make_convention(
     title: str = "Test Convention",
     schema_srn: str = "urn:osa:localhost:schema:test-schema-001@1.0.0",
     hooks: list[HookDefinition] | None = None,
-    source: SourceDefinition | None = None,
+    ingester: IngesterDefinition | None = None,
 ) -> Convention:
     return Convention(
         srn=ConventionSRN.parse(srn),
@@ -46,7 +46,7 @@ def _make_convention(
             max_file_size=100_000_000,
         ),
         hooks=hooks or [],
-        source=source,
+        ingester=ingester,
         created_at=datetime.now(UTC),
     )
 
@@ -70,14 +70,14 @@ def _make_hook() -> HookDefinition:
     )
 
 
-def _make_source() -> SourceDefinition:
-    return SourceDefinition(
-        image="ghcr.io/example/source:latest",
+def _make_ingester() -> IngesterDefinition:
+    return IngesterDefinition(
+        image="ghcr.io/example/ingester:latest",
         digest="sha256:def456",
         runner="oci",
         config={"api_key": "test-key"},
-        limits=SourceLimits(timeout_seconds=7200, memory="8g", cpu="4.0"),
-        schedule=SourceScheduleConfig(cron="0 2 * * *", limit=500),
+        limits=IngesterLimits(timeout_seconds=7200, memory="8g", cpu="4.0"),
+        schedule=IngesterScheduleConfig(cron="0 2 * * *", limit=500),
         initial_run=InitialRunConfig(limit=100),
     )
 
@@ -88,8 +88,8 @@ class TestConventionRepoRoundTrip:
         """Save a convention and retrieve it — all fields should match."""
         repo = PostgresConventionRepository(pg_session)
         hook = _make_hook()
-        source = _make_source()
-        conv = _make_convention(hooks=[hook], source=source)
+        ingester = _make_ingester()
+        conv = _make_convention(hooks=[hook], ingester=ingester)
 
         await repo.save(conv)
         await pg_session.commit()
@@ -106,12 +106,12 @@ class TestConventionRepoRoundTrip:
         assert got.hooks[0].runtime.digest == hook.runtime.digest
         assert got.hooks[0].name == "quality_check"
         assert got.hooks[0].feature.columns[0].name == "score"
-        assert got.source is not None
-        assert got.source.image == source.image
-        assert got.source.schedule is not None
-        assert got.source.schedule.cron == "0 2 * * *"
-        assert got.source.initial_run is not None
-        assert got.source.initial_run.limit == 100
+        assert got.ingester is not None
+        assert got.ingester.image == ingester.image
+        assert got.ingester.schedule is not None
+        assert got.ingester.schedule.cron == "0 2 * * *"
+        assert got.ingester.initial_run is not None
+        assert got.ingester.initial_run.limit == 100
 
     async def test_get_nonexistent_returns_none(self, pg_session: AsyncSession):
         repo = PostgresConventionRepository(pg_session)
@@ -163,14 +163,14 @@ class TestConventionRepoRoundTrip:
         repo = PostgresConventionRepository(pg_session)
         assert await repo.exists(ConventionSRN.parse("urn:osa:localhost:conv:nope@1.0.0")) is False
 
-    async def test_convention_without_source(self, pg_session: AsyncSession):
-        """Source is optional — should be None on retrieval when not set."""
+    async def test_convention_without_ingester(self, pg_session: AsyncSession):
+        """Ingester is optional — should be None on retrieval when not set."""
         repo = PostgresConventionRepository(pg_session)
-        conv = _make_convention(source=None, hooks=[])
+        conv = _make_convention(ingester=None, hooks=[])
         await repo.save(conv)
         await pg_session.commit()
 
         got = await repo.get(conv.srn)
         assert got is not None
-        assert got.source is None
+        assert got.ingester is None
         assert got.hooks == []

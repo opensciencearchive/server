@@ -266,7 +266,7 @@ conventions_table = Table(
     Column("schema_srn", String, nullable=False),  # Reference to schemas.srn
     Column("file_requirements", JSON, nullable=False),  # FileRequirements as dict
     Column("hooks", JSON, nullable=False, default=[]),  # List of HookDefinition dicts
-    Column("source", JSON, nullable=True),  # SourceDefinition as dict
+    Column("source", JSON, nullable=True),  # IngesterDefinition as dict
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
@@ -302,6 +302,29 @@ role_assignments_table = Table(
 )
 
 Index("ix_role_assignments_user_id", role_assignments_table.c.user_id)
+
+
+# ============================================================================
+# INGEST RUNS TABLE (Ingest)
+# ============================================================================
+ingest_runs_table = Table(
+    "ingest_runs",
+    metadata,
+    Column("srn", String, primary_key=True),
+    Column("convention_srn", String, ForeignKey("conventions.srn"), nullable=False),
+    Column("status", String(32), nullable=False, server_default=text("'pending'")),
+    Column("ingestion_finished", Boolean, nullable=False, server_default=text("false")),
+    Column("batches_ingested", Integer, nullable=False, server_default=text("0")),
+    Column("batches_completed", Integer, nullable=False, server_default=text("0")),
+    Column("published_count", Integer, nullable=False, server_default=text("0")),
+    Column("batch_size", Integer, nullable=False, server_default=text("1000")),
+    Column("record_limit", Integer, nullable=True),
+    Column("started_at", DateTime(timezone=True), nullable=False),
+    Column("completed_at", DateTime(timezone=True), nullable=True),
+)
+
+Index("idx_ingest_runs_convention", ingest_runs_table.c.convention_srn)
+Index("idx_ingest_runs_status", ingest_runs_table.c.status)
 
 
 # ============================================================================

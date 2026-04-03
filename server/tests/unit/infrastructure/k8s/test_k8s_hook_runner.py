@@ -15,6 +15,7 @@ from osa.domain.shared.model.hook import (
     TableFeatureSpec,
 )
 from osa.domain.validation.model.hook_result import HookStatus
+from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.validation.port.hook_runner import HookInputs
 from osa.infrastructure.k8s.runner import K8sHookRunner
 
@@ -460,7 +461,7 @@ class TestExecutionAndCleanup:
             b'{"step":"Check","status":"completed","message":"OK"}\n'
         )
 
-        inputs = HookInputs(record_json={"srn": "test"}, run_id=_RUN_ID)
+        inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
         result = await runner._run_job(
             batch_api,
             core_api,
@@ -509,7 +510,7 @@ class TestExecutionAndCleanup:
         hook = _make_hook()
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         work_dir.mkdir(parents=True)
-        inputs = HookInputs(record_json={"srn": "test"}, run_id=_RUN_ID)
+        inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
 
         result = await runner._run_job(
             batch_api,
@@ -574,7 +575,7 @@ class TestExecutionAndCleanup:
         hook = _make_hook()
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         work_dir.mkdir(parents=True)
-        inputs = HookInputs(record_json={"srn": "test"}, run_id=_RUN_ID)
+        inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
 
         result = await runner._run_job(
             batch_api,
@@ -584,7 +585,7 @@ class TestExecutionAndCleanup:
             work_dir,
         )
 
-        assert result.status == HookStatus.FAILED
+        assert result.status == HookStatus.OOM
         assert "oom" in result.error_message.lower()
 
     @pytest.mark.asyncio
@@ -633,7 +634,7 @@ class TestExecutionAndCleanup:
         hook = _make_hook()
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         work_dir.mkdir(parents=True)
-        inputs = HookInputs(record_json={"srn": "test"}, run_id=_RUN_ID)
+        inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
 
         result = await runner._run_job(
             batch_api,
@@ -687,7 +688,7 @@ class TestExecutionAndCleanup:
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         output_dir = work_dir / "output"
         output_dir.mkdir(parents=True)
-        inputs = HookInputs(record_json={"srn": "test"}, run_id=_RUN_ID)
+        inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
 
         result = await runner._run_job(
             batch_api,
@@ -723,7 +724,7 @@ class TestExecutionAndCleanup:
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         output_dir = work_dir / "output"
         output_dir.mkdir(parents=True)
-        inputs = HookInputs(record_json={"srn": "test"}, run_id=_RUN_ID)
+        inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
 
         result = await runner._run_job(
             batch_api,
@@ -778,7 +779,7 @@ class TestExecutionAndCleanup:
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         output_dir = work_dir / "output"
         output_dir.mkdir(parents=True)
-        inputs = HookInputs(record_json={"srn": "test"}, run_id=_RUN_ID)
+        inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
 
         result = await runner._run_job(
             batch_api,
@@ -843,7 +844,7 @@ class TestExecutionAndCleanup:
         runner._s3.get_object.return_value = (
             b'{"step":"Validate","status":"rejected","message":"Missing atoms"}\n'
         )
-        inputs = HookInputs(record_json={"srn": "test"}, run_id=_RUN_ID)
+        inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
 
         result = await runner._run_job(
             batch_api,
@@ -904,7 +905,7 @@ class TestRunIdFromInputs:
 
         hook = _make_hook()
         inputs = HookInputs(
-            record_json={"srn": "test"},
+            records=[HookRecord(id="test", metadata={})],
             run_id="my-real-run-id",
         )
 

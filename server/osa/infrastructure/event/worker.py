@@ -4,7 +4,10 @@ import asyncio
 import logging
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
-from typing import Any, NewType
+from typing import TYPE_CHECKING, Any, NewType
+
+if TYPE_CHECKING:
+    from osa.config import Config
 
 from apscheduler import AsyncScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -45,8 +48,10 @@ class Worker:
     enabling multiple handlers to independently process the same event.
     """
 
-    def __init__(self, handler_type: type[EventHandler[Any]]) -> None:
+    def __init__(self, handler_type: type[EventHandler[Any]], *, instance_id: int = 0) -> None:
         self._handler_type = handler_type
+        self._instance_id = instance_id
+        # All instances share the same consumer group so SKIP LOCKED distributes work
         self._consumer_group = handler_type.__name__
 
         # Read config from handler classvars
@@ -73,8 +78,10 @@ class Worker:
 
     @property
     def name(self) -> str:
-        """Worker name (handler class name)."""
-        return self._handler_type.__name__
+        """Worker name (handler class name + instance suffix if concurrent)."""
+        if self._instance_id == 0:
+            return self._handler_type.__name__
+        return f"{self._handler_type.__name__}-{self._instance_id}"
 
     @property
     def consumer_group(self) -> str:
@@ -105,9 +112,11 @@ class Worker:
         if self._container is None:
             raise RuntimeError("Container not set. Call set_container() first.")
 
+        import logfire
+
         self._shutdown = False
         self._task = asyncio.create_task(self._run(), name=f"worker-{self.name}")
-        logger.info(f"Worker '{self.name}' started")
+        logfire.info("worker started: {worker_name}", worker_name=self.name)
         return self._task
 
     def stop(self) -> None:
@@ -236,14 +245,45 @@ class WorkerPool:
         """List of managed workers."""
         return self._workers
 
-    def register(self, handler_type: type[EventHandler[Any]]) -> Worker:
-        """Register an EventHandler type and create a Worker for it."""
-        worker = Worker(handler_type)
-        if self._container is not None:
-            worker.set_container(self._container)
-        self._workers.append(worker)
-        logger.debug(f"Registered handler '{handler_type.__name__}' as worker")
-        return worker
+    def register(
+        self,
+        handler_type: type[EventHandler[Any]],
+        config: "Config | None" = None,
+    ) -> Worker:
+        """Register an EventHandler type and create Worker(s) for it.
+
+        Concurrency is determined by (in priority order):
+        1. Config override (e.g. ``config.worker.hook_concurrency`` for RunHooks)
+        2. Handler classvar ``__concurrency__``
+        3. Default of 1
+
+        Multiple workers share the same consumer group so deliveries are
+        distributed across them via FOR UPDATE SKIP LOCKED.
+        """
+        concurrency = getattr(handler_type, "__concurrency__", 1)
+
+        # Apply config overrides
+        if config is not None:
+            from osa.domain.ingest.handler.run_hooks import RunHooks
+
+            if handler_type is RunHooks:
+                concurrency = config.worker.hook_concurrency
+
+        first_worker = None
+        for i in range(concurrency):
+            worker = Worker(handler_type, instance_id=i)
+            if self._container is not None:
+                worker.set_container(self._container)
+            self._workers.append(worker)
+            if first_worker is None:
+                first_worker = worker
+        if concurrency > 1:
+            logger.debug(
+                f"Registered handler '{handler_type.__name__}' with {concurrency} concurrent workers"
+            )
+        else:
+            logger.debug(f"Registered handler '{handler_type.__name__}' as worker")
+        return first_worker  # type: ignore[return-value]
 
     def add_worker(self, worker: Worker) -> None:
         """Add a worker to the pool."""
@@ -311,36 +351,7 @@ class WorkerPool:
 
     async def _build_schedules_from_conventions(self) -> list[ScheduleConfig]:
         """Query conventions with sources and build schedule configs."""
-        if self._container is None:
-            return []
-
-        from osa.domain.deposition.service.convention import ConventionService
-        from osa.domain.source.schedule import SourceSchedule as SourceScheduleType
-
-        configs: list[ScheduleConfig] = []
-        try:
-            async with self._container(scope=Scope.UOW, context={Identity: System()}) as scope:
-                convention_service = await scope.get(ConventionService)
-                conventions = await convention_service.list_conventions_with_source()
-
-                for conv in conventions:
-                    if conv.source is None or conv.source.schedule is None:
-                        continue
-                    configs.append(
-                        ScheduleConfig(
-                            schedule_type=SourceScheduleType,
-                            cron=conv.source.schedule.cron,
-                            id=f"source-{conv.srn}",
-                            params={
-                                "convention": str(conv.srn),
-                                "limit": conv.source.schedule.limit,
-                            },
-                        )
-                    )
-        except Exception as e:
-            logger.warning(f"Failed to build schedules from conventions: {e}")
-
-        return configs
+        return []
 
     async def stop(self, timeout: float = 30.0) -> None:
         """Stop all workers gracefully."""

@@ -71,7 +71,9 @@ class K8sHookRunner(HookRunner):
 
         # Write input files to S3 (container reads them via PVC/S3 CSI)
         input_prefix = self._s3_prefix(work_dir, "input")
-        await self._s3.put_object(f"{input_prefix}/record.json", json.dumps(inputs.record_json))
+        # Write records.jsonl (unified batch contract)
+        records_jsonl = "\n".join(json.dumps(r.model_dump()) for r in inputs.records) + "\n"
+        await self._s3.put_object(f"{input_prefix}/records.jsonl", records_jsonl)
         if inputs.config or hook.runtime.config:
             config = {**hook.runtime.config, **(inputs.config or {})}
             await self._s3.put_object(f"{input_prefix}/config.json", json.dumps(config))
@@ -113,11 +115,17 @@ class K8sHookRunner(HookRunner):
                 job_name_to_watch = existing.split(":", 1)[1]
             else:
                 # Create new Job (no existing or failed)
+                # Mount the parent of all per-record file dirs — works for
+                # both depositions (one subdir) and ingests (N subdirs)
+                files_dir = None
+                if inputs.files_dirs:
+                    first_dir = next(iter(inputs.files_dirs.values()))
+                    files_dir = first_dir.parent
                 spec = self._build_job_spec(
                     hook,
                     work_dir,
                     run_id=inputs.run_id,
-                    files_dir=inputs.files_dir,
+                    files_dir=files_dir,
                 )
                 job_name_to_watch = spec.metadata.name
 
@@ -262,6 +270,7 @@ class K8sHookRunner(HookRunner):
             V1VolumeMount(name="tmp", mount_path="/tmp"),
         ]
 
+        # Mount per-record file directories (ingest: multiple, deposition: one)
         if files_dir:
             relative_files = self._relative_path(files_dir)
             mounts.append(
@@ -468,7 +477,7 @@ class K8sHookRunner(HookRunner):
                             if getattr(terminated, "reason", None) == "OOMKilled":
                                 return HookResult(
                                     hook_name=hook.name,
-                                    status=HookStatus.FAILED,
+                                    status=HookStatus.OOM,
                                     error_message="Hook killed by OOM",
                                     duration_seconds=duration,
                                 )

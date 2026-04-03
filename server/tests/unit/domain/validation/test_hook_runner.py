@@ -6,55 +6,57 @@ import pytest
 
 from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
+from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 
 
 class TestHookInputs:
     def test_minimal_construction(self):
         inputs = HookInputs(
-            record_json={"srn": "urn:osa:localhost:rec:123"},
+            records=[HookRecord(id="rec1", metadata={})],
             run_id="localhost_test123",
         )
-        assert inputs.record_json == {"srn": "urn:osa:localhost:rec:123"}
-        assert inputs.files_dir is None
+        assert inputs.records == [HookRecord(id="rec1", metadata={})]
+        assert inputs.files_dirs == {}
         assert inputs.config is None
 
-    def test_with_files_dir(self):
-        files = Path("/tmp/files")
+    def test_with_files_dirs(self):
         inputs = HookInputs(
-            record_json={"srn": "test"},
+            records=[HookRecord(id="rec1", metadata={})],
             run_id="localhost_test123",
-            files_dir=files,
+            files_dirs={"rec1": Path("/tmp/files")},
         )
-        assert inputs.files_dir == files
+        assert inputs.files_dirs == {"rec1": Path("/tmp/files")}
 
     def test_with_config(self):
         inputs = HookInputs(
-            record_json={"srn": "test"},
+            records=[HookRecord(id="rec1", metadata={})],
             run_id="localhost_test123",
             config={"r_min": 3.0, "threshold": 0.5},
         )
         assert inputs.config == {"r_min": 3.0, "threshold": 0.5}
 
     def test_full_construction(self):
-        files = Path("/tmp/data/files")
         inputs = HookInputs(
-            record_json={"srn": "urn:osa:localhost:rec:456", "name": "test"},
+            records=[
+                HookRecord(id="rec1", metadata={"name": "test"}),
+                HookRecord(id="rec2", metadata={"name": "test2"}),
+            ],
             run_id="localhost_test456",
-            files_dir=files,
+            files_dirs={"rec1": Path("/tmp/data/files/rec1")},
             config={"key": "value"},
         )
-        assert inputs.record_json["name"] == "test"
-        assert inputs.files_dir == files
+        assert len(inputs.records) == 2
+        assert inputs.records[0].metadata["name"] == "test"
         assert inputs.config == {"key": "value"}
 
     def test_is_frozen(self):
         inputs = HookInputs(
-            record_json={"srn": "test"},
+            records=[HookRecord(id="rec1", metadata={})],
             run_id="localhost_test123",
         )
         with pytest.raises(AttributeError):
-            inputs.record_json = {}  # type: ignore[misc]
+            inputs.records = []  # type: ignore[misc]
 
     def test_is_dataclass(self):
         """HookInputs is a frozen dataclass."""

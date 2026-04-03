@@ -13,6 +13,11 @@ class RecordRepository(Port, Protocol):
     async def save(self, record: Record) -> None: ...
 
     @abstractmethod
+    async def save_many(self, records: list[Record]) -> list[Record]:
+        """Multi-row INSERT with ON CONFLICT DO NOTHING. Returns inserted records."""
+        ...
+
+    @abstractmethod
     async def get(self, srn: RecordSRN) -> Record | None: ...
 
     @abstractmethod

@@ -5,17 +5,21 @@ from typing import Any, NewType
 
 from dishka import AsyncContainer, provide
 
+from osa.config import Config
 from osa.domain.curation.handler import AutoApproveCuration
-from osa.domain.deposition.handler import CreateDepositionFromSource, ReturnToDraft
-from osa.domain.feature.handler import CreateFeatureTables, InsertRecordFeatures
+from osa.domain.deposition.handler import ReturnToDraft
+from osa.domain.feature.handler import (
+    CreateFeatureTables,
+    InsertBatchFeatures,
+    InsertRecordFeatures,
+)
+from osa.domain.ingest.handler import PublishBatch, RunHooks, RunIngester
 from osa.domain.record.handler import ConvertDepositionToRecord
 from osa.domain.shared.event import EventHandler
 from osa.domain.shared.event_log import EventLog
 from osa.domain.shared.model.subscription_registry import SubscriptionRegistry
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.event_repository import EventRepository
-from osa.domain.source.handler import PullFromSource, TriggerInitialSourceRun
-from osa.domain.source.schedule import SourceSchedule
 from osa.domain.validation.handler import ValidateDeposition
 from osa.infrastructure.event.worker import WorkerPool
 from osa.util.di.base import Provider
@@ -32,13 +36,14 @@ _CORE_HANDLERS: list[type[EventHandler[Any]]] = [
     # Feature handlers (must run before source triggers)
     CreateFeatureTables,
     InsertRecordFeatures,
-    # Source handlers
-    TriggerInitialSourceRun,
-    PullFromSource,
+    InsertBatchFeatures,
+    # Ingest handlers
+    RunIngester,
+    RunHooks,
+    PublishBatch,
     # Validation handlers
     ValidateDeposition,
     # Deposition handlers
-    CreateDepositionFromSource,
     ReturnToDraft,
     # Curation handlers
     AutoApproveCuration,
@@ -107,9 +112,6 @@ class EventProvider(Provider):
     def get_event_log(self, repo: EventRepository) -> EventLog:
         return EventLog(repo)
 
-    # UOW-scoped provider for SourceSchedule
-    source_schedule = provide(SourceSchedule, scope=Scope.UOW)
-
     @provide(scope=Scope.APP)
     def get_handler_types(self) -> HandlerTypes:
         """Return all handler types (core + extra) for WorkerPool registration."""
@@ -130,12 +132,13 @@ class EventProvider(Provider):
         self,
         container: AsyncContainer,
         handler_types: HandlerTypes,
+        config: Config,
     ) -> WorkerPool:
         """WorkerPool with pull-based event handlers."""
         pool = WorkerPool(container=container, stale_claim_interval=60.0)
 
         for handler_type in handler_types:
-            pool.register(handler_type)
+            pool.register(handler_type, config=config)
 
         logger.info(f"WorkerPool created with {len(pool.workers)} workers")
         return pool

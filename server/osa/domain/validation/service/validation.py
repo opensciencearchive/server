@@ -18,10 +18,12 @@ from osa.domain.validation.model import (
     RunStatus,
     ValidationRun,
 )
+from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.domain.validation.port.repository import ValidationRunRepository
 from osa.domain.validation.port.storage import HookStoragePort
+from osa.domain.validation.service.hook import HookService
 
 logger = logging.getLogger(__name__)
 
@@ -63,24 +65,30 @@ class ValidationService(Service):
         inputs: HookInputs,
         hooks: list[HookDefinition],
     ) -> tuple[ValidationRun, list[HookResult]]:
-        """Execute hooks sequentially. Halt on reject/fail.
+        """Execute hooks sequentially with OOM retry. Halt on reject/fail/OOM.
 
         Hook outputs are written to durable cold storage under the deposition directory.
         Feature insertion is deferred to record publication time.
+        Each hook is executed via HookService which handles OOM retry with memory doubling.
         """
         run.status = RunStatus.RUNNING
         run.started_at = datetime.now(timezone.utc)
         await self.run_repo.save(run)
+
+        hook_service = HookService(
+            hook_runner=self.hook_runner,
+            hook_storage=self.hook_storage,
+        )
 
         hook_results: list[HookResult] = []
         overall_status: RunStatus = RunStatus.COMPLETED
 
         for hook in hooks:
             work_dir = self.hook_storage.get_hook_output_dir(deposition_srn, hook.name)
-            result = await self.hook_runner.run(hook, inputs, work_dir)
+            result = await hook_service.run_hook(hook, inputs, work_dir)
             hook_results.append(result)
 
-            if result.status == HookStatus.FAILED:
+            if result.status in (HookStatus.FAILED, HookStatus.OOM):
                 overall_status = RunStatus.FAILED
                 break
             if result.status == HookStatus.REJECTED:
@@ -101,14 +109,19 @@ class ValidationService(Service):
         metadata: dict[str, Any],
         hooks: list[HookDefinition],
     ) -> tuple[ValidationRun, list[HookResult]]:
-        """Full validation workflow using enriched event data."""
-        record_json = {"srn": str(deposition_srn), "metadata": metadata}
-        run_id = f"{deposition_srn.domain.root}_{deposition_srn.id.root}"
+        """Full validation workflow using enriched event data.
+
+        Uses the unified batch contract: constructs a 1-record batch for depositions.
+        """
+        local_id = deposition_srn.id.root
+        record = HookRecord(id=local_id, metadata=metadata)
+        run_id = f"{deposition_srn.domain.root}_{local_id}"
         files_dir = self.hook_storage.get_files_dir(deposition_srn)
+
         inputs = HookInputs(
-            record_json=record_json,
+            records=[record],
             run_id=run_id,
-            files_dir=files_dir,
+            files_dirs={local_id: files_dir} if files_dir else {},
         )
 
         run = await self.create_run(inputs=inputs)

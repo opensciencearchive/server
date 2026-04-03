@@ -24,6 +24,7 @@ def config_from_yaml(data: dict, env_overrides: dict[str, str] | None = None) ->
     raw = make_config_yaml(data)
     env = {
         "OSA_AUTH__JWT__SECRET": "test-secret-key-that-is-at-least-32-chars-long",
+        "OSA_BASE_URL": "http://localhost:8000",
         **(env_overrides or {}),
     }
 

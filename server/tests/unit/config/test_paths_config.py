@@ -7,6 +7,13 @@ import pytest
 from osa.config import Config
 
 
+@pytest.fixture(autouse=True)
+def _config_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure required config env vars are set for all tests."""
+    monkeypatch.setenv("OSA_AUTH__JWT__SECRET", "test-secret-key-that-is-at-least-32-chars-long")
+    monkeypatch.setenv("OSA_BASE_URL", "http://localhost:8000")
+
+
 class TestDatabaseUrlDerivation:
     """Tests for database URL derivation from OSAPaths."""
 

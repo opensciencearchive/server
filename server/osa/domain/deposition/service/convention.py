@@ -10,7 +10,7 @@ from osa.domain.semantics.service.schema import SchemaService
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.hook import HookDefinition
-from osa.domain.shared.model.source import SourceDefinition
+from osa.domain.shared.model.source import IngesterDefinition
 from osa.domain.shared.model.srn import ConventionSRN, Domain, LocalId, Semver
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
@@ -30,7 +30,7 @@ class ConventionService(Service):
         file_requirements: FileRequirements,
         description: str | None = None,
         hooks: list[HookDefinition] | None = None,
-        source: SourceDefinition | None = None,
+        ingester: IngesterDefinition | None = None,
     ) -> Convention:
         """Create a convention with an inline schema.
 
@@ -59,7 +59,7 @@ class ConventionService(Service):
             schema_srn=created_schema.srn,
             file_requirements=file_requirements,
             hooks=hooks or [],
-            source=source,
+            ingester=ingester,
             created_at=datetime.now(UTC),
         )
 

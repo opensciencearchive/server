@@ -92,7 +92,7 @@ def test_oci_limits_defaults():
 
     limits = OciLimits()
     assert limits.timeout_seconds == 300
-    assert limits.memory == "512m"
+    assert limits.memory == "1g"
     assert limits.cpu == "0.5"
 
 
@@ -176,7 +176,7 @@ def test_hook_definition_default_limits():
         feature=TableFeatureSpec(cardinality="one", columns=[]),
     )
     assert hook_def.runtime.limits.timeout_seconds == 300
-    assert hook_def.runtime.limits.memory == "512m"
+    assert hook_def.runtime.limits.memory == "1g"
 
 
 def test_hook_definition_serialization_roundtrip():
@@ -209,6 +209,60 @@ def test_hook_definition_serialization_roundtrip():
     restored = HookDefinition.model_validate(data)
     assert restored == hook_def
     assert restored.feature.columns[1].required is False
+
+
+class TestMemoryDoubling:
+    """Tests for HookDefinition.with_memory() and with_doubled_memory()."""
+
+    def _make_hook(self, memory: str = "1g"):
+        from osa.domain.shared.model.hook import (
+            HookDefinition,
+            OciConfig,
+            OciLimits,
+            TableFeatureSpec,
+        )
+
+        return HookDefinition(
+            name="detect_pockets",
+            runtime=OciConfig(
+                image="img:v1",
+                digest="sha256:abc",
+                limits=OciLimits(memory=memory),
+            ),
+            feature=TableFeatureSpec(cardinality="one", columns=[]),
+        )
+
+    def test_hook_definition_with_memory(self):
+        hook = self._make_hook("1g")
+        updated = hook.with_memory("2g")
+        assert updated.runtime.limits.memory == "2g"
+        # original unchanged (frozen)
+        assert hook.runtime.limits.memory == "1g"
+
+    def test_hook_definition_with_doubled_memory_1g(self):
+        hook = self._make_hook("1g")
+        doubled = hook.with_doubled_memory()
+        assert doubled.runtime.limits.memory == "2g"
+
+    def test_hook_definition_with_doubled_memory_512m(self):
+        hook = self._make_hook("512m")
+        doubled = hook.with_doubled_memory()
+        assert doubled.runtime.limits.memory == "1g"
+
+    def test_hook_definition_with_doubled_memory_768m(self):
+        hook = self._make_hook("768m")
+        doubled = hook.with_doubled_memory()
+        assert doubled.runtime.limits.memory == "1536m"
+
+    def test_hook_definition_with_doubled_memory_preserves_other_fields(self):
+        hook = self._make_hook("1g")
+        doubled = hook.with_doubled_memory()
+        assert doubled.name == hook.name
+        assert doubled.runtime.image == hook.runtime.image
+        assert doubled.runtime.digest == hook.runtime.digest
+        assert doubled.runtime.limits.timeout_seconds == hook.runtime.limits.timeout_seconds
+        assert doubled.runtime.limits.cpu == hook.runtime.limits.cpu
+        assert doubled.feature == hook.feature
 
 
 class TestNameValidation:

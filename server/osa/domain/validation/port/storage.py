@@ -6,6 +6,7 @@ from typing import Protocol
 
 from osa.domain.shared.model.srn import DepositionSRN
 from osa.domain.shared.port import Port
+from osa.domain.validation.model.batch_outcome import BatchRecordOutcome, HookRecordId
 
 
 class HookStoragePort(Port, Protocol):
@@ -19,4 +20,27 @@ class HookStoragePort(Port, Protocol):
     @abstractmethod
     def get_files_dir(self, deposition_id: DepositionSRN) -> Path:
         """Return the directory containing data files for a deposition."""
+        ...
+
+    @abstractmethod
+    def write_checkpoint(
+        self, work_dir: Path, outcomes: dict[HookRecordId, BatchRecordOutcome]
+    ) -> None:
+        """Atomically write checkpoint JSONL to work_dir/_checkpoint.jsonl."""
+        ...
+
+    @abstractmethod
+    def write_batch_outcomes(
+        self,
+        work_dir: Path,
+        outcomes: dict[HookRecordId, BatchRecordOutcome],
+    ) -> None:
+        """Write canonical features.jsonl, rejections.jsonl, errors.jsonl."""
+        ...
+
+    @abstractmethod
+    async def read_batch_outcomes(
+        self, output_dir: str, hook_name: str
+    ) -> dict[HookRecordId, BatchRecordOutcome]:
+        """Read JSONL batch outputs (features/rejections/errors) for a hook."""
         ...

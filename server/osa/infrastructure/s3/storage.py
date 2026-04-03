@@ -16,6 +16,11 @@ from osa.domain.deposition.model.value import DepositionFile
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.error import InfrastructureError, NotFoundError
 from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+from osa.domain.validation.model.batch_outcome import (
+    BatchRecordOutcome,
+    HookRecordId,
+    OutcomeStatus,
+)
 from osa.infrastructure.runner_utils import relative_path
 from osa.infrastructure.s3.client import S3Client
 
@@ -25,7 +30,7 @@ logger = logging.getLogger(__name__)
 class S3StorageAdapter(FileStoragePort):
     """S3-backed adapter satisfying all domain storage ports.
 
-    Implements FileStoragePort, SourceStoragePort, HookStoragePort,
+    Implements FileStoragePort, HookStoragePort,
     and FeatureStoragePort via structural subtyping — same as
     FilesystemStorageAdapter but using S3 API instead of POSIX calls.
 
@@ -115,7 +120,7 @@ class S3StorageAdapter(FileStoragePort):
         prefix = f"{self._dep_prefix(deposition_id)}/"
         await self._s3.delete_objects(prefix)
 
-    # ── SourceStoragePort ────────────────────────────────────────────
+    # ── Ingester storage ──────────────────────────────────────────────
 
     def get_source_staging_dir(self, convention_srn: ConventionSRN, run_id: str) -> Path:
         """Return path for PVC subpath computation (no I/O)."""
@@ -143,7 +148,7 @@ class S3StorageAdapter(FileStoragePort):
         source_id: str,
         deposition_srn: DepositionSRN,
     ) -> None:
-        """S3 server-side copy from source staging to deposition files prefix."""
+        """S3 server-side copy from ingester staging to deposition files prefix."""
         source_prefix = f"{relative_path(staging_dir, self._data_mount_path)}/{source_id}/"
 
         dest_prefix = self._files_prefix(deposition_srn)
@@ -178,6 +183,8 @@ class S3StorageAdapter(FileStoragePort):
             srn = DepositionSRN.parse(source_id)
             safe_id = self._safe_id(srn)
             return f"{self._data_mount_path}/depositions/{safe_id}"
+        if source_type == "ingest":
+            return f"{self._data_mount_path}/ingests/{source_id}"
         raise ValueError(f"Unknown source type: {source_type}")
 
     async def read_hook_features(
@@ -200,3 +207,49 @@ class S3StorageAdapter(FileStoragePort):
         prefix = relative_path(Path(hook_output_dir), self._data_mount_path)
         key = f"{prefix}/hooks/{feature_name}/output/features.json"
         return await self._s3.head_object(key)
+
+    async def read_batch_outcomes(
+        self, output_dir: str, hook_name: str
+    ) -> dict[HookRecordId, BatchRecordOutcome]:
+        """Read JSONL batch outputs from S3."""
+        prefix = relative_path(Path(output_dir), self._data_mount_path)
+        hook_prefix = f"{prefix}/hooks/{hook_name}/output"
+        outcomes: dict[HookRecordId, BatchRecordOutcome] = {}
+
+        file_status_map: list[tuple[str, OutcomeStatus, dict[str, str]]] = [
+            ("features.jsonl", OutcomeStatus.PASSED, {"features": "features"}),
+            ("rejections.jsonl", OutcomeStatus.REJECTED, {"reason": "reason"}),
+            ("errors.jsonl", OutcomeStatus.ERRORED, {"error": "error", "retryable": "retryable"}),
+        ]
+
+        for filename, status, field_map in file_status_map:
+            key = f"{hook_prefix}/{filename}"
+            try:
+                data_bytes = await self._s3.get_object(key)
+            except Exception:
+                continue
+
+            for line in data_bytes.decode().split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.warning("Skipping malformed JSON line in %s", filename)
+                    continue
+                raw_id = data.get("id")
+                if not raw_id:
+                    logger.warning("Skipping JSONL line without 'id' in %s", filename)
+                    continue
+                record_id = HookRecordId(raw_id)
+                kwargs: dict[str, Any] = {
+                    "record_id": record_id,
+                    "status": status,
+                }
+                for src, dst in field_map.items():
+                    if src in data:
+                        kwargs[dst] = data[src]
+                outcomes[record_id] = BatchRecordOutcome(**kwargs)
+
+        return outcomes

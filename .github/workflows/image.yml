@@ -35,6 +35,9 @@ jobs:
           if [[ "${{ github.event_name }}" == "release" ]]; then
             TAGS="${TAGS},${{ env.IMAGE }}:${{ github.event.release.tag_name }}"
           fi
+          if [[ -n "${{ github.event.pull_request.number }}" ]]; then
+            TAGS="${TAGS},${{ env.IMAGE }}:pr-${{ github.event.pull_request.number }}"
+          fi
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/build-push-action@v6
