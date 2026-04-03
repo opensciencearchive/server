@@ -585,7 +585,7 @@ class TestExecutionAndCleanup:
             work_dir,
         )
 
-        assert result.status == HookStatus.FAILED
+        assert result.status == HookStatus.OOM
         assert "oom" in result.error_message.lower()
 
     @pytest.mark.asyncio

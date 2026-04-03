@@ -196,3 +196,56 @@ class TestValidationServiceRunHooks:
 
         assert call_order == ["hook_a", "hook_b"]
         assert len(results) == 2
+
+    @pytest.mark.asyncio
+    async def test_validation_service_halts_on_oom(self):
+        """REGRESSION: OOM with exhausted retries should halt pipeline as FAILED."""
+        hook_runner = AsyncMock()
+        hook_runner.run.return_value = _make_hook_result(status=HookStatus.OOM)
+        service = _make_service(hook_runner=hook_runner)
+        run = await service.create_run(inputs=_make_inputs())
+
+        run, results = await service.run_hooks(
+            run=run,
+            deposition_srn=_make_dep_srn(),
+            inputs=_make_inputs(),
+            hooks=[_make_hook_definition()],
+        )
+
+        assert run.status == RunStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_validation_service_retries_on_oom(self):
+        """OOM should be retried via HookService; PASSED on retry → COMPLETED."""
+        call_count = 0
+
+        async def run_hook(hook, inputs, output_dir):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return HookResult(
+                    hook_name=hook.name,
+                    status=HookStatus.OOM,
+                    error_message="OOM",
+                    duration_seconds=30.0,
+                )
+            return HookResult(
+                hook_name=hook.name,
+                status=HookStatus.PASSED,
+                duration_seconds=5.0,
+            )
+
+        hook_runner = AsyncMock()
+        hook_runner.run.side_effect = run_hook
+        service = _make_service(hook_runner=hook_runner)
+        run = await service.create_run(inputs=_make_inputs())
+
+        run, results = await service.run_hooks(
+            run=run,
+            deposition_srn=_make_dep_srn(),
+            inputs=_make_inputs(),
+            hooks=[_make_hook_definition()],
+        )
+
+        assert run.status == RunStatus.COMPLETED
+        assert call_count == 2

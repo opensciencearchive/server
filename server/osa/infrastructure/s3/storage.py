@@ -16,7 +16,11 @@ from osa.domain.deposition.model.value import DepositionFile
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.error import InfrastructureError, NotFoundError
 from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
-from osa.domain.validation.model.batch_outcome import BatchRecordOutcome
+from osa.domain.validation.model.batch_outcome import (
+    BatchRecordOutcome,
+    HookRecordId,
+    OutcomeStatus,
+)
 from osa.infrastructure.runner_utils import relative_path
 from osa.infrastructure.s3.client import S3Client
 
@@ -206,17 +210,19 @@ class S3StorageAdapter(FileStoragePort):
 
     async def read_batch_outcomes(
         self, output_dir: str, hook_name: str
-    ) -> dict[str, BatchRecordOutcome]:
+    ) -> dict[HookRecordId, BatchRecordOutcome]:
         """Read JSONL batch outputs from S3."""
         prefix = relative_path(Path(output_dir), self._data_mount_path)
         hook_prefix = f"{prefix}/hooks/{hook_name}/output"
-        outcomes: dict[str, BatchRecordOutcome] = {}
+        outcomes: dict[HookRecordId, BatchRecordOutcome] = {}
 
-        for filename, status_key, field_map in [
-            ("features.jsonl", "passed", {"features": "features"}),
-            ("rejections.jsonl", "rejected", {"reason": "reason"}),
-            ("errors.jsonl", "errored", {"error": "error", "retryable": "retryable"}),
-        ]:
+        file_status_map: list[tuple[str, OutcomeStatus, dict[str, str]]] = [
+            ("features.jsonl", OutcomeStatus.PASSED, {"features": "features"}),
+            ("rejections.jsonl", OutcomeStatus.REJECTED, {"reason": "reason"}),
+            ("errors.jsonl", OutcomeStatus.ERRORED, {"error": "error", "retryable": "retryable"}),
+        ]
+
+        for filename, status, field_map in file_status_map:
             key = f"{hook_prefix}/{filename}"
             try:
                 data_bytes = await self._s3.get_object(key)
@@ -232,13 +238,14 @@ class S3StorageAdapter(FileStoragePort):
                 except json.JSONDecodeError:
                     logger.warning("Skipping malformed JSON line in %s", filename)
                     continue
-                record_id = data.get("id")
-                if not record_id:
+                raw_id = data.get("id")
+                if not raw_id:
                     logger.warning("Skipping JSONL line without 'id' in %s", filename)
                     continue
+                record_id = HookRecordId(raw_id)
                 kwargs: dict[str, Any] = {
                     "record_id": record_id,
-                    "status": status_key,
+                    "status": status,
                 }
                 for src, dst in field_map.items():
                     if src in data:

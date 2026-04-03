@@ -50,7 +50,7 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
         ingester_dir = self.layout.ingest_batch_ingester_dir(
             event.ingest_run_srn, event.batch_index
         )
-        ingester_records = _read_ingester_records(ingester_dir)
+        ingester_records = IngesterRecord.from_jsonl(ingester_dir / "records.jsonl")
 
         # Read hook outcomes for all hooks
         expected_features = [h.name for h in convention.hooks]
@@ -68,9 +68,11 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
         total = len(ingester_records)
         for hook_name in expected_features:
             outcomes = await self.feature_storage.read_batch_outcomes(str(batch_dir), hook_name)
-            passed = sum(1 for o in outcomes.values() if o.status == "passed")
-            rejected = sum(1 for o in outcomes.values() if o.status == "rejected")
-            errored = sum(1 for o in outcomes.values() if o.status == "errored")
+            from osa.domain.validation.model.batch_outcome import OutcomeStatus
+
+            passed = sum(1 for o in outcomes.values() if o.status == OutcomeStatus.PASSED)
+            rejected = sum(1 for o in outcomes.values() if o.status == OutcomeStatus.REJECTED)
+            errored = sum(1 for o in outcomes.values() if o.status == OutcomeStatus.ERRORED)
             missing = total - len(outcomes)
             short_id = event.ingest_run_srn.rsplit(":", 1)[-1][:8]
             log.info(
@@ -174,33 +176,6 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
             )
 
 
-def _read_ingester_records(ingester_dir) -> list[IngesterRecord]:
-    """Read ingester records from JSONL file into typed objects."""
-    import json
-    from pathlib import Path
-
-    records_file = Path(ingester_dir) / "records.jsonl"
-    records: list[IngesterRecord] = []
-    if not records_file.exists():
-        return records
-    for line in records_file.open():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-            records.append(
-                IngesterRecord(
-                    source_id=data.get("source_id", data.get("id", "")),
-                    metadata=data.get("metadata", {}),
-                    file_paths=data.get("file_paths", []),
-                )
-            )
-        except (json.JSONDecodeError, ValueError):
-            log.warn("Skipping malformed ingester record line")
-    return records
-
-
 async def _get_passed_records(
     ingester_records: list[IngesterRecord],
     batch_dir: str,
@@ -217,7 +192,9 @@ async def _get_passed_records(
         outcomes = await feature_storage.read_batch_outcomes(batch_dir, hook_name)
         if not outcomes:
             return []
-        hook_passed = {rid for rid, o in outcomes.items() if o.status == "passed"}
+        from osa.domain.validation.model.batch_outcome import OutcomeStatus
+
+        hook_passed = {rid for rid, o in outcomes.items() if o.status == OutcomeStatus.PASSED}
 
         if passed_ids is None:
             passed_ids = hook_passed

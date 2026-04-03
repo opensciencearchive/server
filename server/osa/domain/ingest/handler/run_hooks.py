@@ -1,6 +1,5 @@
 """RunHooks — runs hook containers on an ingester batch."""
 
-import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,7 +12,8 @@ from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.outbox import Outbox
 from osa.domain.validation.model.hook_input import HookRecord
-from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
+from osa.domain.validation.port.hook_runner import HookInputs
+from osa.domain.validation.service.hook import HookService
 from osa.infrastructure.logging import get_logger
 from osa.infrastructure.storage.layout import StorageLayout
 
@@ -27,7 +27,7 @@ class RunHooks(EventHandler[IngesterBatchReady]):
 
     ingest_repo: IngestRunRepository
     convention_service: ConventionService
-    hook_runner: HookRunner
+    hook_service: HookService
     outbox: Outbox
     layout: StorageLayout
 
@@ -44,9 +44,7 @@ class RunHooks(EventHandler[IngesterBatchReady]):
         ingester_dir = self.layout.ingest_batch_ingester_dir(
             event.ingest_run_srn, event.batch_index
         )
-        records_file = ingester_dir / "records.jsonl"
-
-        records = _read_ingester_records(records_file)
+        records = IngesterRecord.from_jsonl(ingester_dir / "records.jsonl")
 
         if not records:
             log.warn(
@@ -64,28 +62,43 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                 if record_files.exists():
                     files_dirs[record.source_id] = record_files
 
-        # Run each hook sequentially
+        # Convert to HookInputs with size hints and file dirs
+        inputs = HookInputs(
+            records=[
+                HookRecord(
+                    id=r.source_id,
+                    metadata=r.metadata,
+                    size_hint_mb=r.total_file_mb,
+                )
+                for r in records
+            ],
+            run_id=f"{event.ingest_run_srn}_batch{event.batch_index}",
+            files_dirs=files_dirs,
+        )
+
+        # Build work_dirs for each hook
+        work_dirs: dict[str, Path] = {}
         for hook in convention.hooks:
-            hook_output_dir = self.layout.ingest_batch_hook_dir(
+            hook_dir = self.layout.ingest_batch_hook_dir(
                 event.ingest_run_srn, event.batch_index, hook.name
             )
-            hook_output_dir.mkdir(parents=True, exist_ok=True)
+            hook_dir.mkdir(parents=True, exist_ok=True)
+            work_dirs[hook.name] = hook_dir
 
-            inputs = HookInputs(
-                records=[HookRecord(id=r.source_id, metadata=r.metadata) for r in records],
-                run_id=f"{event.ingest_run_srn}_batch{event.batch_index}",
-                files_dirs=files_dirs,
-                config=None,
-            )
+        # Run all hooks via HookService
+        results = await self.hook_service.run_hooks_for_batch(
+            hooks=convention.hooks,
+            inputs=inputs,
+            work_dirs=work_dirs,
+        )
 
-            result = await self.hook_runner.run(hook, inputs, hook_output_dir)
-
-            short_id = event.ingest_run_srn.rsplit(":", 1)[-1][:8]
+        short_id = event.ingest_run_srn.rsplit(":", 1)[-1][:8]
+        for result in results:
             log.info(
                 "[{short_id}] batch {batch_index} hook={hook_name}: {status} in {duration:.1f}s",
                 short_id=short_id,
                 batch_index=event.batch_index,
-                hook_name=hook.name,
+                hook_name=result.hook_name,
                 status=result.status.value,
                 duration=result.duration_seconds,
                 ingest_run_srn=event.ingest_run_srn,
@@ -99,26 +112,3 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                 batch_index=event.batch_index,
             )
         )
-
-
-def _read_ingester_records(records_file: Path) -> list[IngesterRecord]:
-    """Read ingester records from JSONL file into typed objects."""
-    records: list[IngesterRecord] = []
-    if not records_file.exists():
-        return records
-    for line in records_file.open():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-            records.append(
-                IngesterRecord(
-                    source_id=data.get("source_id", data.get("id", "")),
-                    metadata=data.get("metadata", {}),
-                    file_paths=data.get("file_paths", []),
-                )
-            )
-        except (json.JSONDecodeError, ValueError):
-            log.warn("Skipping malformed ingester record line")
-    return records

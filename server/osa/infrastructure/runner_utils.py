@@ -49,26 +49,14 @@ def detect_rejection(progress: list[ProgressEntry]) -> tuple[bool, str | None]:
 
 
 def parse_memory(memory: str) -> int:
-    """Parse memory string like '2g' or '512m' to bytes."""
-    memory = memory.strip().lower()
-    match = re.match(r"^(\d+(?:\.\d+)?)(g|m|k)?i?$", memory)
-    if not match:
-        raise ValueError(f"Invalid memory format: {memory}")
+    """Parse memory string like '2g' or '512m' to bytes.
 
-    amount = float(match.group(1))
-    unit = match.group(2)
+    .. deprecated::
+        Use ``osa.domain.shared.model.hook.parse_memory`` instead.
+    """
+    from osa.domain.shared.model.hook import parse_memory as _parse_memory
 
-    match unit:
-        case "g":
-            return int(amount * 1024 * 1024 * 1024)
-        case "m":
-            return int(amount * 1024 * 1024)
-        case "k":
-            return int(amount * 1024)
-        case None:
-            return int(amount)
-        case _:
-            raise ValueError(f"Unknown memory unit: {unit}")
+    return _parse_memory(memory)
 
 
 _MEMORY_RE = re.compile(r"^(\d+(?:\.\d+)?)(g|m|k)?i?$")

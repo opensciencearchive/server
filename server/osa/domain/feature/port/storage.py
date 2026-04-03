@@ -4,7 +4,7 @@ from abc import abstractmethod
 from typing import Any, Protocol
 
 from osa.domain.shared.port import Port
-from osa.domain.validation.model.batch_outcome import BatchRecordOutcome
+from osa.domain.validation.model.batch_outcome import BatchRecordOutcome, HookRecordId
 
 
 class FeatureStoragePort(Port, Protocol):
@@ -34,7 +34,7 @@ class FeatureStoragePort(Port, Protocol):
     @abstractmethod
     async def read_batch_outcomes(
         self, output_dir: str, hook_name: str
-    ) -> dict[str, BatchRecordOutcome]:
+    ) -> dict[HookRecordId, BatchRecordOutcome]:
         """Read JSONL batch outputs (features/rejections/errors) for a hook.
 
         Parses features.jsonl, rejections.jsonl, and errors.jsonl from the

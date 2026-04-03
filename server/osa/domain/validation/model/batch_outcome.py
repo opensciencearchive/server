@@ -1,8 +1,19 @@
 """Per-record outcome from a batch hook run."""
 
-from typing import Any
+from enum import StrEnum
+from typing import Any, NewType
 
 from osa.domain.shared.model.value import ValueObject
+
+HookRecordId = NewType("HookRecordId", str)
+
+
+class OutcomeStatus(StrEnum):
+    """Outcome status for a single record in a batch hook execution."""
+
+    PASSED = "passed"
+    REJECTED = "rejected"
+    ERRORED = "errored"
 
 
 class BatchRecordOutcome(ValueObject):
@@ -12,8 +23,8 @@ class BatchRecordOutcome(ValueObject):
     passed (with features), rejected (with reason), or errored.
     """
 
-    record_id: str
-    status: str  # "passed", "rejected", "errored"
+    record_id: HookRecordId
+    status: OutcomeStatus
     features: list[dict[str, Any]] = []
     reason: str | None = None
     error: str | None = None

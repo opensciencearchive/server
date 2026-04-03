@@ -105,6 +105,44 @@ def test_hook_result_default_progress_empty():
     assert result.progress == []
 
 
+def test_hook_status_oom_value():
+    from osa.domain.validation.model.hook_result import HookStatus
+
+    assert HookStatus.OOM == "oom"
+    assert HookStatus.OOM.value == "oom"
+
+
+def test_hook_result_oom_killed_true():
+    from osa.domain.validation.model.hook_result import HookResult, HookStatus
+
+    result = HookResult(
+        hook_name="detect_pockets",
+        status=HookStatus.OOM,
+        error_message="Hook killed by OOM (limit: 1g)",
+        duration_seconds=30.0,
+    )
+    assert result.oom_killed is True
+
+
+def test_hook_result_oom_killed_false():
+    from osa.domain.validation.model.hook_result import HookResult, HookStatus
+
+    result = HookResult(
+        hook_name="detect_pockets",
+        status=HookStatus.FAILED,
+        error_message="Some other error",
+        duration_seconds=10.0,
+    )
+    assert result.oom_killed is False
+
+    passed = HookResult(
+        hook_name="detect_pockets",
+        status=HookStatus.PASSED,
+        duration_seconds=5.0,
+    )
+    assert passed.oom_killed is False
+
+
 def test_hook_result_serialization_roundtrip():
     from osa.domain.validation.model.hook_result import (
         HookResult,

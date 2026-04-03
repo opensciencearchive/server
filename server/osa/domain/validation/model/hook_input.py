@@ -13,3 +13,4 @@ class HookRecord(ValueObject):
 
     id: str
     metadata: dict[str, Any]
+    size_hint_mb: float = 0

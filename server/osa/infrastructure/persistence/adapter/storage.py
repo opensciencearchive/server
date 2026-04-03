@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import os
 import shutil
 import tempfile
 from collections.abc import AsyncIterator
@@ -12,7 +13,11 @@ from osa.domain.deposition.model.value import DepositionFile
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.error import InfrastructureError
 from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
-from osa.domain.validation.model.batch_outcome import BatchRecordOutcome
+from osa.domain.validation.model.batch_outcome import (
+    BatchRecordOutcome,
+    HookRecordId,
+    OutcomeStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -195,40 +200,99 @@ class FilesystemStorageAdapter(FileStoragePort):
 
     async def read_batch_outcomes(
         self, output_dir: str, hook_name: str
-    ) -> dict[str, BatchRecordOutcome]:
+    ) -> dict[HookRecordId, BatchRecordOutcome]:
         """Read JSONL batch outputs from the filesystem, streaming line-by-line."""
         hook_output = Path(output_dir) / "hooks" / hook_name / "output"
-        outcomes: dict[str, BatchRecordOutcome] = {}
+        outcomes: dict[HookRecordId, BatchRecordOutcome] = {}
 
-        for filename, status_key, field_map in [
-            ("features.jsonl", "passed", {"features": "features"}),
-            ("rejections.jsonl", "rejected", {"reason": "reason"}),
-            ("errors.jsonl", "errored", {"error": "error", "retryable": "retryable"}),
-        ]:
-            path = hook_output / filename
-            if not path.exists():
-                continue
-            with path.open() as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        data = json.loads(line)
-                    except json.JSONDecodeError:
-                        logger.warning("Skipping malformed JSON line in %s", filename)
-                        continue
-                    record_id = data.get("id")
-                    if not record_id:
-                        logger.warning("Skipping JSONL line without 'id' in %s", filename)
-                        continue
-                    kwargs: dict[str, Any] = {
-                        "record_id": record_id,
-                        "status": status_key,
-                    }
-                    for src, dst in field_map.items():
-                        if src in data:
-                            kwargs[dst] = data[src]
-                    outcomes[record_id] = BatchRecordOutcome(**kwargs)
+        _parse_batch_output_files(hook_output, outcomes)
 
         return outcomes
+
+    def write_checkpoint(
+        self, work_dir: Path, outcomes: dict[HookRecordId, BatchRecordOutcome]
+    ) -> None:
+        """Atomically write checkpoint JSONL via os.replace()."""
+        checkpoint_path = work_dir / "_checkpoint.jsonl"
+        tmp_path = work_dir / "_checkpoint.jsonl.tmp"
+        with tmp_path.open("w") as f:
+            for outcome in outcomes.values():
+                f.write(outcome.model_dump_json() + "\n")
+        os.replace(tmp_path, checkpoint_path)
+
+    def write_batch_outcomes(
+        self,
+        work_dir: Path,
+        outcomes: dict[HookRecordId, BatchRecordOutcome],
+    ) -> None:
+        """Write canonical features.jsonl, rejections.jsonl, errors.jsonl."""
+        output_dir = work_dir / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        features: list[str] = []
+        rejections: list[str] = []
+        errors: list[str] = []
+
+        for outcome in outcomes.values():
+            row: dict[str, Any] = {"id": outcome.record_id}
+            if outcome.status == OutcomeStatus.PASSED:
+                row["features"] = outcome.features
+                features.append(json.dumps(row))
+            elif outcome.status == OutcomeStatus.REJECTED:
+                row["reason"] = outcome.reason
+                rejections.append(json.dumps(row))
+            elif outcome.status == OutcomeStatus.ERRORED:
+                row["error"] = outcome.error
+                row["retryable"] = outcome.retryable
+                errors.append(json.dumps(row))
+
+        for filename, lines in [
+            ("features.jsonl", features),
+            ("rejections.jsonl", rejections),
+            ("errors.jsonl", errors),
+        ]:
+            if lines:
+                (output_dir / filename).write_text("\n".join(lines) + "\n")
+
+
+# ── Shared parsing ──────────────────────────────────────────────────────
+
+
+_FILE_STATUS_MAP: list[tuple[str, OutcomeStatus, dict[str, str]]] = [
+    ("features.jsonl", OutcomeStatus.PASSED, {"features": "features"}),
+    ("rejections.jsonl", OutcomeStatus.REJECTED, {"reason": "reason"}),
+    ("errors.jsonl", OutcomeStatus.ERRORED, {"error": "error", "retryable": "retryable"}),
+]
+
+
+def _parse_batch_output_files(
+    output_dir: Path, outcomes: dict[HookRecordId, BatchRecordOutcome]
+) -> None:
+    """Parse features/rejections/errors JSONL files into BatchRecordOutcome dict."""
+    for filename, status, field_map in _FILE_STATUS_MAP:
+        path = output_dir / filename
+        if not path.exists():
+            continue
+        with path.open() as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.warning("Skipping malformed JSON line in %s", filename)
+                    continue
+                raw_id = data.get("id")
+                if not raw_id:
+                    logger.warning("Skipping JSONL line without 'id' in %s", filename)
+                    continue
+                record_id = HookRecordId(raw_id)
+                kwargs: dict[str, Any] = {
+                    "record_id": record_id,
+                    "status": status,
+                }
+                for src, dst in field_map.items():
+                    if src in data:
+                        kwargs[dst] = data[src]
+                outcomes[record_id] = BatchRecordOutcome(**kwargs)

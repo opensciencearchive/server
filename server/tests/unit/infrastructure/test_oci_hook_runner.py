@@ -239,7 +239,7 @@ class TestContainerLifecycle:
         assert "exit" in (result.error_message or "").lower()
 
     @pytest.mark.asyncio
-    async def test_oom_killed_returns_failed(self, tmp_path: Path):
+    async def test_oom_killed_returns_oom(self, tmp_path: Path):
         docker = AsyncMock()
         container = AsyncMock()
         docker.containers.create.return_value = container
@@ -258,7 +258,7 @@ class TestContainerLifecycle:
 
         result = await runner.run(hook, inputs, output_dir)
 
-        assert result.status == HookStatus.FAILED
+        assert result.status == HookStatus.OOM
         assert "oom" in (result.error_message or "").lower()
 
     @pytest.mark.asyncio

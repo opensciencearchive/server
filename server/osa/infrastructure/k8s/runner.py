@@ -477,7 +477,7 @@ class K8sHookRunner(HookRunner):
                             if getattr(terminated, "reason", None) == "OOMKilled":
                                 return HookResult(
                                     hook_name=hook.name,
-                                    status=HookStatus.FAILED,
+                                    status=HookStatus.OOM,
                                     error_message="Hook killed by OOM",
                                     duration_seconds=duration,
                                 )

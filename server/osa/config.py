@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Literal, Annotated
 
 import yaml
-from pydantic import BaseModel, field_validator, model_validator, StringConstraints
+from pydantic import BaseModel, BeforeValidator, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 from typing_extensions import Self
 
@@ -64,9 +64,9 @@ class DatabaseConfig(BaseModel):
 class LoggingConfig(BaseModel):
     """Logging configuration (nested in Config, uses env_nested_delimiter)."""
 
-    level: Annotated[LevelName, StringConstraints(to_lower=True)] = (
-        "debug"  # Root log level (DEBUG for development)
-    )
+    level: Annotated[
+        LevelName, BeforeValidator(lambda v: v.lower() if isinstance(v, str) else v)
+    ] = "debug"  # Root log level (DEBUG for development)
     format: str = "%(asctime)s %(levelname)-8s [%(name)s] %(message)s"
     date_format: str = "%Y-%m-%d %H:%M:%S"
 

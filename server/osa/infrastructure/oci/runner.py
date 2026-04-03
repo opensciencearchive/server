@@ -192,7 +192,7 @@ class OciHookRunner(HookRunner):
                     for line in tail_text.splitlines():
                         print(f"    OOM [{hook.name}] {line}", file=sys.stderr, flush=True)
                 return {
-                    "status": HookStatus.FAILED,
+                    "status": HookStatus.OOM,
                     "error_message": f"Hook killed by OOM (limit: {hook.runtime.limits.memory})",
                 }
 
