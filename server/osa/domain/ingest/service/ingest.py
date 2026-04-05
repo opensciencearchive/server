@@ -122,10 +122,8 @@ class IngestService(Service):
 
     async def _check_completion(self, ingest_run: IngestRun) -> None:
         """Transition to COMPLETED and emit IngestCompleted if all batches are accounted for."""
-        if not ingest_run.is_complete:
+        if not ingest_run.check_completion(datetime.now(UTC)):
             return
-        now = datetime.now(UTC)
-        ingest_run.check_completion(now)
         await self.ingest_repo.save(ingest_run)
         await self.outbox.append(
             IngestCompleted(

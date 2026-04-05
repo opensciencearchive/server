@@ -414,6 +414,9 @@ class K8sIngesterRunner(IngesterRunner):
                                 return OOMError("Source killed by OOM")
                             exit_code = getattr(terminated, "exit_code", -1)
                             if exit_code != 0:
+                                # Transient: ingester non-zero exit is often an upstream
+                                # API failure (500, rate limit), not a code bug.
+                                # Contrast with hooks where non-zero = PermanentError.
                                 return TransientError(f"Source exited with code {exit_code}")
         except Exception:
             pass
