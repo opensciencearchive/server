@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from osa.domain.deposition.service.convention import ConventionService
-from osa.domain.ingest.event.events import IngestStarted
+from osa.domain.ingest.event.events import IngestCompleted, IngestRunStarted, NextBatchRequested
 from osa.domain.ingest.model.ingest_run import IngestRun, IngestStatus
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.shared.error import ConflictError, NotFoundError
@@ -69,7 +69,16 @@ class IngestService(Service):
         await self.ingest_repo.save(ingest_run)
 
         await self.outbox.append(
-            IngestStarted(
+            IngestRunStarted(
+                id=EventId(uuid4()),
+                ingest_run_srn=srn,
+                convention_srn=convention_srn,
+                batch_size=batch_size,
+            )
+        )
+
+        await self.outbox.append(
+            NextBatchRequested(
                 id=EventId(uuid4()),
                 ingest_run_srn=srn,
                 convention_srn=convention_srn,
@@ -85,3 +94,42 @@ class IngestService(Service):
             limit=limit,
         )
         return ingest_run
+
+    async def fail_batch(self, ingest_run_srn: str) -> None:
+        """Account for a batch that permanently failed hook processing.
+
+        Increments batches_failed and completes the run if all batches
+        are now accounted for (completed + failed >= ingested).
+        """
+        ingest_run = await self.ingest_repo.increment_failed(ingest_run_srn)
+        await self._check_completion(ingest_run)
+
+    async def fail_ingestion(self, ingest_run_srn: str) -> None:
+        """Account for a failed ingester pull.
+
+        The batch was never sourced, so we mark ingestion as finished
+        (no more batches coming) and increment batches_failed. The
+        completion condition can then fire based on whatever batches
+        were already sourced.
+        """
+        await self.ingest_repo.increment_batches_ingested(
+            ingest_run_srn,
+            set_ingestion_finished=True,
+        )
+        ingest_run = await self.ingest_repo.increment_failed(ingest_run_srn)
+        await self._check_completion(ingest_run)
+
+    async def _check_completion(self, ingest_run: IngestRun) -> None:
+        """Transition to COMPLETED and emit IngestCompleted if all batches are accounted for."""
+        if not ingest_run.is_complete:
+            return
+        now = datetime.now(UTC)
+        ingest_run.check_completion(now)
+        await self.ingest_repo.save(ingest_run)
+        await self.outbox.append(
+            IngestCompleted(
+                id=EventId(uuid4()),
+                ingest_run_srn=ingest_run.srn,
+                total_published=ingest_run.published_count,
+            )
+        )

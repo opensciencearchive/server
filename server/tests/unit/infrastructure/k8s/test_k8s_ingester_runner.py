@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from osa.config import K8sConfig
-from osa.domain.shared.error import ExternalServiceError
+from osa.domain.shared.error import OOMError, TransientError
 from osa.domain.shared.model.source import IngesterDefinition, IngesterLimits
 from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.port.ingester_runner import IngesterInputs
@@ -214,6 +214,8 @@ class TestSourceLifecycle:
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
 
         # No existing jobs
         job_list = MagicMock()
@@ -259,14 +261,7 @@ class TestSourceLifecycle:
         runner._s3.get_object.side_effect = s3_get
 
         inputs = IngesterInputs(convention_srn=_CONV_SRN)
-        result = await runner._run_job(
-            batch_api,
-            core_api,
-            ingester,
-            inputs,
-            work_dir,
-            files_dir,
-        )
+        result = await runner._run_job(ingester, inputs, work_dir, files_dir)
 
         assert len(result.records) == 2
         assert result.session == {"cursor": "abc"}
@@ -274,12 +269,14 @@ class TestSourceLifecycle:
         batch_api.delete_namespaced_job.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_timeout_raises_external_service_error(self, tmp_path: Path):
+    async def test_timeout_raises_transient_error(self, tmp_path: Path):
         config = _make_config(data_mount_path=str(tmp_path))
         runner = K8sIngesterRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
 
         job_list = MagicMock()
         job_list.items = []
@@ -311,23 +308,18 @@ class TestSourceLifecycle:
         files_dir.mkdir(parents=True)
         inputs = IngesterInputs(convention_srn=_CONV_SRN)
 
-        with pytest.raises(ExternalServiceError, match="[Tt]imed out|[Dd]eadline"):
-            await runner._run_job(
-                batch_api,
-                core_api,
-                ingester,
-                inputs,
-                work_dir,
-                files_dir,
-            )
+        with pytest.raises(TransientError, match="[Tt]imed out|[Dd]eadline"):
+            await runner._run_job(ingester, inputs, work_dir, files_dir)
 
     @pytest.mark.asyncio
-    async def test_oom_raises_external_service_error(self, tmp_path: Path):
+    async def test_oom_raises_oom_error(self, tmp_path: Path):
         config = _make_config(data_mount_path=str(tmp_path))
         runner = K8sIngesterRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
 
         job_list = MagicMock()
         job_list.items = []
@@ -371,15 +363,8 @@ class TestSourceLifecycle:
         files_dir.mkdir(parents=True)
         inputs = IngesterInputs(convention_srn=_CONV_SRN)
 
-        with pytest.raises(ExternalServiceError, match="[Oo]OM"):
-            await runner._run_job(
-                batch_api,
-                core_api,
-                ingester,
-                inputs,
-                work_dir,
-                files_dir,
-            )
+        with pytest.raises(OOMError, match="[Oo]OM"):
+            await runner._run_job(ingester, inputs, work_dir, files_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -392,13 +377,13 @@ class TestConventionSrnFromInputs:
 
     @pytest.mark.asyncio
     async def test_run_uses_convention_srn_from_inputs(self, tmp_path: Path):
-        from unittest.mock import patch
-
         config = _make_config(data_mount_path=str(tmp_path))
         runner = K8sIngesterRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
 
         # No existing jobs
         job_list = MagicMock()
@@ -432,11 +417,7 @@ class TestConventionSrnFromInputs:
             convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:my-conv@1.0.0")
         )
 
-        with (
-            patch("kubernetes_asyncio.client.BatchV1Api", return_value=batch_api),
-            patch("kubernetes_asyncio.client.CoreV1Api", return_value=core_api),
-        ):
-            await runner.run(ingester, inputs, files_dir, work_dir)
+        await runner.run(ingester, inputs, files_dir, work_dir)
 
         # Verify convention_srn from inputs ends up in the Job labels
         call_args = batch_api.create_namespaced_job.call_args

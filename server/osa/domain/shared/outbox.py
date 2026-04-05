@@ -1,5 +1,6 @@
 """Outbox - domain service for reliable event delivery."""
 
+from datetime import datetime
 from typing import TypeVar
 
 from osa.domain.shared.event import ClaimResult, Event
@@ -80,6 +81,7 @@ class Outbox(Service):
         delivery_id: str,
         error: str,
         max_retries: int,
+        deliver_after: datetime | None = None,
     ) -> None:
         """Mark a delivery as failed, with retry logic.
 
@@ -90,8 +92,12 @@ class Outbox(Service):
             delivery_id: The delivery row ID.
             error: Error message.
             max_retries: Maximum retry attempts before marking as failed.
+            deliver_after: If set, the delivery won't be eligible for claiming
+                until this timestamp. Used for transient resource backoff.
         """
-        await self._repo.mark_failed_with_retry(delivery_id, error=error, max_retries=max_retries)
+        await self._repo.mark_failed_with_retry(
+            delivery_id, error=error, max_retries=max_retries, deliver_after=deliver_after
+        )
 
     async def reset_stale_claims(self, timeout_seconds: float) -> int:
         """Reset deliveries that have been claimed for too long.

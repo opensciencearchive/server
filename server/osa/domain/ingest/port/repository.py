@@ -41,6 +41,14 @@ class IngestRunRepository(Port, Protocol):
         ...
 
     @abstractmethod
+    async def increment_failed(self, srn: str) -> IngestRun:
+        """Atomically increment batches_failed.
+
+        Returns the updated IngestRun for completion condition checking.
+        """
+        ...
+
+    @abstractmethod
     async def increment_completed(self, srn: str, published_count: int) -> IngestRun:
         """Atomically increment batches_completed and published_count.
 

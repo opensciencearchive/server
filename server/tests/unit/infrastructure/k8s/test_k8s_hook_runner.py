@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from osa.config import K8sConfig
-from osa.domain.shared.error import InfrastructureError
+from osa.domain.shared.error import (
+    OOMError,
+    PermanentError,
+    TransientError,
+)
 from osa.domain.shared.model.hook import (
     ColumnDef,
     HookDefinition,
@@ -70,7 +74,10 @@ def _make_s3_mock() -> AsyncMock:
 def _make_runner(config: K8sConfig | None = None) -> K8sHookRunner:
     api_client = MagicMock()
     s3 = _make_s3_mock()
-    return K8sHookRunner(api_client=api_client, config=config or _make_config(), s3=s3)
+    runner = K8sHookRunner(api_client=api_client, config=config or _make_config(), s3=s3)
+    runner._batch_api = AsyncMock()
+    runner._core_api = AsyncMock()
+    return runner
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +338,7 @@ class TestSchedulingWatch:
     async def test_pod_leaves_pending_quickly(self):
         runner = _make_runner()
         core_api = AsyncMock()
+        runner._core_api = core_api
 
         # Pod transitions from Pending to Running
         pod = MagicMock()
@@ -340,12 +348,13 @@ class TestSchedulingWatch:
         pod_list.items = [pod]
         core_api.list_namespaced_pod.return_value = pod_list
 
-        await runner._wait_for_scheduling(core_api, "test-job", "osa")
+        await runner._wait_for_scheduling("test-job", "osa")
 
     @pytest.mark.asyncio
     async def test_pod_stuck_scheduling_timeout(self):
         runner = _make_runner()
         core_api = AsyncMock()
+        runner._core_api = core_api
 
         # Pod stays in Pending
         pod = MagicMock()
@@ -355,15 +364,16 @@ class TestSchedulingWatch:
         pod_list.items = [pod]
         core_api.list_namespaced_pod.return_value = pod_list
 
-        with pytest.raises(InfrastructureError, match="scheduling"):
+        with pytest.raises(TransientError, match="scheduling"):
             await runner._wait_for_scheduling(
-                core_api, "test-job", "osa", timeout_seconds=0.1, poll_interval=0.05
+                "test-job", "osa", timeout_seconds=0.1, poll_interval=0.05
             )
 
     @pytest.mark.asyncio
     async def test_image_pull_backoff_fails_fast(self):
         runner = _make_runner()
         core_api = AsyncMock()
+        runner._core_api = core_api
 
         pod = MagicMock()
         pod.status.phase = "Pending"
@@ -375,13 +385,14 @@ class TestSchedulingWatch:
         pod_list.items = [pod]
         core_api.list_namespaced_pod.return_value = pod_list
 
-        with pytest.raises(InfrastructureError, match="[Ii]mage pull"):
-            await runner._wait_for_scheduling(core_api, "test-job", "osa")
+        with pytest.raises(PermanentError, match="[Ii]mage pull"):
+            await runner._wait_for_scheduling("test-job", "osa")
 
     @pytest.mark.asyncio
     async def test_err_image_pull_fails_fast(self):
         runner = _make_runner()
         core_api = AsyncMock()
+        runner._core_api = core_api
 
         pod = MagicMock()
         pod.status.phase = "Pending"
@@ -393,13 +404,14 @@ class TestSchedulingWatch:
         pod_list.items = [pod]
         core_api.list_namespaced_pod.return_value = pod_list
 
-        with pytest.raises(InfrastructureError, match="[Ii]mage pull"):
-            await runner._wait_for_scheduling(core_api, "test-job", "osa")
+        with pytest.raises(PermanentError, match="[Ii]mage pull"):
+            await runner._wait_for_scheduling("test-job", "osa")
 
     @pytest.mark.asyncio
     async def test_pod_evicted(self):
         runner = _make_runner()
         core_api = AsyncMock()
+        runner._core_api = core_api
 
         pod = MagicMock()
         pod.status.phase = "Failed"
@@ -409,8 +421,8 @@ class TestSchedulingWatch:
         pod_list.items = [pod]
         core_api.list_namespaced_pod.return_value = pod_list
 
-        with pytest.raises(InfrastructureError, match="[Ee]vict"):
-            await runner._wait_for_scheduling(core_api, "test-job", "osa")
+        with pytest.raises(TransientError, match="[Ee]vict"):
+            await runner._wait_for_scheduling("test-job", "osa")
 
 
 # ---------------------------------------------------------------------------
@@ -427,6 +439,8 @@ class TestExecutionAndCleanup:
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
 
         # No existing jobs (orphan check)
         job_list = MagicMock()
@@ -462,13 +476,7 @@ class TestExecutionAndCleanup:
         )
 
         inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
-        result = await runner._run_job(
-            batch_api,
-            core_api,
-            hook,
-            inputs,
-            work_dir,
-        )
+        result = await runner._run_job(hook, inputs, work_dir)
 
         assert result.status == HookStatus.PASSED
         assert len(result.progress) == 1
@@ -482,6 +490,8 @@ class TestExecutionAndCleanup:
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
 
         job_list = MagicMock()
         job_list.items = []
@@ -512,19 +522,12 @@ class TestExecutionAndCleanup:
         work_dir.mkdir(parents=True)
         inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
 
-        result = await runner._run_job(
-            batch_api,
-            core_api,
-            hook,
-            inputs,
-            work_dir,
-        )
-
-        assert result.status == HookStatus.FAILED
-        assert (
-            "timed out" in result.error_message.lower()
-            or "deadline" in result.error_message.lower()
-        )
+        with pytest.raises(TransientError, match="[Tt]imed out|[Dd]eadline"):
+            await runner._run_job(
+                hook,
+                inputs,
+                work_dir,
+            )
         batch_api.delete_namespaced_job.assert_called_once()
 
     @pytest.mark.asyncio
@@ -534,6 +537,8 @@ class TestExecutionAndCleanup:
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
 
         job_list = MagicMock()
         job_list.items = []
@@ -577,16 +582,12 @@ class TestExecutionAndCleanup:
         work_dir.mkdir(parents=True)
         inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
 
-        result = await runner._run_job(
-            batch_api,
-            core_api,
-            hook,
-            inputs,
-            work_dir,
-        )
-
-        assert result.status == HookStatus.OOM
-        assert "oom" in result.error_message.lower()
+        with pytest.raises(OOMError, match="[Oo][Oo][Mm]"):
+            await runner._run_job(
+                hook,
+                inputs,
+                work_dir,
+            )
 
     @pytest.mark.asyncio
     async def test_nonzero_exit(self, tmp_path: Path):
@@ -595,6 +596,8 @@ class TestExecutionAndCleanup:
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
 
         job_list = MagicMock()
         job_list.items = []
@@ -636,16 +639,12 @@ class TestExecutionAndCleanup:
         work_dir.mkdir(parents=True)
         inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
 
-        result = await runner._run_job(
-            batch_api,
-            core_api,
-            hook,
-            inputs,
-            work_dir,
-        )
-
-        assert result.status == HookStatus.FAILED
-        assert "exit" in result.error_message.lower()
+        with pytest.raises(PermanentError, match="[Ee]xit"):
+            await runner._run_job(
+                hook,
+                inputs,
+                work_dir,
+            )
 
     @pytest.mark.asyncio
     async def test_orphan_running_job_attaches(self, tmp_path: Path):
@@ -655,6 +654,8 @@ class TestExecutionAndCleanup:
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
 
         # Existing active job
         existing_job = MagicMock()
@@ -691,8 +692,6 @@ class TestExecutionAndCleanup:
         inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
 
         result = await runner._run_job(
-            batch_api,
-            core_api,
             hook,
             inputs,
             work_dir,
@@ -710,6 +709,8 @@ class TestExecutionAndCleanup:
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
 
         existing_job = MagicMock()
         existing_job.metadata.name = "osa-hook-existing"
@@ -727,8 +728,6 @@ class TestExecutionAndCleanup:
         inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
 
         result = await runner._run_job(
-            batch_api,
-            core_api,
             hook,
             inputs,
             work_dir,
@@ -745,6 +744,8 @@ class TestExecutionAndCleanup:
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
 
         existing_job = MagicMock()
         existing_job.metadata.name = "osa-hook-existing"
@@ -782,8 +783,6 @@ class TestExecutionAndCleanup:
         inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
 
         result = await runner._run_job(
-            batch_api,
-            core_api,
             hook,
             inputs,
             work_dir,
@@ -807,7 +806,7 @@ class TestExecutionAndCleanup:
         batch_api.delete_namespaced_job.side_effect = FakeNotFound()
 
         # Should not raise
-        await runner._cleanup_job(batch_api, "test-job", "osa")
+        await runner._cleanup_job("test-job", "osa")
 
     @pytest.mark.asyncio
     async def test_rejection_via_progress(self, tmp_path: Path):
@@ -817,6 +816,8 @@ class TestExecutionAndCleanup:
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
 
         job_list = MagicMock()
         job_list.items = []
@@ -847,8 +848,6 @@ class TestExecutionAndCleanup:
         inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
 
         result = await runner._run_job(
-            batch_api,
-            core_api,
             hook,
             inputs,
             work_dir,
@@ -869,13 +868,13 @@ class TestRunIdFromInputs:
     @pytest.mark.asyncio
     async def test_run_uses_run_id_from_inputs(self, tmp_path: Path):
         """The run_id in Job labels comes from inputs, not the work_dir path."""
-        from unittest.mock import patch
-
         config = _make_config(data_mount_path=str(tmp_path))
         runner = K8sHookRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
 
         # No existing jobs
         job_list = MagicMock()
@@ -909,11 +908,7 @@ class TestRunIdFromInputs:
             run_id="my-real-run-id",
         )
 
-        with (
-            patch("kubernetes_asyncio.client.BatchV1Api", return_value=batch_api),
-            patch("kubernetes_asyncio.client.CoreV1Api", return_value=core_api),
-        ):
-            await runner.run(hook, inputs, work_dir)
+        await runner.run(hook, inputs, work_dir)
 
         # Verify the Job was created with the run_id from inputs
         call_args = batch_api.create_namespaced_job.call_args

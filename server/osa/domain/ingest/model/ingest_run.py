@@ -36,6 +36,7 @@ class IngestRun(Aggregate):
     batches_ingested: int = 0
     batches_completed: int = 0
     published_count: int = 0
+    batches_failed: int = 0
     batch_size: int = 1000
     limit: int | None = None  # Max total records (None = unlimited)
     started_at: datetime
@@ -71,8 +72,11 @@ class IngestRun(Aggregate):
 
     @property
     def is_complete(self) -> bool:
-        """Check the completion condition: all sourced batches are completed."""
-        return self.ingestion_finished and self.batches_ingested == self.batches_completed
+        """Check the completion condition: all sourced batches are accounted for."""
+        return (
+            self.ingestion_finished
+            and (self.batches_completed + self.batches_failed) >= self.batches_ingested
+        )
 
     def check_completion(self, completed_at: datetime) -> bool:
         """Check completion condition and transition if met.

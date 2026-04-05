@@ -186,7 +186,7 @@ class TestIndependentFailureTracking:
         await outbox.mark_failed_with_retry(delivery_id, error="Timeout", max_retries=3)
 
         mock_repo.mark_failed_with_retry.assert_called_once_with(
-            delivery_id, error="Timeout", max_retries=3
+            delivery_id, error="Timeout", max_retries=3, deliver_after=None
         )
 
 

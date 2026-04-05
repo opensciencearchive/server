@@ -72,6 +72,18 @@ class ConfigurationError(InfrastructureError):
     """System misconfiguration detected."""
 
 
+class TransientError(InfrastructureError):
+    """Temporary failure — worker retries with backoff."""
+
+
+class PermanentError(InfrastructureError):
+    """Unrecoverable failure — worker gives up."""
+
+
+class OOMError(PermanentError):
+    """Container killed by out-of-memory. HookService intercepts for memory retry."""
+
+
 # =============================================================================
 # Event Processing Errors
 # =============================================================================

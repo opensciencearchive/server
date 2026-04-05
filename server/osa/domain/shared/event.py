@@ -130,6 +130,7 @@ class Delivery:
 
     id: str
     event: "Event"
+    retry_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -259,6 +260,16 @@ class EventHandler(Generic[E], metaclass=_EventHandlerMeta):
         """
         for event in events:
             await self.handle(event)
+
+    async def on_exhausted(self, event: E) -> None:
+        """Called when delivery retries are exhausted or failure is permanent.
+
+        Override to perform cleanup or accounting when an event will never
+        be successfully processed. Default: no-op.
+
+        Args:
+            event: The event that could not be processed.
+        """
 
 
 # --- Schedule ---

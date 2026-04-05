@@ -4,12 +4,14 @@ from osa.domain.ingest.event.events import (
     HookBatchCompleted,
     IngestBatchPublished,
     IngestCompleted,
-    IngestStarted,
+    IngestRunStarted,
     IngesterBatchReady,
+    NextBatchRequested,
 )
 
 __all__ = [
-    "IngestStarted",
+    "IngestRunStarted",
+    "NextBatchRequested",
     "IngesterBatchReady",
     "HookBatchCompleted",
     "IngestBatchPublished",

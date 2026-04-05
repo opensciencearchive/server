@@ -6,7 +6,14 @@ def test_hook_status_values():
 
     assert HookStatus.PASSED == "passed"
     assert HookStatus.REJECTED == "rejected"
-    assert HookStatus.FAILED == "failed"
+
+
+def test_hook_status_only_business_outcomes():
+    """HookStatus should only carry business outcomes, not failure modes."""
+    from osa.domain.validation.model.hook_result import HookStatus
+
+    members = set(HookStatus)
+    assert members == {HookStatus.PASSED, HookStatus.REJECTED}
 
 
 def test_progress_entry_full():
@@ -61,19 +68,6 @@ def test_hook_result_rejected():
     assert result.rejection_reason == "Missing coordinates"
 
 
-def test_hook_result_failed():
-    from osa.domain.validation.model.hook_result import HookResult, HookStatus
-
-    result = HookResult(
-        hook_name="detect_pockets",
-        status=HookStatus.FAILED,
-        error_message="OOM killed",
-        duration_seconds=300.0,
-    )
-    assert result.status == HookStatus.FAILED
-    assert result.error_message == "OOM killed"
-
-
 def test_hook_result_with_progress():
     from osa.domain.validation.model.hook_result import (
         HookResult,
@@ -103,44 +97,6 @@ def test_hook_result_default_progress_empty():
         duration_seconds=0.1,
     )
     assert result.progress == []
-
-
-def test_hook_status_oom_value():
-    from osa.domain.validation.model.hook_result import HookStatus
-
-    assert HookStatus.OOM == "oom"
-    assert HookStatus.OOM.value == "oom"
-
-
-def test_hook_result_oom_killed_true():
-    from osa.domain.validation.model.hook_result import HookResult, HookStatus
-
-    result = HookResult(
-        hook_name="detect_pockets",
-        status=HookStatus.OOM,
-        error_message="Hook killed by OOM (limit: 1g)",
-        duration_seconds=30.0,
-    )
-    assert result.oom_killed is True
-
-
-def test_hook_result_oom_killed_false():
-    from osa.domain.validation.model.hook_result import HookResult, HookStatus
-
-    result = HookResult(
-        hook_name="detect_pockets",
-        status=HookStatus.FAILED,
-        error_message="Some other error",
-        duration_seconds=10.0,
-    )
-    assert result.oom_killed is False
-
-    passed = HookResult(
-        hook_name="detect_pockets",
-        status=HookStatus.PASSED,
-        duration_seconds=5.0,
-    )
-    assert passed.oom_killed is False
 
 
 def test_hook_result_serialization_roundtrip():

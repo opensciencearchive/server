@@ -19,6 +19,7 @@ from osa.domain.validation.model.batch_outcome import (
     OutcomeStatus,
 )
 from osa.domain.validation.model.hook_input import HookRecord
+from osa.domain.shared.error import OOMError
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs
 
@@ -50,22 +51,8 @@ def _passed_result(hook_name: str = "detect_pockets", duration: float = 5.0) -> 
     return HookResult(hook_name=hook_name, status=HookStatus.PASSED, duration_seconds=duration)
 
 
-def _oom_result(hook_name: str = "detect_pockets", duration: float = 30.0) -> HookResult:
-    return HookResult(
-        hook_name=hook_name,
-        status=HookStatus.OOM,
-        error_message="Hook killed by OOM",
-        duration_seconds=duration,
-    )
-
-
-def _failed_result(hook_name: str = "detect_pockets", duration: float = 10.0) -> HookResult:
-    return HookResult(
-        hook_name=hook_name,
-        status=HookStatus.FAILED,
-        error_message="Some error",
-        duration_seconds=duration,
-    )
+def _oom_error() -> OOMError:
+    return OOMError("Hook killed by OOM")
 
 
 class FakeHookStorage:
@@ -164,7 +151,7 @@ class TestHookServiceOOMRetry:
                 features_file.write_text(
                     json.dumps({"id": records[0].id, "features": [{"score": 0.5}]}) + "\n"
                 )
-                return _oom_result()
+                raise _oom_error()
             else:
                 # Second call: succeed with remaining
                 features_file = output_dir / "features.jsonl"
@@ -188,7 +175,7 @@ class TestHookServiceOOMRetry:
 
 
 class TestHookServiceOOMExhaustion:
-    """T017: OOM exhaustion marks remaining records as errored."""
+    """T017: OOM exhaustion marks remaining records as errored and re-raises."""
 
     @pytest.mark.asyncio
     async def test_oom_exhaustion_marks_errored(self, tmp_path: Path):
@@ -202,13 +189,13 @@ class TestHookServiceOOMExhaustion:
         output_dir.mkdir(parents=True)
 
         runner = AsyncMock()
-        runner.run.return_value = _oom_result()
+        runner.run.side_effect = _oom_error()
         storage = FakeHookStorage()
 
         service = HookService(hook_runner=runner, hook_storage=storage)
-        result = await service.run_hook(hook, _inputs(records), work_dir)
+        with pytest.raises(OOMError):
+            await service.run_hook(hook, _inputs(records), work_dir)
 
-        assert result.status == HookStatus.OOM
         # Should have retried MAX_OOM_RETRIES times
         assert runner.run.call_count == 4  # 1 initial + 3 retries
 
@@ -221,10 +208,11 @@ class TestHookServiceOOMExhaustion:
 
 
 class TestHookServiceNonOOMFailure:
-    """T018: Non-OOM failure does NOT trigger retry."""
+    """T018: Non-OOM failure propagates without retry."""
 
     @pytest.mark.asyncio
     async def test_non_oom_failure_no_retry(self, tmp_path: Path):
+        from osa.domain.shared.error import PermanentError
         from osa.domain.validation.service.hook import HookService
 
         hook = _make_hook()
@@ -234,13 +222,13 @@ class TestHookServiceNonOOMFailure:
         (work_dir / "output").mkdir(parents=True)
 
         runner = AsyncMock()
-        runner.run.return_value = _failed_result()
+        runner.run.side_effect = PermanentError("Hook exited with code 1")
         storage = FakeHookStorage()
 
         service = HookService(hook_runner=runner, hook_storage=storage)
-        result = await service.run_hook(hook, _inputs(records), work_dir)
+        with pytest.raises(PermanentError):
+            await service.run_hook(hook, _inputs(records), work_dir)
 
-        assert result.status == HookStatus.FAILED
         runner.run.assert_called_once()
 
 
@@ -338,7 +326,7 @@ class TestHookServiceMultiHook:
             if h.name == "hook_one":
                 return _passed_result(hook_name="hook_one")
             else:
-                return _oom_result(hook_name="hook_two")
+                raise _oom_error()
 
         runner.run.side_effect = side_effect
 
@@ -348,13 +336,13 @@ class TestHookServiceMultiHook:
         r1 = await service.run_hook(hook1, _inputs(records), work_dir1)
         assert r1.status == HookStatus.PASSED
 
-        # Run hook 2 — should OOM and exhaust retries
-        r2 = await service.run_hook(hook2, _inputs(records), work_dir2)
-        assert r2.status == HookStatus.OOM
+        # Run hook 2 — should OOM and exhaust retries, then raise
+        with pytest.raises(OOMError):
+            await service.run_hook(hook2, _inputs(records), work_dir2)
 
         # Hook 1 was called once, hook 2 was called 4 times (1 + 3 retries)
         hook1_calls = [c for c in runner.run.call_args_list if c[0][0].name == "hook_one"]
-        hook2_calls = [c for c in runner.run.call_args_list if c[0][0].name == "hook_two"]
+        hook2_calls = [c for c in runner.run.call_args_list if c[0][0].name != "hook_one"]
         assert len(hook1_calls) == 1
         assert len(hook2_calls) == 4
 

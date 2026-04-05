@@ -1,9 +1,9 @@
 """Worker and WorkerPool for pull-based event processing."""
 
 import asyncio
-import logging
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, NewType
 
 if TYPE_CHECKING:
@@ -13,7 +13,7 @@ from apscheduler import AsyncScheduler
 from apscheduler.triggers.cron import CronTrigger
 from dishka import AsyncContainer
 from osa.domain.auth.model.identity import Identity, System
-from osa.domain.shared.error import SkippedEvents
+from osa.domain.shared.error import PermanentError, SkippedEvents, TransientError
 from osa.domain.shared.event import (
     EventHandler,
     Schedule,
@@ -22,9 +22,10 @@ from osa.domain.shared.event import (
     WorkerStatus,
 )
 from osa.domain.shared.outbox import Outbox
+from osa.infrastructure.logging import get_logger
 from osa.util.di.scope import Scope
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -136,7 +137,7 @@ class Worker:
             logger.info(f"Worker '{self.name}' cancelled")
             raise
         except Exception as e:
-            logger.exception(f"Worker '{self.name}' crashed: {e}")
+            logger.error(f"Worker '{self.name}' crashed: {e}")
             self._state.error = e
             raise
         finally:
@@ -171,8 +172,9 @@ class Worker:
             self._state.current_batch = result.events
             self._state.last_claim_at = result.claimed_at
 
+            handler = await scope.get(self._handler_type)
+
             try:
-                handler = await scope.get(self._handler_type)
                 events = result.events
 
                 if self._batch_size > 1:
@@ -187,9 +189,7 @@ class Worker:
                 self._state.processed_count += len(result.deliveries)
 
             except SkippedEvents as e:
-                logger.warning(
-                    f"Worker '{self.name}' skipping {len(e.event_ids)} events: {e.reason}"
-                )
+                logger.warn(f"Worker '{self.name}' skipping {len(e.event_ids)} events: {e.reason}")
                 skipped_set = set(e.event_ids)
                 for delivery in result.deliveries:
                     if delivery.event.id in skipped_set:
@@ -198,16 +198,71 @@ class Worker:
                         await outbox.mark_delivered(delivery.id)
                 self._state.processed_count += len(result.deliveries) - len(e.event_ids)
 
+            except TransientError as e:
+                self._state.failed_count += len(result.deliveries)
+                self._state.error = e
+                for delivery in result.deliveries:
+                    exhausted = delivery.retry_count + 1 >= self._max_retries
+                    if exhausted:
+                        logger.warn(
+                            "Worker '{name}' transient retries exhausted: {error}",
+                            name=self.name,
+                            error=str(e),
+                        )
+                        await handler.on_exhausted(delivery.event)
+                        await outbox.mark_failed(delivery.id, str(e))
+                    else:
+                        backoff_seconds = min(300, 60 * (2**delivery.retry_count))
+                        deliver_after = datetime.now(UTC) + timedelta(seconds=backoff_seconds)
+                        logger.warn(
+                            "Worker '{name}' transient failure: {error} "
+                            "(attempt={attempt}, next_retry={next_retry})",
+                            name=self.name,
+                            error=str(e),
+                            attempt=delivery.retry_count,
+                            next_retry=deliver_after.isoformat(),
+                        )
+                        await outbox.mark_failed_with_retry(
+                            delivery.id,
+                            str(e),
+                            max_retries=self._max_retries,
+                            deliver_after=deliver_after,
+                        )
+
+            except PermanentError as e:
+                self._state.failed_count += len(result.deliveries)
+                self._state.error = e
+                logger.error(
+                    "Worker '{name}' permanent failure: {error}",
+                    name=self.name,
+                    error=str(e),
+                )
+                for delivery in result.deliveries:
+                    await handler.on_exhausted(delivery.event)
+                    await outbox.mark_failed(delivery.id, str(e))
+
             except Exception as e:
                 self._state.failed_count += len(result.deliveries)
                 self._state.error = e
-                logger.error(f"Worker '{self.name}' batch failed: {e}")
+                logger.error(
+                    "Worker '{name}' batch failed: {error}",
+                    name=self.name,
+                    error=str(e),
+                )
                 for delivery in result.deliveries:
-                    await outbox.mark_failed_with_retry(
-                        delivery.id,
-                        str(e),
-                        max_retries=self._max_retries,
-                    )
+                    exhausted = delivery.retry_count + 1 >= self._max_retries
+                    if exhausted:
+                        await handler.on_exhausted(delivery.event)
+                        await outbox.mark_failed(delivery.id, str(e))
+                    else:
+                        backoff_seconds = min(30, 5 ** (delivery.retry_count + 1))
+                        deliver_after = datetime.now(UTC) + timedelta(seconds=backoff_seconds)
+                        await outbox.mark_failed_with_retry(
+                            delivery.id,
+                            str(e),
+                            max_retries=self._max_retries,
+                            deliver_after=deliver_after,
+                        )
 
             finally:
                 self._state.current_batch = []
@@ -406,7 +461,9 @@ class WorkerPool:
             self._schedule_failures[config.id] = failures
             logger.error(f"Failed to run schedule {config.id} (failures: {failures}): {e}")
             if failures >= 5:
-                logger.critical(f"Schedule {config.id} has failed {failures} consecutive times")
+                logger.error(
+                    f"CRITICAL: Schedule {config.id} has failed {failures} consecutive times"
+                )
 
     async def __aenter__(self) -> "WorkerPool":
         """Start the pool as async context manager."""

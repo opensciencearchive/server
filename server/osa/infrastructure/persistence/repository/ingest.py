@@ -29,6 +29,7 @@ class PostgresIngestRunRepository(IngestRunRepository):
             "batches_ingested": ingest_run.batches_ingested,
             "batches_completed": ingest_run.batches_completed,
             "published_count": ingest_run.published_count,
+            "batches_failed": ingest_run.batches_failed,
             "batch_size": ingest_run.batch_size,
             "record_limit": ingest_run.limit,
             "started_at": ingest_run.started_at,
@@ -91,6 +92,24 @@ class PostgresIngestRunRepository(IngestRunRepository):
             raise NotFoundError(f"Ingest run not found: {srn}")
         return _row_to_ingest_run(dict(row))
 
+    async def increment_failed(self, srn: str) -> IngestRun:
+        """Atomically increment batches_failed."""
+        t = ingest_runs_table
+        stmt = (
+            update(t)
+            .where(t.c.srn == srn)
+            .values(batches_failed=t.c.batches_failed + 1)
+            .returning(*t.c)
+        )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        row = result.mappings().first()
+        if row is None:
+            from osa.domain.shared.error import NotFoundError
+
+            raise NotFoundError(f"Ingest run not found: {srn}")
+        return _row_to_ingest_run(dict(row))
+
     async def increment_completed(self, srn: str, published_count: int) -> IngestRun:
         """Atomically increment batches_completed and published_count."""
         t = ingest_runs_table
@@ -122,6 +141,7 @@ def _row_to_ingest_run(row: dict) -> IngestRun:
         batches_ingested=row["batches_ingested"],
         batches_completed=row["batches_completed"],
         published_count=row["published_count"],
+        batches_failed=row.get("batches_failed", 0),
         batch_size=row["batch_size"],
         limit=row.get("record_limit"),
         started_at=row["started_at"],

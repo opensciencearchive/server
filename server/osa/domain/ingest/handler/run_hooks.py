@@ -8,7 +8,8 @@ from osa.domain.ingest.event.events import HookBatchCompleted, IngesterBatchRead
 from osa.domain.ingest.model.ingester_record import IngesterRecord
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.ingest.port.storage import IngestStoragePort
-from osa.domain.shared.error import NotFoundError
+from osa.domain.ingest.service.ingest import IngestService
+from osa.domain.shared.error import NotFoundError, PermanentError
 from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.outbox import Outbox
@@ -26,6 +27,7 @@ class RunHooks(EventHandler[IngesterBatchReady]):
     __claim_timeout__ = 3600.0
 
     ingest_repo: IngestRunRepository
+    ingest_service: IngestService
     convention_service: ConventionService
     hook_service: HookService
     outbox: Outbox
@@ -82,11 +84,22 @@ class RunHooks(EventHandler[IngesterBatchReady]):
             )
 
         # Run all hooks via HookService
-        results = await self.hook_service.run_hooks_for_batch(
-            hooks=convention.hooks,
-            inputs=inputs,
-            work_dirs=work_dirs,
-        )
+        try:
+            results = await self.hook_service.run_hooks_for_batch(
+                hooks=convention.hooks,
+                inputs=inputs,
+                work_dirs=work_dirs,
+            )
+        except PermanentError as e:
+            log.error(
+                "[{short_id}] batch {batch_index} permanently failed: {error}",
+                short_id=event.ingest_run_srn.rsplit(":", 1)[-1][:8],
+                batch_index=event.batch_index,
+                error=str(e),
+                ingest_run_srn=event.ingest_run_srn,
+            )
+            await self._fail_batch(event)
+            return
 
         short_id = event.ingest_run_srn.rsplit(":", 1)[-1][:8]
         for result in results:
@@ -108,3 +121,16 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                 batch_index=event.batch_index,
             )
         )
+
+    async def on_exhausted(self, event: IngesterBatchReady) -> None:
+        """Called when transient retries are exhausted — account for the failed batch."""
+        log.error(
+            "batch {batch_index} retries exhausted",
+            batch_index=event.batch_index,
+            ingest_run_srn=event.ingest_run_srn,
+        )
+        await self._fail_batch(event)
+
+    async def _fail_batch(self, event: IngesterBatchReady) -> None:
+        """Account for a permanently failed batch."""
+        await self.ingest_service.fail_batch(event.ingest_run_srn)

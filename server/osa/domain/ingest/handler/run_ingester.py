@@ -1,13 +1,14 @@
-"""RunIngester — runs ingester container on IngestStarted or continuation."""
+"""RunIngester — runs ingester container on NextBatchRequested."""
 
 from uuid import uuid4
 
 from osa.domain.deposition.service.convention import ConventionService
-from osa.domain.ingest.event.events import IngestStarted, IngesterBatchReady
+from osa.domain.ingest.event.events import IngesterBatchReady, NextBatchRequested
 from osa.domain.ingest.model.ingest_run import IngestStatus
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.ingest.port.storage import IngestStoragePort
-from osa.domain.shared.error import NotFoundError
+from osa.domain.ingest.service.ingest import IngestService
+from osa.domain.shared.error import NotFoundError, PermanentError
 from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.outbox import Outbox
@@ -17,18 +18,19 @@ from osa.infrastructure.logging import get_logger
 log = get_logger(__name__)
 
 
-class RunIngester(EventHandler[IngestStarted]):
+class RunIngester(EventHandler[NextBatchRequested]):
     """Runs ingester container and emits IngesterBatchReady per batch."""
 
     __claim_timeout__ = 3600.0
 
     ingest_repo: IngestRunRepository
+    ingest_service: IngestService
     convention_service: ConventionService
     ingester_runner: IngesterRunner
     outbox: Outbox
     ingest_storage: IngestStoragePort
 
-    async def handle(self, event: IngestStarted) -> None:
+    async def handle(self, event: NextBatchRequested) -> None:
         ingest_run = await self.ingest_repo.get(event.ingest_run_srn)
         if ingest_run is None:
             raise NotFoundError(f"Ingest run not found: {event.ingest_run_srn}")
@@ -53,7 +55,7 @@ class RunIngester(EventHandler[IngestStarted]):
             remaining = ingest_run.limit - ingested_so_far
             if remaining <= 0:
                 log.warn(
-                    "Ignoring redelivered IngestStarted — limit already met (batches_ingested={batches_ingested}, limit={limit})",
+                    "Ignoring redelivered NextBatchRequested — limit already met (batches_ingested={batches_ingested}, limit={limit})",
                     batches_ingested=ingest_run.batches_ingested,
                     limit=ingest_run.limit,
                     ingest_run_srn=event.ingest_run_srn,
@@ -74,12 +76,22 @@ class RunIngester(EventHandler[IngestStarted]):
         work_dir = self.ingest_storage.batch_work_dir(event.ingest_run_srn, batch_index)
         files_dir = self.ingest_storage.batch_files_dir(event.ingest_run_srn, batch_index)
 
-        output = await self.ingester_runner.run(
-            ingester=convention.ingester,
-            inputs=inputs,
-            files_dir=files_dir,
-            work_dir=work_dir,
-        )
+        try:
+            output = await self.ingester_runner.run(
+                ingester=convention.ingester,
+                inputs=inputs,
+                files_dir=files_dir,
+                work_dir=work_dir,
+            )
+        except PermanentError as e:
+            log.error(
+                "[{short_id}] ingester permanently failed: {error}",
+                short_id=event.ingest_run_srn.rsplit(":", 1)[-1][:8],
+                error=str(e),
+                ingest_run_srn=event.ingest_run_srn,
+            )
+            await self._fail_ingestion(event)
+            return
 
         await self.ingest_storage.write_records(event.ingest_run_srn, batch_index, output.records)
 
@@ -119,10 +131,22 @@ class RunIngester(EventHandler[IngestStarted]):
 
         if has_more:
             await self.outbox.append(
-                IngestStarted(
+                NextBatchRequested(
                     id=EventId(uuid4()),
                     ingest_run_srn=event.ingest_run_srn,
                     convention_srn=event.convention_srn,
                     batch_size=ingest_run.batch_size,
                 )
             )
+
+    async def on_exhausted(self, event: NextBatchRequested) -> None:
+        """Transient retries exhausted — stop ingestion and check completion."""
+        log.error(
+            "ingester retries exhausted",
+            ingest_run_srn=event.ingest_run_srn,
+        )
+        await self._fail_ingestion(event)
+
+    async def _fail_ingestion(self, event: NextBatchRequested) -> None:
+        """Account for a permanently failed ingester pull."""
+        await self.ingest_service.fail_ingestion(event.ingest_run_srn)

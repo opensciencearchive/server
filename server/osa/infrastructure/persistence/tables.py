@@ -120,6 +120,7 @@ deliveries_table = Table(
     Column("delivered_at", DateTime(timezone=True), nullable=True),
     Column("delivery_error", Text, nullable=True),
     Column("retry_count", Integer, nullable=False, server_default=text("0")),
+    Column("deliver_after", DateTime(timezone=True), nullable=True),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     UniqueConstraint("event_id", "consumer_group", name="uq_delivery_event_consumer"),
 )
@@ -131,6 +132,13 @@ Index(
     deliveries_table.c.status,
     deliveries_table.c.event_id,
     postgresql_where=text("status IN ('pending', 'claimed')"),
+)
+
+# Deferred delivery filtering
+Index(
+    "idx_deliveries_deliver_after",
+    deliveries_table.c.deliver_after,
+    postgresql_where=text("status = 'pending'"),
 )
 
 # For joining back to events
@@ -319,6 +327,7 @@ ingest_runs_table = Table(
     Column("published_count", Integer, nullable=False, server_default=text("0")),
     Column("batch_size", Integer, nullable=False, server_default=text("1000")),
     Column("record_limit", Integer, nullable=True),
+    Column("batches_failed", Integer, nullable=False, server_default=text("0")),
     Column("started_at", DateTime(timezone=True), nullable=False),
     Column("completed_at", DateTime(timezone=True), nullable=True),
 )

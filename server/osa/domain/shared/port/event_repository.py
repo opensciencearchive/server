@@ -1,5 +1,6 @@
 """EventRepository port - pure CRUD for event persistence."""
 
+from datetime import datetime
 from typing import Protocol, TypeVar
 
 from osa.domain.shared.event import ClaimResult, Event, EventId
@@ -123,6 +124,7 @@ class EventRepository(Protocol):
         delivery_id: str,
         error: str,
         max_retries: int,
+        deliver_after: datetime | None = None,
     ) -> None:
         """Mark a delivery as failed with retry logic.
 

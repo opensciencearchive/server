@@ -3,8 +3,21 @@
 from osa.domain.shared.event import Event, EventId
 
 
-class IngestStarted(Event):
-    """Emitted when an ingest run is created. Triggers first ingester pull."""
+class IngestRunStarted(Event):
+    """Emitted once when an ingest run is created. Observability/audit only."""
+
+    id: EventId
+    ingest_run_srn: str
+    convention_srn: str
+    batch_size: int
+
+
+class NextBatchRequested(Event):
+    """Emitted to trigger the next ingester batch pull.
+
+    Emitted by StartIngest (first batch) and by RunIngester (continuation).
+    RunIngester is the only handler that listens to this event.
+    """
 
     id: EventId
     ingest_run_srn: str

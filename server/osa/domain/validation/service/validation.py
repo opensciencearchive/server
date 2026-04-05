@@ -85,12 +85,13 @@ class ValidationService(Service):
 
         for hook in hooks:
             work_dir = self.hook_storage.get_hook_output_dir(deposition_srn, hook.name)
-            result = await hook_service.run_hook(hook, inputs, work_dir)
-            hook_results.append(result)
-
-            if result.status in (HookStatus.FAILED, HookStatus.OOM):
+            try:
+                result = await hook_service.run_hook(hook, inputs, work_dir)
+            except Exception:
                 overall_status = RunStatus.FAILED
                 break
+            hook_results.append(result)
+
             if result.status == HookStatus.REJECTED:
                 overall_status = RunStatus.REJECTED
                 break

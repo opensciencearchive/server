@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from osa.domain.shared.error import OOMError, PermanentError, TransientError
 from osa.domain.shared.model.hook import (
     ColumnDef,
     HookDefinition,
@@ -233,13 +234,11 @@ class TestContainerLifecycle:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        result = await runner.run(hook, inputs, output_dir)
-
-        assert result.status == HookStatus.FAILED
-        assert "exit" in (result.error_message or "").lower()
+        with pytest.raises(PermanentError, match="[Ee]xit"):
+            await runner.run(hook, inputs, output_dir)
 
     @pytest.mark.asyncio
-    async def test_oom_killed_returns_oom(self, tmp_path: Path):
+    async def test_oom_killed_raises_oom_error(self, tmp_path: Path):
         docker = AsyncMock()
         container = AsyncMock()
         docker.containers.create.return_value = container
@@ -256,13 +255,11 @@ class TestContainerLifecycle:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        result = await runner.run(hook, inputs, output_dir)
-
-        assert result.status == HookStatus.OOM
-        assert "oom" in (result.error_message or "").lower()
+        with pytest.raises(OOMError, match="[Oo][Oo][Mm]"):
+            await runner.run(hook, inputs, output_dir)
 
     @pytest.mark.asyncio
-    async def test_timeout_returns_failed(self, tmp_path: Path):
+    async def test_timeout_raises_infrastructure_error(self, tmp_path: Path):
         import asyncio
 
         docker = AsyncMock()
@@ -286,10 +283,8 @@ class TestContainerLifecycle:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        result = await runner.run(hook, inputs, output_dir)
-
-        assert result.status == HookStatus.FAILED
-        assert "timed out" in (result.error_message or "").lower()
+        with pytest.raises(TransientError, match="[Tt]imed out"):
+            await runner.run(hook, inputs, output_dir)
 
     @pytest.mark.asyncio
     async def test_rejection_via_progress(self, tmp_path: Path):
@@ -474,7 +469,5 @@ class TestContainerConfig:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        result = await runner.run(hook, inputs, output_dir)
-
-        assert result.status == HookStatus.FAILED
-        container.delete.assert_called_once_with(force=True)
+        with pytest.raises(TransientError, match="Docker error"):
+            await runner.run(hook, inputs, output_dir)

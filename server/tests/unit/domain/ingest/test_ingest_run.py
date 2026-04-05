@@ -142,3 +142,74 @@ class TestCounterIncrements:
     def test_custom_batch_size(self) -> None:
         run = _make_run(batch_size=500)
         assert run.batch_size == 500
+
+
+class TestBatchFailureAccounting:
+    def test_batches_failed_defaults_to_zero(self) -> None:
+        run = _make_run()
+        assert run.batches_failed == 0
+
+    def test_complete_with_all_batches_succeeded(self) -> None:
+        run = _make_run(
+            status=IngestStatus.RUNNING,
+            ingestion_finished=True,
+            batches_ingested=3,
+            batches_completed=3,
+            batches_failed=0,
+        )
+        assert run.is_complete
+
+    def test_complete_with_some_batches_failed(self) -> None:
+        """A run completes when all batches are accounted for, even if some failed."""
+        run = _make_run(
+            status=IngestStatus.RUNNING,
+            ingestion_finished=True,
+            batches_ingested=3,
+            batches_completed=2,
+            batches_failed=1,
+        )
+        assert run.is_complete
+
+    def test_complete_with_all_batches_failed(self) -> None:
+        run = _make_run(
+            status=IngestStatus.RUNNING,
+            ingestion_finished=True,
+            batches_ingested=3,
+            batches_completed=0,
+            batches_failed=3,
+        )
+        assert run.is_complete
+
+    def test_not_complete_when_batches_still_pending(self) -> None:
+        run = _make_run(
+            status=IngestStatus.RUNNING,
+            ingestion_finished=True,
+            batches_ingested=3,
+            batches_completed=1,
+            batches_failed=1,
+        )
+        assert not run.is_complete
+
+    def test_not_complete_when_ingestion_not_finished(self) -> None:
+        run = _make_run(
+            status=IngestStatus.RUNNING,
+            ingestion_finished=False,
+            batches_ingested=3,
+            batches_completed=0,
+            batches_failed=3,
+        )
+        assert not run.is_complete
+
+    def test_check_completion_transitions_with_failures(self) -> None:
+        run = _make_run(
+            status=IngestStatus.RUNNING,
+            ingestion_finished=True,
+            batches_ingested=3,
+            batches_completed=2,
+            batches_failed=1,
+        )
+        now = datetime.now(UTC)
+        completed = run.check_completion(now)
+        assert completed is True
+        assert run.status == IngestStatus.COMPLETED
+        assert run.completed_at == now

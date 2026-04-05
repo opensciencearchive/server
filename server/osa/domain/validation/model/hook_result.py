@@ -10,8 +10,6 @@ from osa.domain.shared.model.value import ValueObject
 class HookStatus(StrEnum):
     PASSED = "passed"
     REJECTED = "rejected"
-    FAILED = "failed"
-    OOM = "oom"
 
 
 class ProgressEntry(ValueObject):
@@ -31,8 +29,3 @@ class HookResult(ValueObject):
     error_message: str | None = None
     progress: list[ProgressEntry] = Field(default_factory=list)
     duration_seconds: float
-
-    @property
-    def oom_killed(self) -> bool:
-        """Whether this hook was killed by an out-of-memory condition."""
-        return self.status == HookStatus.OOM

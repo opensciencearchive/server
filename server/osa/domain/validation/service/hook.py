@@ -13,6 +13,7 @@ import json
 from collections.abc import Iterable
 from pathlib import Path
 
+from osa.domain.shared.error import OOMError
 from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.service import Service
 from osa.domain.validation.model.batch_outcome import (
@@ -81,16 +82,15 @@ class HookService(Service):
                 config=inputs.config,
             )
 
-            result = await self.hook_runner.run(current_hook, attempt_inputs, work_dir)
-            total_duration += result.duration_seconds
+            try:
+                result = await self.hook_runner.run(current_hook, attempt_inputs, work_dir)
+            except OOMError:
+                # Read any partial output written before OOM
+                new_outcomes = _read_output_dir(work_dir)
+                for rid, outcome in new_outcomes.items():
+                    if rid not in outcomes:
+                        outcomes[rid] = outcome
 
-            # Read any output written by this attempt
-            new_outcomes = _read_output_dir(work_dir)
-            for rid, outcome in new_outcomes.items():
-                if rid not in outcomes:
-                    outcomes[rid] = outcome
-
-            if result.oom_killed:
                 # Checkpoint what we have so far
                 await self.hook_storage.write_checkpoint(work_dir, outcomes)
 
@@ -118,17 +118,19 @@ class HookService(Service):
                             error=f"OOM after {MAX_OOM_RETRIES} retries (last limit: {current_hook.runtime.limits.memory})",
                         )
                     await self.hook_storage.write_batch_outcomes(work_dir, outcomes)
-                    return HookResult(
-                        hook_name=hook.name,
-                        status=HookStatus.OOM,
-                        error_message=f"OOM exhausted after {MAX_OOM_RETRIES} retries",
-                        duration_seconds=total_duration,
-                    )
-            elif result.status == HookStatus.FAILED:
-                # Non-OOM failure — no retry
-                await self.hook_storage.write_batch_outcomes(work_dir, outcomes)
-                return result
-            elif result.status == HookStatus.REJECTED:
+                    raise
+            # Non-OOM exceptions (TransientError, PermanentError, etc.)
+            # propagate uncaught to the worker layer
+
+            total_duration += result.duration_seconds
+
+            # Read any output written by this attempt
+            new_outcomes = _read_output_dir(work_dir)
+            for rid, outcome in new_outcomes.items():
+                if rid not in outcomes:
+                    outcomes[rid] = outcome
+
+            if result.status == HookStatus.REJECTED:
                 # Rejection — no retry, propagate status
                 await self.hook_storage.write_batch_outcomes(work_dir, outcomes)
                 return HookResult(
