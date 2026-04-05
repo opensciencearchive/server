@@ -37,8 +37,8 @@ class S3IngestStorage:
         """Convert a StorageLayout path to an S3 key."""
         return relative_path(path, self._data_mount_path)
 
-    async def read_session(self, ingest_run_srn: str) -> dict[str, Any] | None:
-        key = self._key(self._layout.ingest_session_file(ingest_run_srn))
+    async def read_session(self, ingest_run_id: str) -> dict[str, Any] | None:
+        key = self._key(self._layout.ingest_session_file(ingest_run_id))
         try:
             data = await self._s3.get_object(key)
             return json.loads(data)
@@ -47,20 +47,20 @@ class S3IngestStorage:
                 return None
             raise
 
-    async def write_session(self, ingest_run_srn: str, session: dict[str, Any]) -> None:
-        key = self._key(self._layout.ingest_session_file(ingest_run_srn))
+    async def write_session(self, ingest_run_id: str, session: dict[str, Any]) -> None:
+        key = self._key(self._layout.ingest_session_file(ingest_run_id))
         await self._s3.put_object(key, json.dumps(session))
 
     async def write_records(
-        self, ingest_run_srn: str, batch_index: int, records: list[dict[str, Any]]
+        self, ingest_run_id: str, batch_index: int, records: list[dict[str, Any]]
     ) -> None:
-        ingester_dir = self._layout.ingest_batch_ingester_dir(ingest_run_srn, batch_index)
+        ingester_dir = self._layout.ingest_batch_ingester_dir(ingest_run_id, batch_index)
         key = f"{self._key(ingester_dir)}/records.jsonl"
         content = "".join(json.dumps(r) + "\n" for r in records)
         await self._s3.put_object(key, content)
 
-    async def read_records(self, ingest_run_srn: str, batch_index: int) -> list[dict[str, Any]]:
-        ingester_dir = self._layout.ingest_batch_ingester_dir(ingest_run_srn, batch_index)
+    async def read_records(self, ingest_run_id: str, batch_index: int) -> list[dict[str, Any]]:
+        ingester_dir = self._layout.ingest_batch_ingester_dir(ingest_run_id, batch_index)
         key = f"{self._key(ingester_dir)}/records.jsonl"
         try:
             data = await self._s3.get_object(key)
@@ -76,14 +76,14 @@ class S3IngestStorage:
             records.append(json.loads(line))
         return records
 
-    def batch_dir(self, ingest_run_srn: str, batch_index: int) -> Path:
-        return self._layout.ingest_batch_dir(ingest_run_srn, batch_index)
+    def batch_dir(self, ingest_run_id: str, batch_index: int) -> Path:
+        return self._layout.ingest_batch_dir(ingest_run_id, batch_index)
 
-    def batch_work_dir(self, ingest_run_srn: str, batch_index: int) -> Path:
-        return self._layout.ingest_batch_ingester_dir(ingest_run_srn, batch_index)
+    def batch_work_dir(self, ingest_run_id: str, batch_index: int) -> Path:
+        return self._layout.ingest_batch_ingester_dir(ingest_run_id, batch_index)
 
-    def batch_files_dir(self, ingest_run_srn: str, batch_index: int) -> Path:
-        return self._layout.ingest_batch_ingester_dir(ingest_run_srn, batch_index) / "files"
+    def batch_files_dir(self, ingest_run_id: str, batch_index: int) -> Path:
+        return self._layout.ingest_batch_ingester_dir(ingest_run_id, batch_index) / "files"
 
-    def hook_work_dir(self, ingest_run_srn: str, batch_index: int, hook_name: str) -> Path:
-        return self._layout.ingest_batch_hook_dir(ingest_run_srn, batch_index, hook_name)
+    def hook_work_dir(self, ingest_run_id: str, batch_index: int, hook_name: str) -> Path:
+        return self._layout.ingest_batch_hook_dir(ingest_run_id, batch_index, hook_name)

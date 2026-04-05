@@ -26,9 +26,7 @@ class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
         if not event.expected_features or not event.published_srns:
             return
 
-        batch_output_dir = str(
-            self.layout.ingest_batch_dir(event.ingest_run_srn, event.batch_index)
-        )
+        batch_output_dir = str(self.layout.ingest_batch_dir(event.ingest_run_id, event.batch_index))
 
         total_inserted = 0
         skipped_dupes = 0
@@ -59,7 +57,7 @@ class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
                 )
                 total_inserted += count
 
-        short_id = event.ingest_run_srn.rsplit(":", 1)[-1][:8]
+        short_id = event.ingest_run_id[:8]
         dupe_msg = f", {skipped_dupes} duplicates skipped" if skipped_dupes else ""
         log.info(
             "[{short_id}] batch {batch_index}: inserted {total_inserted} feature rows ({hook_count} hooks{dupe_msg})",
@@ -68,5 +66,5 @@ class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
             total_inserted=total_inserted,
             hook_count=len(event.expected_features),
             dupe_msg=dupe_msg,
-            ingest_run_srn=event.ingest_run_srn,
+            ingest_run_id=event.ingest_run_id,
         )

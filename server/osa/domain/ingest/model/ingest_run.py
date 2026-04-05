@@ -2,9 +2,12 @@
 
 from datetime import datetime
 from enum import StrEnum
+from typing import NewType
 
 from osa.domain.shared.error import InvalidStateError
 from osa.domain.shared.model.aggregate import Aggregate
+
+IngestRunId = NewType("IngestRunId", str)
 
 
 class IngestStatus(StrEnum):
@@ -29,7 +32,7 @@ class IngestRun(Aggregate):
     Counter updates use atomic SQL increments in the repository.
     """
 
-    srn: str
+    id: IngestRunId
     convention_srn: str
     status: IngestStatus = IngestStatus.PENDING
     ingestion_finished: bool = False

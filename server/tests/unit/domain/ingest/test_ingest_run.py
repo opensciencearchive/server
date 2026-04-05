@@ -10,7 +10,7 @@ from osa.domain.shared.error import InvalidStateError
 
 def _make_run(**overrides) -> IngestRun:
     defaults = {
-        "srn": "urn:osa:localhost:ing:test-run",
+        "id": "test-run-id",
         "convention_srn": "urn:osa:localhost:conv:test-conv@1.0.0",
         "status": IngestStatus.PENDING,
         "started_at": datetime.now(UTC),

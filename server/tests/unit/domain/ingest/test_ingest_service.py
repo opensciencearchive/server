@@ -74,13 +74,13 @@ class TestStartIngest:
         # First event: IngestRunStarted (observability)
         first_event = service.outbox.append.call_args_list[0][0][0]
         assert first_event.__class__.__name__ == "IngestRunStarted"
-        assert first_event.ingest_run_srn == run.srn
+        assert first_event.ingest_run_id == run.id
         assert first_event.convention_srn == run.convention_srn
 
         # Second event: NextBatchRequested (triggers first batch)
         second_event = service.outbox.append.call_args_list[1][0][0]
         assert second_event.__class__.__name__ == "NextBatchRequested"
-        assert second_event.ingest_run_srn == run.srn
+        assert second_event.ingest_run_id == run.id
         assert second_event.convention_srn == run.convention_srn
 
     @pytest.mark.asyncio

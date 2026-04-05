@@ -20,7 +20,7 @@ from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.infrastructure.k8s.errors import classify_api_error
-from osa.infrastructure.k8s.naming import job_name, label_value
+from osa.infrastructure.k8s.naming import job_name
 from osa.infrastructure.runner_utils import (
     detect_rejection,
     relative_path,
@@ -183,7 +183,9 @@ class K8sHookRunner(HookRunner):
             "active:{job_name}" if a running Job exists
             None if no Job or only failed Jobs exist
         """
-        label_selector = f"osa.io/hook={hook_name},osa.io/run-id={label_value(run_id)}"
+        ingest_run_id = run_id.split("_b", 1)[0]
+        batch_index = run_id.split("_b", 1)[1] if "_b" in run_id else "0"
+        label_selector = f"osa.io/hook={hook_name},osa.io/ingest-run-id={ingest_run_id},osa.io/ingest-run-batch={batch_index}"
         try:
             job_list = await self._batch_api.list_namespaced_job(
                 namespace, label_selector=label_selector
@@ -234,10 +236,13 @@ class K8sHookRunner(HookRunner):
         input_subpath = f"{relative_work}/input"
         output_subpath = f"{relative_work}/output"
 
+        ingest_run_id = run_id.split("_b", 1)[0]
+        batch_index = run_id.split("_b", 1)[1] if "_b" in run_id else "0"
         labels = {
             "osa.io/role": "hook",
             "osa.io/hook": hook.name,
-            "osa.io/run-id": label_value(run_id),
+            "osa.io/ingest-run-id": ingest_run_id,
+            "osa.io/ingest-run-batch": batch_index,
         }
 
         mounts = [

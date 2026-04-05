@@ -1,5 +1,6 @@
 """Ingest domain events — payloads carry path references, not inline data (AD-1)."""
 
+from osa.domain.ingest.model.ingest_run import IngestRunId
 from osa.domain.shared.event import Event, EventId
 
 
@@ -7,7 +8,7 @@ class IngestRunStarted(Event):
     """Emitted once when an ingest run is created. Observability/audit only."""
 
     id: EventId
-    ingest_run_srn: str
+    ingest_run_id: IngestRunId
     convention_srn: str
     batch_size: int
 
@@ -20,7 +21,7 @@ class NextBatchRequested(Event):
     """
 
     id: EventId
-    ingest_run_srn: str
+    ingest_run_id: IngestRunId
     convention_srn: str
     batch_size: int
 
@@ -28,11 +29,11 @@ class NextBatchRequested(Event):
 class IngesterBatchReady(Event):
     """Emitted when an ingester container produces a batch of records.
 
-    Batch data is on disk at the path derived from {ingest_run_srn, batch_index}.
+    Batch data is on disk at the path derived from {ingest_run_id, batch_index}.
     """
 
     id: EventId
-    ingest_run_srn: str
+    ingest_run_id: IngestRunId
     batch_index: int
     has_more: bool
 
@@ -44,7 +45,7 @@ class HookBatchCompleted(Event):
     """
 
     id: EventId
-    ingest_run_srn: str
+    ingest_run_id: IngestRunId
     batch_index: int
 
 
@@ -56,7 +57,7 @@ class IngestBatchPublished(Event):
     """
 
     id: EventId
-    ingest_run_srn: str
+    ingest_run_id: IngestRunId
     convention_srn: str
     batch_index: int
     published_srns: list[str]
@@ -69,5 +70,5 @@ class IngestCompleted(Event):
     """Emitted when all batches are processed and the ingest run is complete."""
 
     id: EventId
-    ingest_run_srn: str
+    ingest_run_id: IngestRunId
     total_published: int

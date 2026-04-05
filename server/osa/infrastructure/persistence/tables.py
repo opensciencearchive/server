@@ -318,8 +318,8 @@ Index("ix_role_assignments_user_id", role_assignments_table.c.user_id)
 ingest_runs_table = Table(
     "ingest_runs",
     metadata,
-    Column("srn", String, primary_key=True),
-    Column("convention_srn", String, ForeignKey("conventions.srn"), nullable=False),
+    Column("id", String, primary_key=True),
+    Column("convention_srn", String, nullable=False),
     Column("status", String(32), nullable=False, server_default=text("'pending'")),
     Column("ingestion_finished", Boolean, nullable=False, server_default=text("false")),
     Column("batches_ingested", Integer, nullable=False, server_default=text("0")),

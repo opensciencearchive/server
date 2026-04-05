@@ -215,7 +215,8 @@ class TestJobSpecGeneration:
         labels = spec.spec.template.metadata.labels
         assert labels["osa.io/role"] == "hook"
         assert labels["osa.io/hook"] == "validate_dna"
-        assert labels["osa.io/run-id"] == "run-abc123"
+        assert labels["osa.io/ingest-run-id"] == "run-abc123"
+        assert labels["osa.io/ingest-run-batch"] == "0"
 
     def test_human_readable_job_name(self):
         runner = _make_runner()
@@ -914,4 +915,5 @@ class TestRunIdFromInputs:
         call_args = batch_api.create_namespaced_job.call_args
         spec = call_args[0][1]  # positional arg: (namespace, spec)
         labels = spec.metadata.labels
-        assert labels["osa.io/run-id"] == "my-real-run-id"
+        assert labels["osa.io/ingest-run-id"] == "my-real-run-id"
+        assert labels["osa.io/ingest-run-batch"] == "0"

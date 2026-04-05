@@ -138,7 +138,7 @@ class TestRecordServiceIngestSource:
         draft = RecordDraft(
             source=IngestSource(
                 id="run-123-pdb-456",
-                ingest_run_srn="urn:osa:localhost:val:run123",
+                ingest_run_id="run123",
                 upstream_source="pdb",
             ),
             metadata={"title": "Ingested Protein"},

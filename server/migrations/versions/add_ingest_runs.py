@@ -23,11 +23,10 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.create_table(
         "ingest_runs",
-        sa.Column("srn", sa.String(), primary_key=True),
+        sa.Column("id", sa.String(), primary_key=True),
         sa.Column(
             "convention_srn",
             sa.String(),
-            sa.ForeignKey("conventions.srn"),
             nullable=False,
         ),
         sa.Column(

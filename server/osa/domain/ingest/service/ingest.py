@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.ingest.event.events import IngestCompleted, IngestRunStarted, NextBatchRequested
-from osa.domain.ingest.model.ingest_run import IngestRun, IngestStatus
+from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId, IngestStatus
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.shared.error import ConflictError, NotFoundError
 from osa.domain.shared.event import EventId
@@ -54,11 +54,11 @@ class IngestService(Service):
                 code="ingest_already_running",
             )
 
-        srn = f"urn:osa:{self.node_domain.root}:ing:{uuid4()}"
+        run_id = IngestRunId(str(uuid4()))
         now = datetime.now(UTC)
 
         ingest_run = IngestRun(
-            srn=srn,
+            id=run_id,
             convention_srn=convention_srn,
             status=IngestStatus.PENDING,
             batch_size=batch_size,
@@ -71,7 +71,7 @@ class IngestService(Service):
         await self.outbox.append(
             IngestRunStarted(
                 id=EventId(uuid4()),
-                ingest_run_srn=srn,
+                ingest_run_id=run_id,
                 convention_srn=convention_srn,
                 batch_size=batch_size,
             )
@@ -80,12 +80,13 @@ class IngestService(Service):
         await self.outbox.append(
             NextBatchRequested(
                 id=EventId(uuid4()),
-                ingest_run_srn=srn,
+                ingest_run_id=run_id,
                 convention_srn=convention_srn,
                 batch_size=batch_size,
             )
         )
 
+        srn = f"urn:osa:{self.node_domain.root}:ing:{run_id}"
         log.info(
             "ingest started for {convention_srn}",
             ingest_run_srn=srn,
@@ -95,16 +96,16 @@ class IngestService(Service):
         )
         return ingest_run
 
-    async def fail_batch(self, ingest_run_srn: str) -> None:
+    async def fail_batch(self, ingest_run_id: IngestRunId) -> None:
         """Account for a batch that permanently failed hook processing.
 
         Increments batches_failed and completes the run if all batches
         are now accounted for (completed + failed >= ingested).
         """
-        ingest_run = await self.ingest_repo.increment_failed(ingest_run_srn)
+        ingest_run = await self.ingest_repo.increment_failed(ingest_run_id)
         await self._check_completion(ingest_run)
 
-    async def fail_ingestion(self, ingest_run_srn: str) -> None:
+    async def fail_ingestion(self, ingest_run_id: IngestRunId) -> None:
         """Account for a failed ingester pull.
 
         The batch was never sourced, so we mark ingestion as finished
@@ -113,10 +114,10 @@ class IngestService(Service):
         were already sourced.
         """
         await self.ingest_repo.increment_batches_ingested(
-            ingest_run_srn,
+            ingest_run_id,
             set_ingestion_finished=True,
         )
-        ingest_run = await self.ingest_repo.increment_failed(ingest_run_srn)
+        ingest_run = await self.ingest_repo.increment_failed(ingest_run_id)
         await self._check_completion(ingest_run)
 
     async def _check_completion(self, ingest_run: IngestRun) -> None:
@@ -129,7 +130,7 @@ class IngestService(Service):
         await self.outbox.append(
             IngestCompleted(
                 id=EventId(uuid4()),
-                ingest_run_srn=ingest_run.srn,
+                ingest_run_id=ingest_run.id,
                 total_published=ingest_run.published_count,
             )
         )

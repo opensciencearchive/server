@@ -31,23 +31,23 @@ class TestIngestSource:
     def test_type_is_ingest(self):
         src = IngestSource(
             id="run-123-source-456",
-            ingest_run_srn="urn:osa:localhost:val:run123",
+            ingest_run_id="run123",
             upstream_source="pdb",
         )
         assert src.type == "ingest"
 
-    def test_requires_ingest_run_srn(self):
+    def test_requires_ingest_run_id(self):
         with pytest.raises(ValidationError):
             IngestSource(id="run-123", upstream_source="pdb")
 
     def test_requires_upstream_source(self):
         with pytest.raises(ValidationError):
-            IngestSource(id="run-123", ingest_run_srn="urn:osa:localhost:val:run123")
+            IngestSource(id="run-123", ingest_run_id="run123")
 
     def test_serialization_roundtrip(self):
         src = IngestSource(
             id="run-123-source-456",
-            ingest_run_srn="urn:osa:localhost:val:run123",
+            ingest_run_id="run123",
             upstream_source="pdb",
         )
         data = src.model_dump()
@@ -65,7 +65,7 @@ class TestRecordSourceDiscriminator:
         data = {
             "type": "ingest",
             "id": "run-123",
-            "ingest_run_srn": "urn:osa:localhost:val:run1",
+            "ingest_run_id": "urn:osa:localhost:val:run1",
             "upstream_source": "geo",
         }
         adapter = TypeAdapter(RecordSource)
@@ -83,7 +83,7 @@ class TestRecordSourceDiscriminator:
         adapter = TypeAdapter(RecordSource)
         src = IngestSource(
             id="run-1",
-            ingest_run_srn="urn:osa:localhost:val:run1",
+            ingest_run_id="run1",
             upstream_source="pdb",
         )
         json_str = adapter.dump_json(src)

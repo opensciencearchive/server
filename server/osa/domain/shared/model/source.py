@@ -55,7 +55,7 @@ class IngestSource(_RecordSourceBase):
     """Record originated from an automated ingest run."""
 
     type: Literal["ingest"] = "ingest"
-    ingest_run_srn: str
+    ingest_run_id: str
     upstream_source: str
 
 
