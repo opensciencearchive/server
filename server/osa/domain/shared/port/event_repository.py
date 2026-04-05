@@ -19,6 +19,7 @@ class EventRepository(Protocol):
         self,
         event: Event,
         consumer_groups: set[str],
+        deliver_after: datetime | None = None,
     ) -> None:
         """Save event to the append-only log and create delivery rows.
 
@@ -26,6 +27,7 @@ class EventRepository(Protocol):
             event: The event to persist.
             consumer_groups: Set of consumer group names to create deliveries for.
                 If empty, the event is saved without any delivery rows (audit-only).
+            deliver_after: If set, deliveries won't be claimed until this time.
         """
         ...
 

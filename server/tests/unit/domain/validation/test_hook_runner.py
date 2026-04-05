@@ -89,6 +89,9 @@ class TestHookRunnerProtocol:
                     duration_seconds=0.1,
                 )
 
+            async def capture_logs(self, run_id: str) -> str:
+                return ""
+
         assert isinstance(FakeRunner(), HookRunner)
 
     def test_incomplete_class_does_not_satisfy_protocol(self):
@@ -104,6 +107,9 @@ class TestHookRunnerProtocol:
 
         class LaxRunner:
             async def run(self, *args, **kwargs):
+                pass
+
+            async def capture_logs(self, *args, **kwargs):
                 pass
 
         # runtime_checkable only checks method names exist, not signatures

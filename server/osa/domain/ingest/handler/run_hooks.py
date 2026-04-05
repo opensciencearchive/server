@@ -14,7 +14,7 @@ from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.outbox import Outbox
 from osa.domain.validation.model.hook_input import HookRecord
-from osa.domain.validation.port.hook_runner import HookInputs
+from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.domain.validation.service.hook import HookService
 from osa.infrastructure.logging import get_logger
 
@@ -30,6 +30,7 @@ class RunHooks(EventHandler[IngesterBatchReady]):
     ingest_service: IngestService
     convention_service: ConventionService
     hook_service: HookService
+    hook_runner: HookRunner
     outbox: Outbox
     ingest_storage: IngestStoragePort
 
@@ -89,11 +90,13 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                 work_dirs=work_dirs,
             )
         except PermanentError as e:
+            container_logs = await self.hook_runner.capture_logs(inputs.run_id)
             log.error(
                 "[{short_id}] batch {batch_index} permanently failed: {error}",
                 short_id=event.ingest_run_id[:8],
                 batch_index=event.batch_index,
                 error=str(e),
+                container_logs=container_logs,
                 ingest_run_id=event.ingest_run_id,
             )
             await self._fail_batch(event)

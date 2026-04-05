@@ -59,6 +59,23 @@ class K8sIngesterRunner(IngesterRunner):
         """Convert a PVC path + subdir to an S3 key prefix."""
         return f"{relative_path(work_dir, self._config.data_mount_path)}/{subdir}"
 
+    async def capture_logs(self, run_id: str) -> str:
+        """Capture recent pod logs for an ingester Job identified by run_id."""
+        namespace = self._config.namespace
+        label_selector = f"osa.io/role=ingester,osa.io/ingest-run-id={run_id}"
+        try:
+            pod_list = await self._core_api.list_namespaced_pod(
+                namespace, label_selector=label_selector
+            )
+            for pod in pod_list.items:
+                log_str = await self._core_api.read_namespaced_pod_log(
+                    pod.metadata.name, namespace, tail_lines=10
+                )
+                return log_str.strip() if log_str else ""
+        except Exception:
+            return ""
+        return ""
+
     async def run(
         self,
         ingester: IngesterDefinition,
@@ -101,6 +118,10 @@ class K8sIngesterRunner(IngesterRunner):
             if existing and existing.startswith("active:"):
                 job_name_to_watch = existing.split(":", 1)[1]
             else:
+                # Clear stale output from previous failed runs
+                output_prefix = self._s3_prefix(work_dir, "output")
+                await self._s3.delete_objects(output_prefix)
+
                 spec = self._build_job_spec(
                     ingester,
                     work_dir=work_dir,
@@ -223,6 +244,9 @@ class K8sIngesterRunner(IngesterRunner):
         }
         if convention_srn is not None:
             labels["osa.io/convention"] = label_value(convention_srn)
+        if inputs and inputs.ingest_run_id:
+            labels["osa.io/ingest-run-id"] = inputs.ingest_run_id
+            labels["osa.io/ingest-run-batch"] = str(inputs.batch_index)
 
         env = [
             V1EnvVar(name="OSA_IN", value="/osa/in"),

@@ -44,6 +44,10 @@ class OciHookRunner(HookRunner):
         self._host_data_dir = host_data_dir
         self._container_data_dir = container_data_dir
 
+    async def capture_logs(self, run_id: str) -> str:
+        """OCI containers are deleted after run — logs captured inline during execution."""
+        return ""
+
     async def run(
         self,
         hook: HookDefinition,

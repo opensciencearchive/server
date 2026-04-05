@@ -59,6 +59,28 @@ class K8sHookRunner(HookRunner):
         """Convert a PVC path + subdir to an S3 key prefix."""
         return f"{relative_path(work_dir, self._config.data_mount_path)}/{subdir}"
 
+    async def capture_logs(self, run_id: str) -> str:
+        """Capture recent pod logs for a hook Job identified by run_id."""
+        namespace = self._config.namespace
+        # Find the Job by label — run_id format is {uuid}_b{batch}
+        ingest_run_id = run_id.split("_b", 1)[0]
+        batch_index = run_id.split("_b", 1)[1] if "_b" in run_id else "0"
+        label_selector = (
+            f"osa.io/ingest-run-id={ingest_run_id},osa.io/ingest-run-batch={batch_index}"
+        )
+        try:
+            pod_list = await self._core_api.list_namespaced_pod(
+                namespace, label_selector=label_selector
+            )
+            for pod in pod_list.items:
+                log_str = await self._core_api.read_namespaced_pod_log(
+                    pod.metadata.name, namespace, tail_lines=10
+                )
+                return log_str.strip() if log_str else ""
+        except Exception:
+            return ""
+        return ""
+
     async def run(
         self,
         hook: HookDefinition,

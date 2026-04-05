@@ -1,5 +1,6 @@
 """RunIngester — runs ingester container on NextBatchRequested."""
 
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from osa.domain.deposition.service.convention import ConventionService
@@ -14,6 +15,9 @@ from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.ingester_runner import IngesterInputs, IngesterRunner
 from osa.infrastructure.logging import get_logger
+
+BACKPRESSURE_DELAY = timedelta(seconds=60)
+MAX_PENDING_BATCHES = 1
 
 log = get_logger(__name__)
 
@@ -34,6 +38,28 @@ class RunIngester(EventHandler[NextBatchRequested]):
         ingest_run = await self.ingest_repo.get(event.ingest_run_id)
         if ingest_run is None:
             raise NotFoundError(f"Ingest run not found: {event.ingest_run_id}")
+
+        # Backpressure: don't ingest faster than hooks can process
+        pending = (
+            ingest_run.batches_ingested - ingest_run.batches_completed - ingest_run.batches_failed
+        )
+        if pending >= MAX_PENDING_BATCHES:
+            log.info(
+                "[{short_id}] backpressure: {pending} batches pending, deferring next pull",
+                short_id=event.ingest_run_id[:8],
+                pending=pending,
+                ingest_run_id=event.ingest_run_id,
+            )
+            await self.outbox.append(
+                NextBatchRequested(
+                    id=EventId(uuid4()),
+                    ingest_run_id=event.ingest_run_id,
+                    convention_srn=event.convention_srn,
+                    batch_size=event.batch_size,
+                ),
+                deliver_after=datetime.now(UTC) + BACKPRESSURE_DELAY,
+            )
+            return
 
         if ingest_run.status == IngestStatus.PENDING:
             ingest_run.mark_running()
@@ -69,6 +95,8 @@ class RunIngester(EventHandler[NextBatchRequested]):
 
         inputs = IngesterInputs(
             convention_srn=convention.srn,
+            ingest_run_id=event.ingest_run_id,
+            batch_index=batch_index,
             config=convention.ingester.config,
             limit=effective_batch_limit,
             session=session,
@@ -84,10 +112,12 @@ class RunIngester(EventHandler[NextBatchRequested]):
                 work_dir=work_dir,
             )
         except PermanentError as e:
+            container_logs = await self.ingester_runner.capture_logs(event.ingest_run_id)
             log.error(
                 "[{short_id}] ingester permanently failed: {error}",
                 short_id=event.ingest_run_id[:8],
                 error=str(e),
+                container_logs=container_logs,
                 ingest_run_id=event.ingest_run_id,
             )
             await self._fail_ingestion(event)

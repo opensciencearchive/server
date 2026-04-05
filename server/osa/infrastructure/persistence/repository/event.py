@@ -32,6 +32,7 @@ class SQLAlchemyEventRepository(EventRepository):
         self,
         event: Event,
         consumer_groups: set[str],
+        deliver_after: datetime | None = None,
     ) -> None:
         """Save event to append-only log and create delivery rows."""
         now = datetime.now(UTC)
@@ -53,6 +54,7 @@ class SQLAlchemyEventRepository(EventRepository):
                 consumer_group=group,
                 status="pending",
                 retry_count=0,
+                deliver_after=deliver_after,
                 updated_at=now,
             )
             await self._session.execute(delivery_stmt)

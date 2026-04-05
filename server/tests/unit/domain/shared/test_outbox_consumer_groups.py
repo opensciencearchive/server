@@ -57,7 +57,7 @@ class TestOutboxAppendCreatesDeliveries:
         await outbox.append(event)
 
         mock_repo.save_with_deliveries.assert_called_once_with(
-            event, consumer_groups={"HandlerA", "HandlerB"}
+            event, consumer_groups={"HandlerA", "HandlerB"}, deliver_after=None
         )
 
     async def test_append_audit_only_event_creates_zero_deliveries(
@@ -73,7 +73,9 @@ class TestOutboxAppendCreatesDeliveries:
 
         await outbox.append(event)
 
-        mock_repo.save_with_deliveries.assert_called_once_with(event, consumer_groups=set())
+        mock_repo.save_with_deliveries.assert_called_once_with(
+            event, consumer_groups=set(), deliver_after=None
+        )
 
 
 class TestOutboxClaimByConsumerGroup:
