@@ -17,7 +17,7 @@ from osa.domain.shared.port.ingester_runner import IngesterInputs, IngesterRunne
 from osa.infrastructure.logging import get_logger
 
 BACKPRESSURE_DELAY = timedelta(seconds=60)
-MAX_PENDING_BATCHES = 1
+MAX_PENDING_BATCHES = 4
 
 log = get_logger(__name__)
 
