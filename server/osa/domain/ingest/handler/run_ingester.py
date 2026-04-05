@@ -17,7 +17,6 @@ from osa.domain.shared.port.ingester_runner import IngesterInputs, IngesterRunne
 from osa.infrastructure.logging import get_logger
 
 BACKPRESSURE_DELAY = timedelta(seconds=60)
-MAX_PENDING_BATCHES = 4
 
 log = get_logger(__name__)
 
@@ -39,15 +38,11 @@ class RunIngester(EventHandler[NextBatchRequested]):
         if ingest_run is None:
             raise NotFoundError(f"Ingest run not found: {event.ingest_run_id}")
 
-        # Backpressure: don't ingest faster than hooks can process
-        pending = (
-            ingest_run.batches_ingested - ingest_run.batches_completed - ingest_run.batches_failed
-        )
-        if pending >= MAX_PENDING_BATCHES:
+        # Backpressure: don't ingest if the cluster can't schedule more Jobs
+        if not await self.ingester_runner.has_capacity():
             log.info(
-                "[{short_id}] backpressure: {pending} batches pending, deferring next pull for {delay}s",
+                "[{short_id}] backpressure: cluster has pending Jobs, deferring next pull for {delay}s",
                 short_id=event.ingest_run_id[:8],
-                pending=pending,
                 delay=int(BACKPRESSURE_DELAY.total_seconds()),
                 ingest_run_id=event.ingest_run_id,
             )

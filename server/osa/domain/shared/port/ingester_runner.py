@@ -56,3 +56,11 @@ class IngesterRunner(Protocol):
         if logs are unavailable. Used for failure diagnostics.
         """
         ...
+
+    async def has_capacity(self) -> bool:
+        """Check whether the cluster can schedule more Jobs.
+
+        Returns False if there are pending (unschedulable) Jobs in the namespace.
+        Used by the ingester to avoid submitting work that will just timeout.
+        """
+        ...

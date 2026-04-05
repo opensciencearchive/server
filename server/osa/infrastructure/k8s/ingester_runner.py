@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -20,6 +19,7 @@ from osa.domain.shared.model.source import IngesterDefinition
 from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.port.ingester_runner import IngesterInputs, IngesterOutput, IngesterRunner
 from osa.infrastructure.k8s.errors import classify_api_error
+from osa.infrastructure.logging import get_logger
 from osa.infrastructure.k8s.naming import job_name, label_value, sanitize_label
 from osa.infrastructure.runner_utils import (
     relative_path,
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
     from osa.infrastructure.s3.client import S3Client
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 SCHEDULING_TIMEOUT = 120
 
@@ -58,6 +58,20 @@ class K8sIngesterRunner(IngesterRunner):
     def _s3_prefix(self, work_dir: Path, subdir: str) -> str:
         """Convert a PVC path + subdir to an S3 key prefix."""
         return f"{relative_path(work_dir, self._config.data_mount_path)}/{subdir}"
+
+    async def has_capacity(self) -> bool:
+        """Check for pending (unschedulable) pods in the namespace."""
+        namespace = self._config.namespace
+        try:
+            pod_list = await self._core_api.list_namespaced_pod(
+                namespace, field_selector="status.phase=Pending"
+            )
+            return len(pod_list.items) == 0
+        except Exception as e:
+            logger.warn(
+                "Failed to check cluster capacity: {error} — assuming capacity", error=str(e)
+            )
+            return True
 
     async def capture_logs(self, run_id: str) -> str:
         """Capture recent pod logs for an ingester Job identified by run_id."""
@@ -133,12 +147,10 @@ class K8sIngesterRunner(IngesterRunner):
 
                 await self._batch_api.create_namespaced_job(namespace, spec)
                 logger.info(
-                    "Created K8s ingester Job",
-                    extra={
-                        "job_name": job_name_to_watch,
-                        "namespace": namespace,
-                        "image": f"{ingester.image}@{ingester.digest}",
-                    },
+                    "Created K8s ingester Job: {job_name}",
+                    job_name=job_name_to_watch,
+                    namespace=namespace,
+                    image=f"{ingester.image}@{ingester.digest}",
                 )
 
             # Phase 1: Scheduling
@@ -153,12 +165,10 @@ class K8sIngesterRunner(IngesterRunner):
 
             output = await self._parse_source_output(work_dir, files_dir)
             logger.info(
-                "Source completed",
-                extra={
-                    "job_name": job_name_to_watch,
-                    "record_count": len(output.records),
-                    "has_session": output.session is not None,
-                },
+                "Source completed: {job_name} ({record_count} records)",
+                job_name=job_name_to_watch,
+                record_count=len(output.records),
+                has_session=output.session is not None,
             )
             return output
 
@@ -457,4 +467,4 @@ class K8sIngesterRunner(IngesterRunner):
         except Exception as exc:
             if getattr(exc, "status", None) == 404:
                 return
-            logger.warning("Failed to clean up K8s ingester Job", extra={"job_name": job_name})
+            logger.warn("Failed to clean up K8s ingester Job: {job_name}", job_name=job_name)
