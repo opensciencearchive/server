@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -20,6 +19,7 @@ from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.infrastructure.k8s.errors import classify_api_error
+from osa.infrastructure.logging import get_logger
 from osa.infrastructure.k8s.naming import job_name
 from osa.infrastructure.runner_utils import (
     detect_rejection,
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
     from osa.infrastructure.s3.client import S3Client
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 SCHEDULING_TIMEOUT = 120  # seconds to wait for pod to leave Pending
 
@@ -115,12 +115,21 @@ class K8sHookRunner(HookRunner):
             existing = await self._check_existing_job(namespace, hook.name, inputs.run_id)
 
             if existing == "succeeded":
-                # Read output from completed Job
+                logger.info(
+                    "Reusing output from completed hook Job (hook={hook_name}, run_id={run_id})",
+                    hook_name=hook.name,
+                    run_id=inputs.run_id,
+                )
                 return await self._parse_hook_result(hook, work_dir, start_time)
 
             if existing and existing.startswith("active:"):
                 # Attach to running Job
                 job_name_to_watch = existing.split(":", 1)[1]
+                logger.info(
+                    "Attaching to running hook Job: {job_name} (hook={hook_name})",
+                    job_name=job_name_to_watch,
+                    hook_name=hook.name,
+                )
             else:
                 # Create new Job (no existing or failed)
                 # Mount the parent of all per-record file dirs — works for
@@ -139,14 +148,10 @@ class K8sHookRunner(HookRunner):
 
                 await self._batch_api.create_namespaced_job(namespace, spec)
                 logger.info(
-                    "Created K8s Job",
-                    extra={
-                        "job_name": job_name_to_watch,
-                        "namespace": namespace,
-                        "image": f"{hook.runtime.image}@{hook.runtime.digest}",
-                        "hook_name": hook.name,
-                        "run_id": inputs.run_id,
-                    },
+                    "Created K8s hook Job: {job_name} (hook={hook_name}, run_id={run_id})",
+                    job_name=job_name_to_watch,
+                    hook_name=hook.name,
+                    run_id=inputs.run_id,
                 )
 
             # Phase 1: Wait for scheduling
@@ -160,6 +165,12 @@ class K8sHookRunner(HookRunner):
             )
 
             return await self._parse_hook_result(hook, work_dir, start_time)
+
+        except InfrastructureError as e:
+            # Capture logs before cleanup destroys the pod
+            if job_name_to_watch:
+                e.container_logs = await self._capture_pod_logs(job_name_to_watch, namespace)
+            raise
 
         finally:
             if job_name_to_watch:
@@ -446,13 +457,28 @@ class K8sHookRunner(HookRunner):
 
         raise TransientError(f"Watch timeout waiting for Job {job_name} completion")
 
+    async def _capture_pod_logs(self, job_name: str, namespace: str) -> str:
+        """Capture tail logs from a Job's pod. Returns empty if unavailable."""
+        try:
+            pod_list = await self._core_api.list_namespaced_pod(
+                namespace, label_selector=f"job-name={job_name}"
+            )
+            for pod in pod_list.items:
+                log_str = await self._core_api.read_namespaced_pod_log(
+                    pod.metadata.name, namespace, tail_lines=10
+                )
+                return log_str.strip() if log_str else ""
+        except Exception:
+            return ""
+        return ""
+
     async def _diagnose_failure(
         self,
         job_name: str,
         namespace: str,
         failure_info: str,
     ) -> InfrastructureError:
-        """Inspect pod status and return the appropriate exception."""
+        """Inspect pod status, capture logs, and return the appropriate exception."""
         if "DeadlineExceeded" in failure_info:
             return TransientError("Hook timed out (deadline exceeded)")
 
@@ -488,11 +514,12 @@ class K8sHookRunner(HookRunner):
                 namespace,
                 propagation_policy="Background",
             )
-            logger.info("Cleaned up K8s Job", extra={"job_name": job_name})
+            logger.info("Cleaned up K8s hook Job: {job_name}", job_name=job_name)
         except Exception as exc:
             if getattr(exc, "status", None) == 404:
                 return  # Already gone
-            logger.warning(
-                "Failed to clean up K8s Job",
-                extra={"job_name": job_name, "error": str(exc)},
+            logger.warn(
+                "Failed to clean up K8s hook Job: {job_name} ({error})",
+                job_name=job_name,
+                error=str(exc),
             )

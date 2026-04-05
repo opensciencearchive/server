@@ -25,6 +25,7 @@ class RunIngester(EventHandler[NextBatchRequested]):
     """Runs ingester container and emits IngesterBatchReady per batch."""
 
     __claim_timeout__ = 3600.0
+    __max_retries__ = 20
 
     ingest_repo: IngestRunRepository
     ingest_service: IngestService
@@ -41,7 +42,7 @@ class RunIngester(EventHandler[NextBatchRequested]):
         # Backpressure: don't ingest if the cluster can't schedule more Jobs
         if not await self.ingester_runner.has_capacity():
             log.info(
-                "[{short_id}] backpressure: cluster has pending Jobs, deferring next pull for {delay}s",
+                "[{short_id}] backpressure: cluster has pending Jobs, deferring next pull +{delay}s",
                 short_id=event.ingest_run_id[:8],
                 delay=int(BACKPRESSURE_DELAY.total_seconds()),
                 ingest_run_id=event.ingest_run_id,
@@ -108,12 +109,11 @@ class RunIngester(EventHandler[NextBatchRequested]):
                 work_dir=work_dir,
             )
         except PermanentError as e:
-            container_logs = await self.ingester_runner.capture_logs(event.ingest_run_id)
             log.error(
                 "[{short_id}] ingester permanently failed: {error}",
                 short_id=event.ingest_run_id[:8],
                 error=str(e),
-                container_logs=container_logs,
+                container_logs=e.container_logs or "",
                 ingest_run_id=event.ingest_run_id,
             )
             await self._fail_ingestion(event)

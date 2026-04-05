@@ -216,11 +216,11 @@ class Worker:
                         deliver_after = datetime.now(UTC) + timedelta(seconds=backoff_seconds)
                         logger.warn(
                             "Worker '{name}' transient failure: {error} "
-                            "(attempt={attempt}, next_retry={next_retry})",
+                            "(attempt={attempt}, next_retry=+{backoff}s)",
                             name=self.name,
                             error=str(e),
                             attempt=delivery.retry_count,
-                            next_retry=deliver_after.isoformat(),
+                            backoff=backoff_seconds,
                         )
                         await outbox.mark_failed_with_retry(
                             delivery.id,

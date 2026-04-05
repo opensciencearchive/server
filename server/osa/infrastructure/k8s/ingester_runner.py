@@ -127,10 +127,15 @@ class K8sIngesterRunner(IngesterRunner):
             )
 
             if existing == "succeeded":
+                logger.info("Reusing output from completed ingester Job")
                 return await self._parse_source_output(work_dir, files_dir)
 
             if existing and existing.startswith("active:"):
                 job_name_to_watch = existing.split(":", 1)[1]
+                logger.info(
+                    "Attaching to running ingester Job: {job_name}",
+                    job_name=job_name_to_watch,
+                )
             else:
                 # Clear stale output from previous failed runs
                 output_prefix = self._s3_prefix(work_dir, "output")
@@ -165,12 +170,18 @@ class K8sIngesterRunner(IngesterRunner):
 
             output = await self._parse_source_output(work_dir, files_dir)
             logger.info(
-                "Source completed: {job_name} ({record_count} records)",
+                "Ingester batch completed: {job_name} ({record_count} records)",
                 job_name=job_name_to_watch,
                 record_count=len(output.records),
                 has_session=output.session is not None,
             )
             return output
+
+        except InfrastructureError as e:
+            # Capture logs before cleanup destroys the pod
+            if job_name_to_watch:
+                e.container_logs = await self._capture_pod_logs(job_name_to_watch, namespace)
+            raise
 
         finally:
             if job_name_to_watch:
@@ -424,13 +435,28 @@ class K8sIngesterRunner(IngesterRunner):
 
         raise TransientError(f"Watch timeout waiting for ingester Job {job_name} completion")
 
+    async def _capture_pod_logs(self, job_name: str, namespace: str) -> str:
+        """Capture tail logs from a Job's pod. Returns empty if unavailable."""
+        try:
+            pod_list = await self._core_api.list_namespaced_pod(
+                namespace, label_selector=f"job-name={job_name}"
+            )
+            for pod in pod_list.items:
+                log_str = await self._core_api.read_namespaced_pod_log(
+                    pod.metadata.name, namespace, tail_lines=10
+                )
+                return log_str.strip() if log_str else ""
+        except Exception:
+            return ""
+        return ""
+
     async def _diagnose_failure(
         self,
         job_name: str,
         namespace: str,
         failure_info: str,
     ) -> InfrastructureError:
-        """Inspect pod status and return the appropriate exception."""
+        """Inspect pod status, capture logs, and return the appropriate exception."""
         if "DeadlineExceeded" in failure_info:
             return TransientError("Ingester timed out (deadline exceeded)")
 
@@ -464,6 +490,7 @@ class K8sIngesterRunner(IngesterRunner):
                 namespace,
                 propagation_policy="Background",
             )
+            logger.info("Cleaned up K8s ingester Job: {job_name}", job_name=job_name)
         except Exception as exc:
             if getattr(exc, "status", None) == 404:
                 return

@@ -59,6 +59,8 @@ class AuthorizationError(DomainError):
 class InfrastructureError(OSAError):
     """Base class for infrastructure/system errors."""
 
+    container_logs: str | None = None
+
 
 class StorageUnavailableError(InfrastructureError):
     """Storage backend (database, object store) is unavailable."""
