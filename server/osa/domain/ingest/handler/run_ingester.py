@@ -45,9 +45,10 @@ class RunIngester(EventHandler[NextBatchRequested]):
         )
         if pending >= MAX_PENDING_BATCHES:
             log.info(
-                "[{short_id}] backpressure: {pending} batches pending, deferring next pull",
+                "[{short_id}] backpressure: {pending} batches pending, deferring next pull for {delay}s",
                 short_id=event.ingest_run_id[:8],
                 pending=pending,
+                delay=int(BACKPRESSURE_DELAY.total_seconds()),
                 ingest_run_id=event.ingest_run_id,
             )
             await self.outbox.append(

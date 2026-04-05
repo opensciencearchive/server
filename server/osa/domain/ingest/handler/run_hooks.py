@@ -25,6 +25,7 @@ class RunHooks(EventHandler[IngesterBatchReady]):
     """Runs hook containers on an ingester batch and emits HookBatchCompleted."""
 
     __claim_timeout__ = 3600.0
+    __max_retries__ = 100
 
     ingest_repo: IngestRunRepository
     ingest_service: IngestService
