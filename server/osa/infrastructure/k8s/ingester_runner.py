@@ -137,9 +137,11 @@ class K8sIngesterRunner(IngesterRunner):
                     job_name=job_name_to_watch,
                 )
             else:
-                # Clear stale output from previous failed runs
+                # Clear stale output and files from previous failed runs
                 output_prefix = self._s3_prefix(work_dir, "output")
                 await self._s3.delete_objects(output_prefix)
+                files_prefix = relative_path(files_dir, self._config.data_mount_path)
+                await self._s3.delete_objects(files_prefix)
 
                 spec = self._build_job_spec(
                     ingester,
@@ -180,7 +182,14 @@ class K8sIngesterRunner(IngesterRunner):
         except InfrastructureError as e:
             # Capture logs before cleanup destroys the pod
             if job_name_to_watch:
-                e.container_logs = await self._capture_pod_logs(job_name_to_watch, namespace)
+                logs = await self._capture_pod_logs(job_name_to_watch, namespace)
+                e.container_logs = logs
+                if logs:
+                    logger.error(
+                        "Job {job_name} failed — container logs:\n{logs}",
+                        job_name=job_name_to_watch,
+                        logs=logs,
+                    )
             raise
 
         finally:

@@ -169,7 +169,14 @@ class K8sHookRunner(HookRunner):
         except InfrastructureError as e:
             # Capture logs before cleanup destroys the pod
             if job_name_to_watch:
-                e.container_logs = await self._capture_pod_logs(job_name_to_watch, namespace)
+                logs = await self._capture_pod_logs(job_name_to_watch, namespace)
+                e.container_logs = logs
+                if logs:
+                    logger.error(
+                        "Job {job_name} failed — container logs:\n{logs}",
+                        job_name=job_name_to_watch,
+                        logs=logs,
+                    )
             raise
 
         finally:
