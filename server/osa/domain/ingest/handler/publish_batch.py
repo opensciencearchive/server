@@ -14,6 +14,7 @@ from osa.domain.ingest.model.ingest_run import IngestStatus
 from osa.domain.ingest.model.ingester_record import IngesterRecord
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.ingest.port.storage import IngestStoragePort
+from osa.domain.ingest.service.ingest import IngestService
 from osa.domain.record.model.draft import RecordDraft
 from osa.domain.record.service import RecordService
 from osa.domain.shared.error import NotFoundError
@@ -35,6 +36,7 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
     feature_storage: FeatureStoragePort
     outbox: Outbox
     ingest_storage: IngestStoragePort
+    ingest_service: IngestService
 
     async def handle(self, event: HookBatchCompleted) -> None:
         ingest_run = await self.ingest_repo.get(event.ingest_run_id)
@@ -174,6 +176,15 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
                 total_published=updated.published_count,
                 ingest_run_id=event.ingest_run_id,
             )
+
+    async def on_exhausted(self, event: HookBatchCompleted) -> None:
+        """Called when publish retries are exhausted — account for the failed batch."""
+        log.error(
+            "batch {batch_index} publish retries exhausted",
+            batch_index=event.batch_index,
+            ingest_run_id=event.ingest_run_id,
+        )
+        await self.ingest_service.fail_batch(event.ingest_run_id)
 
 
 async def _get_passed_records(
