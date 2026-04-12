@@ -1,5 +1,7 @@
 """RunHooks — runs hook containers on an ingester batch."""
 
+from osa.domain.validation.model import HookResult
+
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,7 +11,7 @@ from osa.domain.ingest.model.ingester_record import IngesterRecord
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.ingest.port.storage import IngestStoragePort
 from osa.domain.ingest.service.ingest import IngestService
-from osa.domain.shared.error import NotFoundError, PermanentError
+from osa.domain.shared.error import NotFoundError, OOMError, PermanentError
 from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.outbox import Outbox
@@ -83,11 +85,23 @@ class RunHooks(EventHandler[IngesterBatchReady]):
             )
 
         # Run all hooks via HookService
+        results: list[HookResult] = []
         try:
             results = await self.hook_service.run_hooks_for_batch(
                 hooks=convention.hooks,
                 inputs=inputs,
                 work_dirs=work_dirs,
+            )
+        except OOMError as e:
+            # OOM exhaustion after retries — HookService already wrote outcomes
+            # (passed + errored) to disk. Fall through to emit HookBatchCompleted
+            # so PublishBatch can publish the records that DID pass.
+            log.warn(
+                "[{short_id}] batch {batch_index} OOM exhausted, publishing partial results: {error}",
+                short_id=event.ingest_run_id[:8],
+                batch_index=event.batch_index,
+                error=str(e),
+                ingest_run_id=event.ingest_run_id,
             )
         except PermanentError as e:
             log.error(
