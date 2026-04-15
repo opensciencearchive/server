@@ -60,6 +60,96 @@ def _make_runner(config: K8sConfig | None = None) -> K8sIngesterRunner:
 
 
 # ---------------------------------------------------------------------------
+# Backpressure capacity check
+# ---------------------------------------------------------------------------
+
+
+def _make_pod(*, phase: str = "Pending", conditions: list | None = None) -> MagicMock:
+    pod = MagicMock()
+    pod.status.phase = phase
+    pod.status.conditions = conditions
+    return pod
+
+
+def _make_condition(*, type_: str, reason: str, status: str = "False") -> MagicMock:
+    cond = MagicMock()
+    cond.type = type_
+    cond.reason = reason
+    cond.status = status
+    return cond
+
+
+class TestHasCapacity:
+    @pytest.mark.asyncio
+    async def test_no_pending_pods_returns_true(self):
+        runner = _make_runner()
+        runner._core_api = AsyncMock()
+        pod_list = MagicMock()
+        pod_list.items = []
+        runner._core_api.list_namespaced_pod.return_value = pod_list
+
+        assert await runner.has_capacity() is True
+
+    @pytest.mark.asyncio
+    async def test_pending_but_schedulable_returns_true(self):
+        """Pods in Pending that are actively scheduling (no Unschedulable condition)
+        should NOT trigger backpressure — they'll be Running in seconds."""
+        runner = _make_runner()
+        runner._core_api = AsyncMock()
+
+        # Pod is Pending with PodScheduled=True (normal startup)
+        pod = _make_pod(
+            phase="Pending",
+            conditions=[_make_condition(type_="PodScheduled", reason="", status="True")],
+        )
+        pod_list = MagicMock()
+        pod_list.items = [pod]
+        runner._core_api.list_namespaced_pod.return_value = pod_list
+
+        assert await runner.has_capacity() is True
+
+    @pytest.mark.asyncio
+    async def test_pending_no_conditions_returns_true(self):
+        """Pods in Pending with no conditions yet (just created) should not block."""
+        runner = _make_runner()
+        runner._core_api = AsyncMock()
+
+        pod = _make_pod(phase="Pending", conditions=None)
+        pod_list = MagicMock()
+        pod_list.items = [pod]
+        runner._core_api.list_namespaced_pod.return_value = pod_list
+
+        assert await runner.has_capacity() is True
+
+    @pytest.mark.asyncio
+    async def test_unschedulable_pod_returns_false(self):
+        """A pod with PodScheduled=False reason=Unschedulable means the cluster is full."""
+        runner = _make_runner()
+        runner._core_api = AsyncMock()
+
+        pod = _make_pod(
+            phase="Pending",
+            conditions=[
+                _make_condition(type_="PodScheduled", reason="Unschedulable", status="False"),
+            ],
+        )
+        pod_list = MagicMock()
+        pod_list.items = [pod]
+        runner._core_api.list_namespaced_pod.return_value = pod_list
+
+        assert await runner.has_capacity() is False
+
+    @pytest.mark.asyncio
+    async def test_api_failure_assumes_capacity(self):
+        """If the K8s API fails, assume capacity (don't block on transient API errors)."""
+        runner = _make_runner()
+        runner._core_api = AsyncMock()
+        runner._core_api.list_namespaced_pod.side_effect = Exception("API timeout")
+
+        assert await runner.has_capacity() is True
+
+
+# ---------------------------------------------------------------------------
 # Job spec differences (T021)
 # ---------------------------------------------------------------------------
 

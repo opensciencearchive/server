@@ -60,13 +60,23 @@ class K8sIngesterRunner(IngesterRunner):
         return f"{relative_path(work_dir, self._config.data_mount_path)}/{subdir}"
 
     async def has_capacity(self) -> bool:
-        """Check for pending (unschedulable) pods in the namespace."""
+        """Check for unschedulable pods in the namespace.
+
+        Only triggers backpressure when a pod has PodScheduled=False with
+        reason=Unschedulable, meaning the cluster genuinely can't place it.
+        Pods that are Pending but actively scheduling (image pull, node
+        assignment) are normal and should not block ingestion.
+        """
         namespace = self._config.namespace
         try:
             pod_list = await self._core_api.list_namespaced_pod(
                 namespace, field_selector="status.phase=Pending"
             )
-            return len(pod_list.items) == 0
+            for pod in pod_list.items:
+                for condition in pod.status.conditions or []:
+                    if condition.type == "PodScheduled" and condition.reason == "Unschedulable":
+                        return False
+            return True
         except Exception as e:
             logger.warn(
                 "Failed to check cluster capacity: {error} — assuming capacity", error=str(e)
