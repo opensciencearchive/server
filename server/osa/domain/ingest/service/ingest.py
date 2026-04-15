@@ -96,6 +96,17 @@ class IngestService(Service):
         )
         return ingest_run
 
+    async def complete_batch(self, ingest_run_id: IngestRunId, published_count: int) -> None:
+        """Account for a successfully processed batch.
+
+        Increments batches_completed and published_count atomically,
+        then checks the completion condition.
+        """
+        ingest_run = await self.ingest_repo.increment_completed(
+            ingest_run_id, published_count=published_count
+        )
+        await self._check_completion(ingest_run)
+
     async def fail_batch(self, ingest_run_id: IngestRunId) -> None:
         """Account for a batch that permanently failed hook processing.
 
@@ -131,4 +142,10 @@ class IngestService(Service):
                 ingest_run_id=ingest_run.id,
                 total_published=ingest_run.published_count,
             )
+        )
+        log.info(
+            "[{short_id}] COMPLETE: {total_published} records published",
+            short_id=str(ingest_run.id)[:8],
+            total_published=ingest_run.published_count,
+            ingest_run_id=ingest_run.id,
         )

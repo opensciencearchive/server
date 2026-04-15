@@ -209,7 +209,14 @@ class Worker:
                             name=self.name,
                             error=str(e),
                         )
-                        await handler.on_exhausted(delivery.event)
+                        try:
+                            await handler.on_exhausted(delivery.event)
+                        except Exception as exhausted_err:
+                            logger.error(
+                                "Worker '{name}' on_exhausted failed: {error}",
+                                name=self.name,
+                                error=str(exhausted_err),
+                            )
                         await outbox.mark_failed(delivery.id, str(e))
                     else:
                         backoff_seconds = min(300, 60 * (2**delivery.retry_count))
@@ -238,7 +245,14 @@ class Worker:
                     error=str(e),
                 )
                 for delivery in result.deliveries:
-                    await handler.on_exhausted(delivery.event)
+                    try:
+                        await handler.on_exhausted(delivery.event)
+                    except Exception as exhausted_err:
+                        logger.error(
+                            "Worker '{name}' on_exhausted failed: {error}",
+                            name=self.name,
+                            error=str(exhausted_err),
+                        )
                     await outbox.mark_failed(delivery.id, str(e))
 
             except Exception as e:
@@ -252,7 +266,14 @@ class Worker:
                 for delivery in result.deliveries:
                     exhausted = delivery.retry_count + 1 >= self._max_retries
                     if exhausted:
-                        await handler.on_exhausted(delivery.event)
+                        try:
+                            await handler.on_exhausted(delivery.event)
+                        except Exception as exhausted_err:
+                            logger.error(
+                                "Worker '{name}' on_exhausted failed: {error}",
+                                name=self.name,
+                                error=str(exhausted_err),
+                            )
                         await outbox.mark_failed(delivery.id, str(e))
                     else:
                         backoff_seconds = min(30, 5 ** (delivery.retry_count + 1))

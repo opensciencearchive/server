@@ -1,6 +1,5 @@
 """PublishBatch — reads hook outputs, bulk-publishes passing records."""
 
-from datetime import UTC, datetime
 from uuid import uuid4
 
 from osa.domain.deposition.service.convention import ConventionService
@@ -8,9 +7,7 @@ from osa.domain.feature.port.storage import FeatureStoragePort
 from osa.domain.ingest.event.events import (
     HookBatchCompleted,
     IngestBatchPublished,
-    IngestCompleted,
 )
-from osa.domain.ingest.model.ingest_run import IngestStatus
 from osa.domain.ingest.model.ingester_record import IngesterRecord
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.ingest.port.storage import IngestStoragePort
@@ -151,31 +148,8 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
                     )
                 )
 
-        # Update counters atomically
-        updated = await self.ingest_repo.increment_completed(
-            event.ingest_run_id,
-            published_count=published_count,
-        )
-
-        # Check completion condition
-        if updated.is_complete and updated.status == IngestStatus.RUNNING:
-            updated.check_completion(datetime.now(UTC))
-            await self.ingest_repo.save(updated)
-
-            await self.outbox.append(
-                IngestCompleted(
-                    id=EventId(uuid4()),
-                    ingest_run_id=event.ingest_run_id,
-                    total_published=updated.published_count,
-                )
-            )
-            short_id = event.ingest_run_id[:8]
-            log.info(
-                "[{short_id}] COMPLETE: {total_published} records published",
-                short_id=short_id,
-                total_published=updated.published_count,
-                ingest_run_id=event.ingest_run_id,
-            )
+        # Update counters and check completion via service
+        await self.ingest_service.complete_batch(event.ingest_run_id, published_count)
 
     async def on_exhausted(self, event: HookBatchCompleted) -> None:
         """Called when publish retries are exhausted — account for the failed batch."""
