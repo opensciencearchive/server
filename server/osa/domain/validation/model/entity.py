@@ -24,8 +24,6 @@ class ValidationRun(Entity):
         if not self.results:
             return None
         statuses = [r.status for r in self.results]
-        if HookStatus.FAILED in statuses:
-            return HookStatus.FAILED
         if HookStatus.REJECTED in statuses:
             return HookStatus.REJECTED
         return HookStatus.PASSED

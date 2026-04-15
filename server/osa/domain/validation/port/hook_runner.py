@@ -43,3 +43,12 @@ class HookRunner(Port, Protocol):
         ``input/`` is ephemeral (cleaned after run); ``output/`` persists for later reading.
         """
         ...
+
+    @abstractmethod
+    async def capture_logs(self, run_id: str) -> str:
+        """Capture recent container logs for a run.
+
+        Returns the last few lines of container/pod output, or empty string
+        if logs are unavailable. Used for failure diagnostics.
+        """
+        ...

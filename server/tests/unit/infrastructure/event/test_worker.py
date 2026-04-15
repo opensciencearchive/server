@@ -358,9 +358,12 @@ class TestWorkerStartStop:
         # Act - Run one poll cycle
         await worker._poll_once()
 
-        # Assert - Event should be marked as failed using delivery_id
-        outbox.mark_failed_with_retry.assert_called_once_with(
-            delivery_id, "Processing failed", max_retries=3
-        )
+        # Assert - Event should be marked as failed using delivery_id with backoff
+        outbox.mark_failed_with_retry.assert_called_once()
+        call_args = outbox.mark_failed_with_retry.call_args
+        assert call_args[0][0] == delivery_id
+        assert call_args[0][1] == "Processing failed"
+        assert call_args[1]["max_retries"] == 3
+        assert call_args[1]["deliver_after"] is not None
         assert worker.state.failed_count == 1
         assert worker.state.error is not None

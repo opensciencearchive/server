@@ -1,6 +1,5 @@
 """PublishBatch — reads hook outputs, bulk-publishes passing records."""
 
-from datetime import UTC, datetime
 from uuid import uuid4
 
 from osa.domain.deposition.service.convention import ConventionService
@@ -8,12 +7,11 @@ from osa.domain.feature.port.storage import FeatureStoragePort
 from osa.domain.ingest.event.events import (
     HookBatchCompleted,
     IngestBatchPublished,
-    IngestCompleted,
 )
-from osa.domain.ingest.model.ingest_run import IngestStatus
 from osa.domain.ingest.model.ingester_record import IngesterRecord
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.ingest.port.storage import IngestStoragePort
+from osa.domain.ingest.service.ingest import IngestService
 from osa.domain.record.model.draft import RecordDraft
 from osa.domain.record.service import RecordService
 from osa.domain.shared.error import NotFoundError
@@ -35,24 +33,23 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
     feature_storage: FeatureStoragePort
     outbox: Outbox
     ingest_storage: IngestStoragePort
+    ingest_service: IngestService
 
     async def handle(self, event: HookBatchCompleted) -> None:
-        ingest_run = await self.ingest_repo.get(event.ingest_run_srn)
+        ingest_run = await self.ingest_repo.get(event.ingest_run_id)
         if ingest_run is None:
-            raise NotFoundError(f"Ingest run not found: {event.ingest_run_srn}")
+            raise NotFoundError(f"Ingest run not found: {event.ingest_run_id}")
 
         convention = await self.convention_service.get_convention(
             ConventionSRN.parse(ingest_run.convention_srn)
         )
 
         # Read ingester records via storage port (filesystem or S3)
-        raw_records = await self.ingest_storage.read_records(
-            event.ingest_run_srn, event.batch_index
-        )
+        raw_records = await self.ingest_storage.read_records(event.ingest_run_id, event.batch_index)
         ingester_records = IngesterRecord.from_dicts(raw_records)
 
         # batch_dir used as locator for hook outcome reads
-        batch_dir = str(self.ingest_storage.batch_dir(event.ingest_run_srn, event.batch_index))
+        batch_dir = str(self.ingest_storage.batch_dir(event.ingest_run_id, event.batch_index))
 
         # Read hook outcomes for all hooks
         expected_features = [h.name for h in convention.hooks]
@@ -67,7 +64,7 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
         )
 
         # Log outcome breakdown per hook
-        short_id = event.ingest_run_srn.rsplit(":", 1)[-1][:8]
+        short_id = event.ingest_run_id[:8]
         total = len(ingester_records)
         for hook_name in expected_features:
             outcomes = await self.feature_storage.read_batch_outcomes(str(batch_dir), hook_name)
@@ -88,7 +85,7 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
                 rejected=rejected,
                 errored=errored,
                 missing=missing,
-                ingest_run_srn=event.ingest_run_srn,
+                ingest_run_id=event.ingest_run_id,
             )
 
         published_count = 0
@@ -100,7 +97,7 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
                     RecordDraft(
                         source=IngestSource(
                             id=f"{ingest_run.convention_srn}:{record.source_id}",
-                            ingest_run_srn=ingest_run.srn,
+                            ingest_run_id=ingest_run.id,
                             upstream_source=record.source_id,
                         ),
                         metadata=record.metadata,
@@ -133,7 +130,7 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
                 published=published_count,
                 passed=len(passed_records),
                 duplicates=len(drafts) - published_count,
-                ingest_run_srn=event.ingest_run_srn,
+                ingest_run_id=event.ingest_run_id,
             )
 
             # Emit IngestBatchPublished for feature insertion
@@ -141,7 +138,7 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
                 await self.outbox.append(
                     IngestBatchPublished(
                         id=EventId(uuid4()),
-                        ingest_run_srn=event.ingest_run_srn,
+                        ingest_run_id=event.ingest_run_id,
                         convention_srn=ingest_run.convention_srn,
                         batch_index=event.batch_index,
                         published_srns=published_srns,
@@ -151,31 +148,17 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
                     )
                 )
 
-        # Update counters atomically
-        updated = await self.ingest_repo.increment_completed(
-            event.ingest_run_srn,
-            published_count=published_count,
+        # Update counters and check completion via service
+        await self.ingest_service.complete_batch(event.ingest_run_id, published_count)
+
+    async def on_exhausted(self, event: HookBatchCompleted) -> None:
+        """Called when publish retries are exhausted — account for the failed batch."""
+        log.error(
+            "batch {batch_index} publish retries exhausted",
+            batch_index=event.batch_index,
+            ingest_run_id=event.ingest_run_id,
         )
-
-        # Check completion condition
-        if updated.is_complete and updated.status == IngestStatus.RUNNING:
-            updated.check_completion(datetime.now(UTC))
-            await self.ingest_repo.save(updated)
-
-            await self.outbox.append(
-                IngestCompleted(
-                    id=EventId(uuid4()),
-                    ingest_run_srn=event.ingest_run_srn,
-                    total_published=updated.published_count,
-                )
-            )
-            short_id = event.ingest_run_srn.rsplit(":", 1)[-1][:8]
-            log.info(
-                "[{short_id}] COMPLETE: {total_published} records published",
-                short_id=short_id,
-                total_published=updated.published_count,
-                ingest_run_srn=event.ingest_run_srn,
-            )
+        await self.ingest_service.fail_batch(event.ingest_run_id)
 
 
 async def _get_passed_records(

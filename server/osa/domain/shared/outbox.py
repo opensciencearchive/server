@@ -1,5 +1,6 @@
 """Outbox - domain service for reliable event delivery."""
 
+from datetime import datetime
 from typing import TypeVar
 
 from osa.domain.shared.event import ClaimResult, Event
@@ -24,7 +25,7 @@ class Outbox(Service):
     _repo: EventRepository
     _registry: SubscriptionRegistry
 
-    async def append(self, event: Event) -> None:
+    async def append(self, event: Event, *, deliver_after: datetime | None = None) -> None:
         """Add an event to the outbox for delivery.
 
         Creates one delivery row per consumer group subscribed to this event type.
@@ -32,10 +33,13 @@ class Outbox(Service):
 
         Args:
             event: The event to append.
+            deliver_after: If set, deliveries won't be claimed until this time.
         """
         event_type_name = type(event).__name__
         consumer_groups = self._registry.get(event_type_name, set())
-        await self._repo.save_with_deliveries(event, consumer_groups=consumer_groups)
+        await self._repo.save_with_deliveries(
+            event, consumer_groups=consumer_groups, deliver_after=deliver_after
+        )
 
     async def claim(
         self,
@@ -80,6 +84,7 @@ class Outbox(Service):
         delivery_id: str,
         error: str,
         max_retries: int,
+        deliver_after: datetime | None = None,
     ) -> None:
         """Mark a delivery as failed, with retry logic.
 
@@ -90,8 +95,12 @@ class Outbox(Service):
             delivery_id: The delivery row ID.
             error: Error message.
             max_retries: Maximum retry attempts before marking as failed.
+            deliver_after: If set, the delivery won't be eligible for claiming
+                until this timestamp. Used for transient resource backoff.
         """
-        await self._repo.mark_failed_with_retry(delivery_id, error=error, max_retries=max_retries)
+        await self._repo.mark_failed_with_retry(
+            delivery_id, error=error, max_retries=max_retries, deliver_after=deliver_after
+        )
 
     async def reset_stale_claims(self, timeout_seconds: float) -> int:
         """Reset deliveries that have been claimed for too long.

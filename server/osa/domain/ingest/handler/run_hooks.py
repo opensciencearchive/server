@@ -1,5 +1,7 @@
 """RunHooks — runs hook containers on an ingester batch."""
 
+from osa.domain.validation.model import HookResult
+
 from pathlib import Path
 from uuid import uuid4
 
@@ -8,7 +10,8 @@ from osa.domain.ingest.event.events import HookBatchCompleted, IngesterBatchRead
 from osa.domain.ingest.model.ingester_record import IngesterRecord
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.ingest.port.storage import IngestStoragePort
-from osa.domain.shared.error import NotFoundError
+from osa.domain.ingest.service.ingest import IngestService
+from osa.domain.shared.error import NotFoundError, OOMError, PermanentError
 from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.outbox import Outbox
@@ -24,37 +27,37 @@ class RunHooks(EventHandler[IngesterBatchReady]):
     """Runs hook containers on an ingester batch and emits HookBatchCompleted."""
 
     __claim_timeout__ = 3600.0
+    __max_retries__ = 100
 
     ingest_repo: IngestRunRepository
+    ingest_service: IngestService
     convention_service: ConventionService
     hook_service: HookService
     outbox: Outbox
     ingest_storage: IngestStoragePort
 
     async def handle(self, event: IngesterBatchReady) -> None:
-        ingest_run = await self.ingest_repo.get(event.ingest_run_srn)
+        ingest_run = await self.ingest_repo.get(event.ingest_run_id)
         if ingest_run is None:
-            raise NotFoundError(f"Ingest run not found: {event.ingest_run_srn}")
+            raise NotFoundError(f"Ingest run not found: {event.ingest_run_id}")
 
         convention = await self.convention_service.get_convention(
             ConventionSRN.parse(ingest_run.convention_srn)
         )
 
         # Read records via storage port (filesystem or S3)
-        raw_records = await self.ingest_storage.read_records(
-            event.ingest_run_srn, event.batch_index
-        )
+        raw_records = await self.ingest_storage.read_records(event.ingest_run_id, event.batch_index)
         records = IngesterRecord.from_dicts(raw_records)
 
         if not records:
             log.warn(
                 "ingest batch {batch_index}: no records to process",
                 batch_index=event.batch_index,
-                ingest_run_srn=event.ingest_run_srn,
+                ingest_run_id=event.ingest_run_id,
             )
 
         # Build files_dirs from ingester files (Path locators for runner volume mounts)
-        files_base = self.ingest_storage.batch_files_dir(event.ingest_run_srn, event.batch_index)
+        files_base = self.ingest_storage.batch_files_dir(event.ingest_run_id, event.batch_index)
         files_dirs: dict[str, Path] = {}
         for record in records:
             if record.files:
@@ -70,7 +73,7 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                 )
                 for r in records
             ],
-            run_id=f"{event.ingest_run_srn}_batch{event.batch_index}",
+            run_id=f"{event.ingest_run_id}_b{event.batch_index}",
             files_dirs=files_dirs,
         )
 
@@ -78,17 +81,41 @@ class RunHooks(EventHandler[IngesterBatchReady]):
         work_dirs: dict[str, Path] = {}
         for hook in convention.hooks:
             work_dirs[hook.name] = self.ingest_storage.hook_work_dir(
-                event.ingest_run_srn, event.batch_index, hook.name
+                event.ingest_run_id, event.batch_index, hook.name
             )
 
         # Run all hooks via HookService
-        results = await self.hook_service.run_hooks_for_batch(
-            hooks=convention.hooks,
-            inputs=inputs,
-            work_dirs=work_dirs,
-        )
+        results: list[HookResult] = []
+        try:
+            results = await self.hook_service.run_hooks_for_batch(
+                hooks=convention.hooks,
+                inputs=inputs,
+                work_dirs=work_dirs,
+            )
+        except OOMError as e:
+            # OOM exhaustion after retries — HookService already wrote outcomes
+            # (passed + errored) to disk. Fall through to emit HookBatchCompleted
+            # so PublishBatch can publish the records that DID pass.
+            log.warn(
+                "[{short_id}] batch {batch_index} OOM exhausted, publishing partial results: {error}",
+                short_id=event.ingest_run_id[:8],
+                batch_index=event.batch_index,
+                error=str(e),
+                ingest_run_id=event.ingest_run_id,
+            )
+        except PermanentError as e:
+            log.error(
+                "[{short_id}] batch {batch_index} permanently failed: {error}",
+                short_id=event.ingest_run_id[:8],
+                batch_index=event.batch_index,
+                error=str(e),
+                container_logs=e.container_logs or "",
+                ingest_run_id=event.ingest_run_id,
+            )
+            await self._fail_batch(event)
+            return
 
-        short_id = event.ingest_run_srn.rsplit(":", 1)[-1][:8]
+        short_id = event.ingest_run_id[:8]
         for result in results:
             log.info(
                 "[{short_id}] batch {batch_index} hook={hook_name}: {status} in {duration:.1f}s",
@@ -97,14 +124,27 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                 hook_name=result.hook_name,
                 status=result.status.value,
                 duration=result.duration_seconds,
-                ingest_run_srn=event.ingest_run_srn,
+                ingest_run_id=event.ingest_run_id,
             )
 
         # Emit HookBatchCompleted
         await self.outbox.append(
             HookBatchCompleted(
                 id=EventId(uuid4()),
-                ingest_run_srn=event.ingest_run_srn,
+                ingest_run_id=event.ingest_run_id,
                 batch_index=event.batch_index,
             )
         )
+
+    async def on_exhausted(self, event: IngesterBatchReady) -> None:
+        """Called when transient retries are exhausted — account for the failed batch."""
+        log.error(
+            "batch {batch_index} retries exhausted",
+            batch_index=event.batch_index,
+            ingest_run_id=event.ingest_run_id,
+        )
+        await self._fail_batch(event)
+
+    async def _fail_batch(self, event: IngesterBatchReady) -> None:
+        """Account for a permanently failed batch."""
+        await self.ingest_service.fail_batch(event.ingest_run_id)

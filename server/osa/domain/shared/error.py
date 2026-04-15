@@ -59,6 +59,8 @@ class AuthorizationError(DomainError):
 class InfrastructureError(OSAError):
     """Base class for infrastructure/system errors."""
 
+    container_logs: str | None = None
+
 
 class StorageUnavailableError(InfrastructureError):
     """Storage backend (database, object store) is unavailable."""
@@ -70,6 +72,18 @@ class ExternalServiceError(InfrastructureError):
 
 class ConfigurationError(InfrastructureError):
     """System misconfiguration detected."""
+
+
+class TransientError(InfrastructureError):
+    """Temporary failure — worker retries with backoff."""
+
+
+class PermanentError(InfrastructureError):
+    """Unrecoverable failure — worker gives up."""
+
+
+class OOMError(PermanentError):
+    """Container killed by out-of-memory. HookService intercepts for memory retry."""
 
 
 # =============================================================================

@@ -8,9 +8,8 @@ import time
 from pathlib import Path
 
 import aiodocker
-import logfire
-
-from osa.domain.shared.error import ExternalServiceError
+from osa.domain.shared.error import OOMError, TransientError
+from osa.infrastructure.logging import get_logger
 from osa.domain.shared.model.source import IngesterDefinition
 from osa.domain.shared.port.ingester_runner import IngesterInputs, IngesterOutput, IngesterRunner
 from osa.infrastructure.runner_utils import (
@@ -18,6 +17,9 @@ from osa.infrastructure.runner_utils import (
     parse_records_file,
     parse_session_file,
 )
+
+
+log = get_logger(__name__)
 
 
 class OciIngesterRunner(IngesterRunner):
@@ -44,6 +46,14 @@ class OciIngesterRunner(IngesterRunner):
         self._docker = docker
         self._host_data_dir = host_data_dir
         self._container_data_dir = container_data_dir
+
+    async def has_capacity(self) -> bool:
+        """Docker doesn't have scheduling contention."""
+        return True
+
+    async def capture_logs(self, run_id: str) -> str:
+        """OCI containers are deleted after run — logs captured inline during execution."""
+        return ""
 
     async def run(
         self,
@@ -92,13 +102,13 @@ class OciIngesterRunner(IngesterRunner):
                 return result
             except asyncio.TimeoutError:
                 duration = time.monotonic() - start_time
-                logfire.error(
-                    "Ingester timed out",
+                log.error(
+                    "Ingester timed out after {timeout}s",
                     image=ingester.image,
                     timeout=timeout,
                     duration=duration,
                 )
-                raise ExternalServiceError(f"Ingester timed out after {timeout}s")
+                raise TransientError(f"Ingester timed out after {timeout}s")
         finally:
             rmtree(staging_dir, onexc=_force_remove)
 
@@ -159,22 +169,26 @@ class OciIngesterRunner(IngesterRunner):
             oom_killed = inspect_data.get("State", {}).get("OOMKilled", False)
 
             if oom_killed:
-                raise ExternalServiceError("Ingester killed by OOM")
+                raise OOMError("Ingester killed by OOM")
 
             if exit_code != 0:
                 logs = await container.log(stdout=True, stderr=True)
                 logs_str = "".join(logs) if logs else ""
-                raise ExternalServiceError(
-                    f"Ingester exited with code {exit_code}: {logs_str[:500]}"
+                log.error(
+                    "Ingester exited with code {exit_code}",
+                    exit_code=exit_code,
+                    image=ingester.image,
+                    container_logs=logs_str[:2000],
                 )
+                raise TransientError(f"Ingester exited with code {exit_code}")
 
             records = parse_records_file(output_dir)
             session = parse_session_file(output_dir)
             return IngesterOutput(records=records, session=session, files_dir=files_dir)
 
         except aiodocker.DockerError as e:
-            logfire.error("Docker error running ingester", error=str(e))
-            raise ExternalServiceError(f"Docker error: {e}") from e
+            log.error("Docker error running ingester: {error}", error=str(e))
+            raise TransientError(f"Docker error: {e}") from e
         finally:
             if container is not None:
                 try:
@@ -212,6 +226,6 @@ class OciIngesterRunner(IngesterRunner):
             pass
 
         # Pull from registry as last resort
-        logfire.info("Pulling ingester image", image=image)
+        log.info("Pulling ingester image: {image}", image=image)
         await self._docker.images.pull(image)
         return image

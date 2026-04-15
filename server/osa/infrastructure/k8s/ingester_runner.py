@@ -4,17 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from osa.config import K8sConfig
-from osa.domain.shared.error import ExternalServiceError, InfrastructureError
+from osa.domain.shared.error import (
+    InfrastructureError,
+    OOMError,
+    PermanentError,
+    TransientError,
+)
 from osa.domain.shared.model.source import IngesterDefinition
 from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.port.ingester_runner import IngesterInputs, IngesterOutput, IngesterRunner
 from osa.infrastructure.k8s.errors import classify_api_error
+from osa.infrastructure.logging import get_logger
 from osa.infrastructure.k8s.naming import job_name, label_value, sanitize_label
 from osa.infrastructure.runner_utils import (
     relative_path,
@@ -22,11 +27,11 @@ from osa.infrastructure.runner_utils import (
 )
 
 if TYPE_CHECKING:
-    from kubernetes_asyncio.client import ApiClient, BatchV1Api, CoreV1Api, V1Job
+    from kubernetes_asyncio.client import ApiClient, V1Job
 
     from osa.infrastructure.s3.client import S3Client
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 SCHEDULING_TIMEOUT = 120
 
@@ -40,17 +45,60 @@ class K8sIngesterRunner(IngesterRunner):
     - Three volume mounts: input (ro), output (rw), files (rw)
     - Higher resource defaults (3600s, 4g)
     - Source-specific env vars (OSA_FILES, OSA_SINCE, etc.)
-    - Errors raise ExternalServiceError (not returned as result values)
     """
 
     def __init__(self, api_client: ApiClient, config: K8sConfig, s3: S3Client) -> None:
-        self._api_client = api_client
+        from kubernetes_asyncio.client import BatchV1Api, CoreV1Api
+
+        self._batch_api = BatchV1Api(api_client)
+        self._core_api = CoreV1Api(api_client)
         self._config = config
         self._s3 = s3
 
     def _s3_prefix(self, work_dir: Path, subdir: str) -> str:
         """Convert a PVC path + subdir to an S3 key prefix."""
         return f"{relative_path(work_dir, self._config.data_mount_path)}/{subdir}"
+
+    async def has_capacity(self) -> bool:
+        """Check for unschedulable pods in the namespace.
+
+        Only triggers backpressure when a pod has PodScheduled=False with
+        reason=Unschedulable, meaning the cluster genuinely can't place it.
+        Pods that are Pending but actively scheduling (image pull, node
+        assignment) are normal and should not block ingestion.
+        """
+        namespace = self._config.namespace
+        try:
+            pod_list = await self._core_api.list_namespaced_pod(
+                namespace, field_selector="status.phase=Pending"
+            )
+            for pod in pod_list.items:
+                for condition in pod.status.conditions or []:
+                    if condition.type == "PodScheduled" and condition.reason == "Unschedulable":
+                        return False
+            return True
+        except Exception as e:
+            logger.warn(
+                "Failed to check cluster capacity: {error} — assuming capacity", error=str(e)
+            )
+            return True
+
+    async def capture_logs(self, run_id: str) -> str:
+        """Capture recent pod logs for an ingester Job identified by run_id."""
+        namespace = self._config.namespace
+        label_selector = f"osa.io/role=ingester,osa.io/ingest-run-id={run_id}"
+        try:
+            pod_list = await self._core_api.list_namespaced_pod(
+                namespace, label_selector=label_selector
+            )
+            for pod in pod_list.items:
+                log_str = await self._core_api.read_namespaced_pod_log(
+                    pod.metadata.name, namespace, tail_lines=10
+                )
+                return log_str.strip() if log_str else ""
+        except Exception:
+            return ""
+        return ""
 
     async def run(
         self,
@@ -59,18 +107,6 @@ class K8sIngesterRunner(IngesterRunner):
         files_dir: Path,
         work_dir: Path,
     ) -> IngesterOutput:
-        try:
-            from kubernetes_asyncio.client import BatchV1Api, CoreV1Api
-        except ImportError:
-            from osa.domain.shared.error import ConfigurationError
-
-            raise ConfigurationError(
-                "kubernetes-asyncio is required for K8s runner. Install with: pip install osa[k8s]"
-            )
-
-        batch_api = BatchV1Api(self._api_client)
-        core_api = CoreV1Api(self._api_client)
-
         # Write input files to S3 (container reads them via PVC/S3 CSI)
         input_prefix = self._s3_prefix(work_dir, "input")
 
@@ -81,26 +117,14 @@ class K8sIngesterRunner(IngesterRunner):
         if inputs.session:
             await self._s3.put_object(f"{input_prefix}/session.json", json.dumps(inputs.session))
 
-        return await self._run_job(
-            batch_api,
-            core_api,
-            ingester,
-            inputs,
-            work_dir,
-            files_dir,
-            convention_srn=inputs.convention_srn,
-        )
+        return await self._run_job(ingester, inputs, work_dir, files_dir)
 
     async def _run_job(
         self,
-        batch_api: BatchV1Api,
-        core_api: CoreV1Api,
         ingester: IngesterDefinition,
         inputs: IngesterInputs,
         work_dir: Path,
         files_dir: Path,
-        *,
-        convention_srn: ConventionSRN | None = None,
     ) -> IngesterOutput:
         """Core Job lifecycle for ingester execution."""
         namespace = self._config.namespace
@@ -109,65 +133,78 @@ class K8sIngesterRunner(IngesterRunner):
         try:
             # Check for existing Jobs
             existing = await self._check_existing_job(
-                batch_api, namespace, convention_srn, ingester.digest
+                namespace, inputs.convention_srn, ingester.digest
             )
 
             if existing == "succeeded":
+                logger.info("Reusing output from completed ingester Job")
                 return await self._parse_source_output(work_dir, files_dir)
 
             if existing and existing.startswith("active:"):
                 job_name_to_watch = existing.split(":", 1)[1]
+                logger.info(
+                    "Attaching to running ingester Job: {job_name}",
+                    job_name=job_name_to_watch,
+                )
             else:
+                # Clear stale output and files from previous failed runs
+                output_prefix = self._s3_prefix(work_dir, "output")
+                await self._s3.delete_objects(output_prefix)
+                files_prefix = relative_path(files_dir, self._config.data_mount_path)
+                await self._s3.delete_objects(files_prefix)
+
                 spec = self._build_job_spec(
                     ingester,
                     work_dir=work_dir,
                     files_dir=files_dir,
                     inputs=inputs,
-                    convention_srn=convention_srn,
+                    convention_srn=inputs.convention_srn,
                 )
                 job_name_to_watch = spec.metadata.name
 
-                await batch_api.create_namespaced_job(namespace, spec)
+                await self._batch_api.create_namespaced_job(namespace, spec)
                 logger.info(
-                    "Created K8s ingester Job",
-                    extra={
-                        "job_name": job_name_to_watch,
-                        "namespace": namespace,
-                        "image": f"{ingester.image}@{ingester.digest}",
-                    },
+                    "Created K8s ingester Job: {job_name}",
+                    job_name=job_name_to_watch,
+                    namespace=namespace,
+                    image=f"{ingester.image}@{ingester.digest}",
                 )
 
             # Phase 1: Scheduling
-            await self._wait_for_scheduling(core_api, job_name_to_watch, namespace)
+            await self._wait_for_scheduling(job_name_to_watch, namespace)
 
-            # Phase 2: Completion
-            result = await self._wait_for_completion(
-                batch_api,
+            # Phase 2: Completion (raises on failure)
+            await self._wait_for_completion(
                 job_name_to_watch,
                 namespace,
                 timeout_seconds=ingester.limits.timeout_seconds + 30,
             )
 
-            if result == "succeeded":
-                output = await self._parse_source_output(work_dir, files_dir)
-                logger.info(
-                    "Source completed",
-                    extra={
-                        "job_name": job_name_to_watch,
-                        "record_count": len(output.records),
-                        "has_session": output.session is not None,
-                    },
-                )
-                return output
+            output = await self._parse_source_output(work_dir, files_dir)
+            logger.info(
+                "Ingester batch completed: {job_name} ({record_count} records)",
+                job_name=job_name_to_watch,
+                record_count=len(output.records),
+                has_session=output.session is not None,
+            )
+            return output
 
-            # Failed — diagnose and raise
-            await self._diagnose_and_raise(core_api, job_name_to_watch, namespace, ingester, result)
-            # unreachable but satisfies type checker
-            raise ExternalServiceError("Source failed")
+        except InfrastructureError as e:
+            # Capture logs before cleanup destroys the pod
+            if job_name_to_watch:
+                logs = await self._capture_pod_logs(job_name_to_watch, namespace)
+                e.container_logs = logs
+                if logs:
+                    logger.error(
+                        "Job {job_name} failed — container logs:\n{logs}",
+                        job_name=job_name_to_watch,
+                        logs=logs,
+                    )
+            raise
 
         finally:
             if job_name_to_watch:
-                await self._cleanup_job(batch_api, job_name_to_watch, namespace)
+                await self._cleanup_job(job_name_to_watch, namespace)
 
     async def _parse_source_output(self, work_dir: Path, files_dir: Path) -> IngesterOutput:
         from osa.infrastructure.runner_utils import (
@@ -182,7 +219,6 @@ class K8sIngesterRunner(IngesterRunner):
 
     async def _check_existing_job(
         self,
-        batch_api: BatchV1Api,
         namespace: str,
         convention_srn: ConventionSRN | None,
         digest: str = "",
@@ -195,7 +231,9 @@ class K8sIngesterRunner(IngesterRunner):
         label_selector = ",".join(label_parts)
 
         try:
-            job_list = await batch_api.list_namespaced_job(namespace, label_selector=label_selector)
+            job_list = await self._batch_api.list_namespaced_job(
+                namespace, label_selector=label_selector
+            )
         except Exception as exc:
             raise classify_api_error(exc) from exc
 
@@ -246,6 +284,9 @@ class K8sIngesterRunner(IngesterRunner):
         }
         if convention_srn is not None:
             labels["osa.io/convention"] = label_value(convention_srn)
+        if inputs and inputs.ingest_run_id:
+            labels["osa.io/ingest-run-id"] = inputs.ingest_run_id
+            labels["osa.io/ingest-run-batch"] = str(inputs.batch_index)
 
         env = [
             V1EnvVar(name="OSA_IN", value="/osa/in"),
@@ -334,7 +375,6 @@ class K8sIngesterRunner(IngesterRunner):
 
     async def _wait_for_scheduling(
         self,
-        core_api: CoreV1Api,
         job_name: str,
         namespace: str,
         *,
@@ -346,7 +386,7 @@ class K8sIngesterRunner(IngesterRunner):
 
         while time.monotonic() < deadline:
             try:
-                pod_list = await core_api.list_namespaced_pod(
+                pod_list = await self._core_api.list_namespaced_pod(
                     namespace, label_selector=label_selector
                 )
             except Exception as exc:
@@ -356,13 +396,13 @@ class K8sIngesterRunner(IngesterRunner):
                 phase = pod.status.phase
                 if phase == "Failed":
                     reason = getattr(pod.status, "reason", None) or "Unknown"
-                    raise InfrastructureError(f"Pod failed during scheduling: {reason}")
+                    raise TransientError(f"Pod failed during scheduling: {reason}")
 
                 if phase == "Pending" and pod.status.container_statuses:
                     for cs in pod.status.container_statuses:
                         waiting = getattr(cs.state, "waiting", None)
                         if waiting and waiting.reason in ("ImagePullBackOff", "ErrImagePull"):
-                            raise InfrastructureError(
+                            raise PermanentError(
                                 f"Image pull failed: {waiting.reason}: {getattr(waiting, 'message', '')}"
                             )
 
@@ -371,92 +411,106 @@ class K8sIngesterRunner(IngesterRunner):
 
             await asyncio.sleep(poll_interval)
 
-        raise InfrastructureError(
-            f"Pod scheduling timeout after {timeout_seconds}s for Job {job_name}"
-        )
+        raise TransientError(f"Pod scheduling timeout after {timeout_seconds}s for Job {job_name}")
 
     async def _wait_for_completion(
         self,
-        batch_api: BatchV1Api,
         job_name: str,
         namespace: str,
         *,
         timeout_seconds: float = 3630,
         poll_interval: float = 5.0,
-    ) -> str:
+    ) -> None:
+        """Wait for Job to complete. Returns on success, raises on failure."""
         deadline = time.monotonic() + timeout_seconds
 
         while time.monotonic() < deadline:
             try:
-                job = await batch_api.read_namespaced_job(job_name, namespace)
+                job = await self._batch_api.read_namespaced_job(job_name, namespace)
             except Exception as exc:
                 raise classify_api_error(exc) from exc
 
             if job.status.succeeded:
-                return "succeeded"
+                return
             if job.status.conditions:
                 for condition in job.status.conditions:
                     if condition.type == "Failed" and condition.status == "True":
-                        return f"failed:{getattr(condition, 'reason', 'Unknown')}"
+                        failure_reason = getattr(condition, "reason", "Unknown")
+                        raise await self._diagnose_failure(job_name, namespace, failure_reason)
                     if condition.type == "Complete" and condition.status == "True":
-                        return "succeeded"
+                        return
             if job.status.failed:
-                return "failed:BackoffLimitExceeded"
+                raise await self._diagnose_failure(job_name, namespace, "BackoffLimitExceeded")
 
             await asyncio.sleep(poll_interval)
 
         # Timed out — poll once more to catch last-millisecond completions
         try:
-            job = await batch_api.read_namespaced_job(job_name, namespace)
+            job = await self._batch_api.read_namespaced_job(job_name, namespace)
             if job.status.succeeded:
-                return "succeeded"
+                return
         except Exception:
             pass
 
-        return "failed:WatchTimeout"
+        raise TransientError(f"Watch timeout waiting for ingester Job {job_name} completion")
 
-    async def _diagnose_and_raise(
+    async def _capture_pod_logs(self, job_name: str, namespace: str) -> str:
+        """Capture tail logs from a Job's pod. Returns empty if unavailable."""
+        try:
+            pod_list = await self._core_api.list_namespaced_pod(
+                namespace, label_selector=f"job-name={job_name}"
+            )
+            for pod in pod_list.items:
+                log_str = await self._core_api.read_namespaced_pod_log(
+                    pod.metadata.name, namespace, tail_lines=10
+                )
+                return log_str.strip() if log_str else ""
+        except Exception:
+            return ""
+        return ""
+
+    async def _diagnose_failure(
         self,
-        core_api: CoreV1Api,
         job_name: str,
         namespace: str,
-        ingester: IngesterDefinition,
         failure_info: str,
-    ) -> None:
-        """Determine failure reason and raise appropriate error."""
+    ) -> InfrastructureError:
+        """Inspect pod status, capture logs, and return the appropriate exception."""
         if "DeadlineExceeded" in failure_info:
-            raise ExternalServiceError(
-                f"Ingester timed out after {ingester.limits.timeout_seconds}s"
-            )
+            return TransientError("Ingester timed out (deadline exceeded)")
 
         try:
             label_selector = f"job-name={job_name}"
-            pod_list = await core_api.list_namespaced_pod(namespace, label_selector=label_selector)
+            pod_list = await self._core_api.list_namespaced_pod(
+                namespace, label_selector=label_selector
+            )
             for pod in pod_list.items:
                 if pod.status.container_statuses:
                     for cs in pod.status.container_statuses:
                         terminated = getattr(cs.state, "terminated", None)
                         if terminated:
                             if getattr(terminated, "reason", None) == "OOMKilled":
-                                raise ExternalServiceError("Source killed by OOM")
+                                return OOMError("Source killed by OOM")
                             exit_code = getattr(terminated, "exit_code", -1)
                             if exit_code != 0:
-                                raise ExternalServiceError(f"Source exited with code {exit_code}")
-        except ExternalServiceError:
-            raise
+                                # Transient: ingester non-zero exit is often an upstream
+                                # API failure (500, rate limit), not a code bug.
+                                # Contrast with hooks where non-zero = PermanentError.
+                                return TransientError(f"Source exited with code {exit_code}")
         except Exception:
             pass
 
-        raise ExternalServiceError(f"Source failed: {failure_info}")
+        return PermanentError(f"Source failed: {failure_info}")
 
-    async def _cleanup_job(self, batch_api: BatchV1Api, job_name: str, namespace: str) -> None:
+    async def _cleanup_job(self, job_name: str, namespace: str) -> None:
         try:
-            await batch_api.delete_namespaced_job(
+            await self._batch_api.delete_namespaced_job(
                 job_name,
                 namespace,
                 propagation_policy="Background",
             )
+            logger.info("Cleaned up K8s ingester Job: {job_name}", job_name=job_name)
         except Exception as exc:
             if getattr(exc, "status", None) == 404:
                 return
-            logger.warning("Failed to clean up K8s ingester Job", extra={"job_name": job_name})
+            logger.warn("Failed to clean up K8s ingester Job: {job_name}", job_name=job_name)

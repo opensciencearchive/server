@@ -37,17 +37,17 @@ test-cov:
 # Run linter and type checker
 lint:
     @just fix
-    uv run ruff check osa
+    uv run ruff check osa tests
     uv run ty check osa
 
 # Fix formatting and lint issues
 fix:
-    uv run ruff format osa
-    uv run ruff check --fix osa
+    uv run ruff format osa tests
+    uv run ruff check --fix osa tests
 
 # Format code
 format:
-    uv run ruff format osa
+    uv run ruff format osa tests
 
 # === Database ===
 

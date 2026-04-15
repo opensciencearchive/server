@@ -114,16 +114,13 @@ def _shorten_module(name: str) -> str:
     )
     if len(short) <= _MODULE_WIDTH:
         return short
-    # Truncate: keep first and last segment, abbreviate middle
+    # SLF4J-style: abbreviate all segments except the last to first char
     parts = short.split(".")
-    if len(parts) <= 2:
+    if len(parts) == 1:
         return short[:_MODULE_WIDTH]
-    # Keep first and last, drop middle segments until it fits
-    first, *middle, last = parts
-    while middle and len(f"{first}.{'.'.join(middle)}.{last}") > _MODULE_WIDTH:
-        middle.pop(0)
-    result = f"{first}.{'.'.join(middle)}.{last}" if middle else f"{first}.{last}"
-    return result[:_MODULE_WIDTH]
+    *prefixes, last = parts
+    abbreviated = ".".join(p[0] for p in prefixes) + "." + last
+    return abbreviated[:_MODULE_WIDTH]
 
 
 class Logger:

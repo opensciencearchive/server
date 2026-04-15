@@ -4,18 +4,23 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from osa.config import K8sConfig
-from osa.domain.shared.error import InfrastructureError
+from osa.domain.shared.error import (
+    InfrastructureError,
+    OOMError,
+    PermanentError,
+    TransientError,
+)
 from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.infrastructure.k8s.errors import classify_api_error
-from osa.infrastructure.k8s.naming import job_name, label_value
+from osa.infrastructure.logging import get_logger
+from osa.infrastructure.k8s.naming import job_name
 from osa.infrastructure.runner_utils import (
     detect_rejection,
     relative_path,
@@ -23,11 +28,11 @@ from osa.infrastructure.runner_utils import (
 )
 
 if TYPE_CHECKING:
-    from kubernetes_asyncio.client import ApiClient, BatchV1Api, CoreV1Api, V1Job
+    from kubernetes_asyncio.client import ApiClient, V1Job
 
     from osa.infrastructure.s3.client import S3Client
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 SCHEDULING_TIMEOUT = 120  # seconds to wait for pod to leave Pending
 
@@ -43,7 +48,10 @@ class K8sHookRunner(HookRunner):
     """
 
     def __init__(self, api_client: ApiClient, config: K8sConfig, s3: S3Client) -> None:
-        self._api_client = api_client
+        from kubernetes_asyncio.client import BatchV1Api, CoreV1Api
+
+        self._batch_api = BatchV1Api(api_client)
+        self._core_api = CoreV1Api(api_client)
         self._config = config
         self._s3 = s3
 
@@ -51,24 +59,34 @@ class K8sHookRunner(HookRunner):
         """Convert a PVC path + subdir to an S3 key prefix."""
         return f"{relative_path(work_dir, self._config.data_mount_path)}/{subdir}"
 
+    async def capture_logs(self, run_id: str) -> str:
+        """Capture recent pod logs for a hook Job identified by run_id."""
+        namespace = self._config.namespace
+        # Find the Job by label — run_id format is {uuid}_b{batch}
+        ingest_run_id = run_id.split("_b", 1)[0]
+        batch_index = run_id.split("_b", 1)[1] if "_b" in run_id else "0"
+        label_selector = (
+            f"osa.io/ingest-run-id={ingest_run_id},osa.io/ingest-run-batch={batch_index}"
+        )
+        try:
+            pod_list = await self._core_api.list_namespaced_pod(
+                namespace, label_selector=label_selector
+            )
+            for pod in pod_list.items:
+                log_str = await self._core_api.read_namespaced_pod_log(
+                    pod.metadata.name, namespace, tail_lines=10
+                )
+                return log_str.strip() if log_str else ""
+        except Exception:
+            return ""
+        return ""
+
     async def run(
         self,
         hook: HookDefinition,
         inputs: HookInputs,
         work_dir: Path,
     ) -> HookResult:
-        try:
-            from kubernetes_asyncio.client import BatchV1Api, CoreV1Api
-        except ImportError:
-            from osa.domain.shared.error import ConfigurationError
-
-            raise ConfigurationError(
-                "kubernetes-asyncio is required for K8s runner. Install with: pip install osa[k8s]"
-            )
-
-        batch_api = BatchV1Api(self._api_client)
-        core_api = CoreV1Api(self._api_client)
-
         # Write input files to S3 (container reads them via PVC/S3 CSI)
         input_prefix = self._s3_prefix(work_dir, "input")
         # Write records.jsonl (unified batch contract)
@@ -78,18 +96,10 @@ class K8sHookRunner(HookRunner):
             config = {**hook.runtime.config, **(inputs.config or {})}
             await self._s3.put_object(f"{input_prefix}/config.json", json.dumps(config))
 
-        return await self._run_job(
-            batch_api,
-            core_api,
-            hook,
-            inputs,
-            work_dir,
-        )
+        return await self._run_job(hook, inputs, work_dir)
 
     async def _run_job(
         self,
-        batch_api: BatchV1Api,
-        core_api: CoreV1Api,
         hook: HookDefinition,
         inputs: HookInputs,
         work_dir: Path,
@@ -102,17 +112,24 @@ class K8sHookRunner(HookRunner):
         job_name_to_watch = None
 
         try:
-            existing = await self._check_existing_job(
-                batch_api, namespace, hook.name, inputs.run_id
-            )
+            existing = await self._check_existing_job(namespace, hook.name, inputs.run_id)
 
             if existing == "succeeded":
-                # Read output from completed Job
+                logger.info(
+                    "Reusing output from completed hook Job (hook={hook_name}, run_id={run_id})",
+                    hook_name=hook.name,
+                    run_id=inputs.run_id,
+                )
                 return await self._parse_hook_result(hook, work_dir, start_time)
 
             if existing and existing.startswith("active:"):
                 # Attach to running Job
                 job_name_to_watch = existing.split(":", 1)[1]
+                logger.info(
+                    "Attaching to running hook Job: {job_name} (hook={hook_name})",
+                    job_name=job_name_to_watch,
+                    hook_name=hook.name,
+                )
             else:
                 # Create new Job (no existing or failed)
                 # Mount the parent of all per-record file dirs — works for
@@ -129,40 +146,42 @@ class K8sHookRunner(HookRunner):
                 )
                 job_name_to_watch = spec.metadata.name
 
-                await batch_api.create_namespaced_job(namespace, spec)
+                await self._batch_api.create_namespaced_job(namespace, spec)
                 logger.info(
-                    "Created K8s Job",
-                    extra={
-                        "job_name": job_name_to_watch,
-                        "namespace": namespace,
-                        "image": f"{hook.runtime.image}@{hook.runtime.digest}",
-                        "hook_name": hook.name,
-                        "run_id": inputs.run_id,
-                    },
+                    "Created K8s hook Job: {job_name} (hook={hook_name}, run_id={run_id})",
+                    job_name=job_name_to_watch,
+                    hook_name=hook.name,
+                    run_id=inputs.run_id,
                 )
 
             # Phase 1: Wait for scheduling
-            await self._wait_for_scheduling(core_api, job_name_to_watch, namespace)
+            await self._wait_for_scheduling(job_name_to_watch, namespace)
 
-            # Phase 2: Wait for completion
-            result = await self._wait_for_completion(
-                batch_api,
+            # Phase 2: Wait for completion (raises on failure)
+            await self._wait_for_completion(
                 job_name_to_watch,
                 namespace,
                 timeout_seconds=hook.runtime.limits.timeout_seconds + 30,
             )
 
-            if result == "succeeded":
-                return await self._parse_hook_result(hook, work_dir, start_time)
+            return await self._parse_hook_result(hook, work_dir, start_time)
 
-            # Job failed — determine why
-            return await self._diagnose_failure(
-                core_api, job_name_to_watch, namespace, hook, start_time, result
-            )
+        except InfrastructureError as e:
+            # Capture logs before cleanup destroys the pod
+            if job_name_to_watch:
+                logs = await self._capture_pod_logs(job_name_to_watch, namespace)
+                e.container_logs = logs
+                if logs:
+                    logger.error(
+                        "Job {job_name} failed — container logs:\n{logs}",
+                        job_name=job_name_to_watch,
+                        logs=logs,
+                    )
+            raise
 
         finally:
             if job_name_to_watch:
-                await self._cleanup_job(batch_api, job_name_to_watch, namespace)
+                await self._cleanup_job(job_name_to_watch, namespace)
 
     async def _parse_hook_result(
         self, hook: HookDefinition, work_dir: Path, start_time: float
@@ -193,7 +212,6 @@ class K8sHookRunner(HookRunner):
 
     async def _check_existing_job(
         self,
-        batch_api: BatchV1Api,
         namespace: str,
         hook_name: str,
         run_id: str,
@@ -205,9 +223,13 @@ class K8sHookRunner(HookRunner):
             "active:{job_name}" if a running Job exists
             None if no Job or only failed Jobs exist
         """
-        label_selector = f"osa.io/hook={hook_name},osa.io/run-id={label_value(run_id)}"
+        ingest_run_id = run_id.split("_b", 1)[0]
+        batch_index = run_id.split("_b", 1)[1] if "_b" in run_id else "0"
+        label_selector = f"osa.io/hook={hook_name},osa.io/ingest-run-id={ingest_run_id},osa.io/ingest-run-batch={batch_index}"
         try:
-            job_list = await batch_api.list_namespaced_job(namespace, label_selector=label_selector)
+            job_list = await self._batch_api.list_namespaced_job(
+                namespace, label_selector=label_selector
+            )
         except Exception as exc:
             raise classify_api_error(exc) from exc
 
@@ -254,10 +276,13 @@ class K8sHookRunner(HookRunner):
         input_subpath = f"{relative_work}/input"
         output_subpath = f"{relative_work}/output"
 
+        ingest_run_id = run_id.split("_b", 1)[0]
+        batch_index = run_id.split("_b", 1)[1] if "_b" in run_id else "0"
         labels = {
             "osa.io/role": "hook",
             "osa.io/hook": hook.name,
-            "osa.io/run-id": label_value(run_id),
+            "osa.io/ingest-run-id": ingest_run_id,
+            "osa.io/ingest-run-batch": batch_index,
         }
 
         mounts = [
@@ -355,7 +380,6 @@ class K8sHookRunner(HookRunner):
 
     async def _wait_for_scheduling(
         self,
-        core_api: CoreV1Api,
         job_name: str,
         namespace: str,
         *,
@@ -368,7 +392,7 @@ class K8sHookRunner(HookRunner):
 
         while time.monotonic() < deadline:
             try:
-                pod_list = await core_api.list_namespaced_pod(
+                pod_list = await self._core_api.list_namespaced_pod(
                     namespace, label_selector=label_selector
                 )
             except Exception as exc:
@@ -380,7 +404,7 @@ class K8sHookRunner(HookRunner):
                 # Check for eviction
                 if phase == "Failed":
                     reason = getattr(pod.status, "reason", None) or "Unknown"
-                    raise InfrastructureError(f"Pod evicted or failed during scheduling: {reason}")
+                    raise TransientError(f"Pod evicted or failed during scheduling: {reason}")
 
                 # Check for image pull errors
                 if phase == "Pending" and pod.status.container_statuses:
@@ -388,135 +412,121 @@ class K8sHookRunner(HookRunner):
                         waiting = getattr(cs.state, "waiting", None)
                         if waiting and waiting.reason in ("ImagePullBackOff", "ErrImagePull"):
                             message = getattr(waiting, "message", "")
-                            raise InfrastructureError(
-                                f"Image pull failed: {waiting.reason}: {message}"
-                            )
+                            raise PermanentError(f"Image pull failed: {waiting.reason}: {message}")
 
                 if phase in ("Running", "Succeeded", "Failed"):
                     return  # Pod scheduled
 
             await asyncio.sleep(poll_interval)
 
-        raise InfrastructureError(
-            f"Pod scheduling timeout after {timeout_seconds}s for Job {job_name}"
-        )
+        raise TransientError(f"Pod scheduling timeout after {timeout_seconds}s for Job {job_name}")
 
     async def _wait_for_completion(
         self,
-        batch_api: BatchV1Api,
         job_name: str,
         namespace: str,
         *,
         timeout_seconds: float = 330,
         poll_interval: float = 5.0,
-    ) -> str:
-        """Wait for Job to complete (Phase 2). Returns 'succeeded' or 'failed'."""
+    ) -> None:
+        """Wait for Job to complete (Phase 2). Returns on success, raises on failure."""
         deadline = time.monotonic() + timeout_seconds
 
         while time.monotonic() < deadline:
             try:
-                job = await batch_api.read_namespaced_job(job_name, namespace)
+                job = await self._batch_api.read_namespaced_job(job_name, namespace)
             except Exception as exc:
                 raise classify_api_error(exc) from exc
 
             if job.status.succeeded:
-                return "succeeded"
+                return
 
             if job.status.conditions:
                 for condition in job.status.conditions:
                     if condition.type == "Failed" and condition.status == "True":
-                        return f"failed:{getattr(condition, 'reason', 'Unknown')}"
+                        failure_reason = getattr(condition, "reason", "Unknown")
+                        raise await self._diagnose_failure(job_name, namespace, failure_reason)
                     if condition.type == "Complete" and condition.status == "True":
-                        return "succeeded"
+                        return
 
             if job.status.failed:
-                return "failed:BackoffLimitExceeded"
+                raise await self._diagnose_failure(job_name, namespace, "BackoffLimitExceeded")
 
             await asyncio.sleep(poll_interval)
 
         # Timed out — poll once more
         try:
-            job = await batch_api.read_namespaced_job(job_name, namespace)
+            job = await self._batch_api.read_namespaced_job(job_name, namespace)
             if job.status.succeeded:
-                return "succeeded"
+                return
         except Exception:
             pass
 
-        return "failed:WatchTimeout"
+        raise TransientError(f"Watch timeout waiting for Job {job_name} completion")
+
+    async def _capture_pod_logs(self, job_name: str, namespace: str) -> str:
+        """Capture tail logs from a Job's pod. Returns empty if unavailable."""
+        try:
+            pod_list = await self._core_api.list_namespaced_pod(
+                namespace, label_selector=f"job-name={job_name}"
+            )
+            for pod in pod_list.items:
+                log_str = await self._core_api.read_namespaced_pod_log(
+                    pod.metadata.name, namespace, tail_lines=10
+                )
+                return log_str.strip() if log_str else ""
+        except Exception:
+            return ""
+        return ""
 
     async def _diagnose_failure(
         self,
-        core_api: CoreV1Api,
         job_name: str,
         namespace: str,
-        hook: HookDefinition,
-        start_time: float,
         failure_info: str,
-    ) -> HookResult:
-        """Determine failure reason from pod status."""
-        duration = time.monotonic() - start_time
-
-        # Check if DeadlineExceeded
+    ) -> InfrastructureError:
+        """Inspect pod status, capture logs, and return the appropriate exception."""
         if "DeadlineExceeded" in failure_info:
-            return HookResult(
-                hook_name=hook.name,
-                status=HookStatus.FAILED,
-                error_message="Hook timed out (deadline exceeded)",
-                duration_seconds=duration,
-            )
+            return TransientError("Hook timed out (deadline exceeded)")
 
-        # Check pod for OOM or exit code
         try:
             label_selector = f"job-name={job_name}"
-            pod_list = await core_api.list_namespaced_pod(namespace, label_selector=label_selector)
+            pod_list = await self._core_api.list_namespaced_pod(
+                namespace, label_selector=label_selector
+            )
             for pod in pod_list.items:
                 if pod.status.container_statuses:
                     for cs in pod.status.container_statuses:
                         terminated = getattr(cs.state, "terminated", None)
                         if terminated:
                             if getattr(terminated, "reason", None) == "OOMKilled":
-                                return HookResult(
-                                    hook_name=hook.name,
-                                    status=HookStatus.OOM,
-                                    error_message="Hook killed by OOM",
-                                    duration_seconds=duration,
-                                )
+                                return OOMError("Hook killed by OOM")
                             exit_code = getattr(terminated, "exit_code", -1)
                             if exit_code != 0:
-                                return HookResult(
-                                    hook_name=hook.name,
-                                    status=HookStatus.FAILED,
-                                    error_message=f"Hook exited with code {exit_code}",
-                                    duration_seconds=duration,
-                                )
+                                return PermanentError(f"Hook exited with code {exit_code}")
         except Exception:
             pass
 
-        return HookResult(
-            hook_name=hook.name,
-            status=HookStatus.FAILED,
-            error_message=f"Hook failed: {failure_info}",
-            duration_seconds=duration,
-        )
+        return PermanentError(f"Hook failed: {failure_info}")
 
     async def _cleanup_job(
         self,
-        batch_api: BatchV1Api,
         job_name: str,
         namespace: str,
     ) -> None:
         """Delete a Job and its pods. Ignores 404 (already cleaned up)."""
         try:
-            await batch_api.delete_namespaced_job(
+            await self._batch_api.delete_namespaced_job(
                 job_name,
                 namespace,
                 propagation_policy="Background",
             )
-            logger.info("Cleaned up K8s Job", extra={"job_name": job_name})
+            logger.info("Cleaned up K8s hook Job: {job_name}", job_name=job_name)
         except Exception as exc:
             if getattr(exc, "status", None) == 404:
                 return  # Already gone
-            logger.warning(
-                "Failed to clean up K8s Job",
-                extra={"job_name": job_name, "error": str(exc)},
+            logger.warn(
+                "Failed to clean up K8s hook Job: {job_name} ({error})",
+                job_name=job_name,
+                error=str(exc),
             )

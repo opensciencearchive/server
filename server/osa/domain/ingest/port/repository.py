@@ -3,7 +3,7 @@
 from abc import abstractmethod
 from typing import Protocol
 
-from osa.domain.ingest.model.ingest_run import IngestRun
+from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId
 from osa.domain.shared.port import Port
 
 
@@ -21,8 +21,8 @@ class IngestRunRepository(Port, Protocol):
         ...
 
     @abstractmethod
-    async def get(self, srn: str) -> IngestRun | None:
-        """Get an ingest run by SRN."""
+    async def get(self, id: IngestRunId) -> IngestRun | None:
+        """Get an ingest run by ID."""
         ...
 
     @abstractmethod
@@ -32,7 +32,7 @@ class IngestRunRepository(Port, Protocol):
 
     @abstractmethod
     async def increment_batches_ingested(
-        self, srn: str, *, set_ingestion_finished: bool = False
+        self, id: IngestRunId, *, set_ingestion_finished: bool = False
     ) -> IngestRun:
         """Atomically increment batches_ingested and optionally set ingestion_finished.
 
@@ -41,7 +41,15 @@ class IngestRunRepository(Port, Protocol):
         ...
 
     @abstractmethod
-    async def increment_completed(self, srn: str, published_count: int) -> IngestRun:
+    async def increment_failed(self, id: IngestRunId) -> IngestRun:
+        """Atomically increment batches_failed.
+
+        Returns the updated IngestRun for completion condition checking.
+        """
+        ...
+
+    @abstractmethod
+    async def increment_completed(self, id: IngestRunId, published_count: int) -> IngestRun:
         """Atomically increment batches_completed and published_count.
 
         Returns the updated IngestRun with DB-authoritative counter values

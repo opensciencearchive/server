@@ -34,13 +34,19 @@ class StartIngestHandler(CommandHandler[StartIngest, IngestRunCreated]):
     service: IngestService
 
     async def run(self, cmd: StartIngest) -> IngestRunCreated:
+        from osa.domain.shared.model.srn import Domain
+
         ingest_run = await self.service.start_ingest(
             convention_srn=cmd.convention_srn,
             batch_size=cmd.batch_size,
             limit=cmd.limit,
         )
+
+        node_domain: Domain = self.service.node_domain
+        srn = f"urn:osa:{node_domain.root}:ing:{ingest_run.id}"
+
         return IngestRunCreated(
-            srn=ingest_run.srn,
+            srn=srn,
             convention_srn=ingest_run.convention_srn,
             status=ingest_run.status,
             started_at=ingest_run.started_at.isoformat(),

@@ -1,5 +1,6 @@
 """EventRepository port - pure CRUD for event persistence."""
 
+from datetime import datetime
 from typing import Protocol, TypeVar
 
 from osa.domain.shared.event import ClaimResult, Event, EventId
@@ -18,6 +19,7 @@ class EventRepository(Protocol):
         self,
         event: Event,
         consumer_groups: set[str],
+        deliver_after: datetime | None = None,
     ) -> None:
         """Save event to the append-only log and create delivery rows.
 
@@ -25,6 +27,7 @@ class EventRepository(Protocol):
             event: The event to persist.
             consumer_groups: Set of consumer group names to create deliveries for.
                 If empty, the event is saved without any delivery rows (audit-only).
+            deliver_after: If set, deliveries won't be claimed until this time.
         """
         ...
 
@@ -123,6 +126,7 @@ class EventRepository(Protocol):
         delivery_id: str,
         error: str,
         max_retries: int,
+        deliver_after: datetime | None = None,
     ) -> None:
         """Mark a delivery as failed with retry logic.
 

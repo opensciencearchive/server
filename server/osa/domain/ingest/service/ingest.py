@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from osa.domain.deposition.service.convention import ConventionService
-from osa.domain.ingest.event.events import IngestStarted
-from osa.domain.ingest.model.ingest_run import IngestRun, IngestStatus
+from osa.domain.ingest.event.events import IngestCompleted, IngestRunStarted, NextBatchRequested
+from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId, IngestStatus
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.shared.error import ConflictError, NotFoundError
 from osa.domain.shared.event import EventId
@@ -54,11 +54,11 @@ class IngestService(Service):
                 code="ingest_already_running",
             )
 
-        srn = f"urn:osa:{self.node_domain.root}:ing:{uuid4()}"
+        run_id = IngestRunId(str(uuid4()))
         now = datetime.now(UTC)
 
         ingest_run = IngestRun(
-            srn=srn,
+            id=run_id,
             convention_srn=convention_srn,
             status=IngestStatus.PENDING,
             batch_size=batch_size,
@@ -69,14 +69,24 @@ class IngestService(Service):
         await self.ingest_repo.save(ingest_run)
 
         await self.outbox.append(
-            IngestStarted(
+            IngestRunStarted(
                 id=EventId(uuid4()),
-                ingest_run_srn=srn,
+                ingest_run_id=run_id,
                 convention_srn=convention_srn,
                 batch_size=batch_size,
             )
         )
 
+        await self.outbox.append(
+            NextBatchRequested(
+                id=EventId(uuid4()),
+                ingest_run_id=run_id,
+                convention_srn=convention_srn,
+                batch_size=batch_size,
+            )
+        )
+
+        srn = f"urn:osa:{self.node_domain.root}:ing:{run_id}"
         log.info(
             "ingest started for {convention_srn}",
             ingest_run_srn=srn,
@@ -85,3 +95,57 @@ class IngestService(Service):
             limit=limit,
         )
         return ingest_run
+
+    async def complete_batch(self, ingest_run_id: IngestRunId, published_count: int) -> None:
+        """Account for a successfully processed batch.
+
+        Increments batches_completed and published_count atomically,
+        then checks the completion condition.
+        """
+        ingest_run = await self.ingest_repo.increment_completed(
+            ingest_run_id, published_count=published_count
+        )
+        await self._check_completion(ingest_run)
+
+    async def fail_batch(self, ingest_run_id: IngestRunId) -> None:
+        """Account for a batch that permanently failed hook processing.
+
+        Increments batches_failed and completes the run if all batches
+        are now accounted for (completed + failed >= ingested).
+        """
+        ingest_run = await self.ingest_repo.increment_failed(ingest_run_id)
+        await self._check_completion(ingest_run)
+
+    async def fail_ingestion(self, ingest_run_id: IngestRunId) -> None:
+        """Account for a failed ingester pull.
+
+        The batch was never sourced, so we mark ingestion as finished
+        (no more batches coming) and increment batches_failed. The
+        completion condition can then fire based on whatever batches
+        were already sourced.
+        """
+        await self.ingest_repo.increment_batches_ingested(
+            ingest_run_id,
+            set_ingestion_finished=True,
+        )
+        ingest_run = await self.ingest_repo.increment_failed(ingest_run_id)
+        await self._check_completion(ingest_run)
+
+    async def _check_completion(self, ingest_run: IngestRun) -> None:
+        """Transition to COMPLETED and emit IngestCompleted if all batches are accounted for."""
+        if not ingest_run.check_completion(datetime.now(UTC)):
+            return
+        await self.ingest_repo.save(ingest_run)
+        await self.outbox.append(
+            IngestCompleted(
+                id=EventId(uuid4()),
+                ingest_run_id=ingest_run.id,
+                total_published=ingest_run.published_count,
+            )
+        )
+        log.info(
+            "[{short_id}] COMPLETE: {total_published} records published",
+            short_id=str(ingest_run.id)[:8],
+            total_published=ingest_run.published_count,
+            ingest_run_id=ingest_run.id,
+        )

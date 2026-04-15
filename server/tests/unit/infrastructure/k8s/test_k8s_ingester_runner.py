@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from osa.config import K8sConfig
-from osa.domain.shared.error import ExternalServiceError
+from osa.domain.shared.error import OOMError, TransientError
 from osa.domain.shared.model.source import IngesterDefinition, IngesterLimits
 from osa.domain.shared.model.srn import ConventionSRN
 from osa.domain.shared.port.ingester_runner import IngesterInputs
@@ -57,6 +57,96 @@ def _make_runner(config: K8sConfig | None = None) -> K8sIngesterRunner:
     api_client = MagicMock()
     s3 = _make_s3_mock()
     return K8sIngesterRunner(api_client=api_client, config=config or _make_config(), s3=s3)
+
+
+# ---------------------------------------------------------------------------
+# Backpressure capacity check
+# ---------------------------------------------------------------------------
+
+
+def _make_pod(*, phase: str = "Pending", conditions: list | None = None) -> MagicMock:
+    pod = MagicMock()
+    pod.status.phase = phase
+    pod.status.conditions = conditions
+    return pod
+
+
+def _make_condition(*, type_: str, reason: str, status: str = "False") -> MagicMock:
+    cond = MagicMock()
+    cond.type = type_
+    cond.reason = reason
+    cond.status = status
+    return cond
+
+
+class TestHasCapacity:
+    @pytest.mark.asyncio
+    async def test_no_pending_pods_returns_true(self):
+        runner = _make_runner()
+        runner._core_api = AsyncMock()
+        pod_list = MagicMock()
+        pod_list.items = []
+        runner._core_api.list_namespaced_pod.return_value = pod_list
+
+        assert await runner.has_capacity() is True
+
+    @pytest.mark.asyncio
+    async def test_pending_but_schedulable_returns_true(self):
+        """Pods in Pending that are actively scheduling (no Unschedulable condition)
+        should NOT trigger backpressure — they'll be Running in seconds."""
+        runner = _make_runner()
+        runner._core_api = AsyncMock()
+
+        # Pod is Pending with PodScheduled=True (normal startup)
+        pod = _make_pod(
+            phase="Pending",
+            conditions=[_make_condition(type_="PodScheduled", reason="", status="True")],
+        )
+        pod_list = MagicMock()
+        pod_list.items = [pod]
+        runner._core_api.list_namespaced_pod.return_value = pod_list
+
+        assert await runner.has_capacity() is True
+
+    @pytest.mark.asyncio
+    async def test_pending_no_conditions_returns_true(self):
+        """Pods in Pending with no conditions yet (just created) should not block."""
+        runner = _make_runner()
+        runner._core_api = AsyncMock()
+
+        pod = _make_pod(phase="Pending", conditions=None)
+        pod_list = MagicMock()
+        pod_list.items = [pod]
+        runner._core_api.list_namespaced_pod.return_value = pod_list
+
+        assert await runner.has_capacity() is True
+
+    @pytest.mark.asyncio
+    async def test_unschedulable_pod_returns_false(self):
+        """A pod with PodScheduled=False reason=Unschedulable means the cluster is full."""
+        runner = _make_runner()
+        runner._core_api = AsyncMock()
+
+        pod = _make_pod(
+            phase="Pending",
+            conditions=[
+                _make_condition(type_="PodScheduled", reason="Unschedulable", status="False"),
+            ],
+        )
+        pod_list = MagicMock()
+        pod_list.items = [pod]
+        runner._core_api.list_namespaced_pod.return_value = pod_list
+
+        assert await runner.has_capacity() is False
+
+    @pytest.mark.asyncio
+    async def test_api_failure_assumes_capacity(self):
+        """If the K8s API fails, assume capacity (don't block on transient API errors)."""
+        runner = _make_runner()
+        runner._core_api = AsyncMock()
+        runner._core_api.list_namespaced_pod.side_effect = Exception("API timeout")
+
+        assert await runner.has_capacity() is True
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +304,8 @@ class TestSourceLifecycle:
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
 
         # No existing jobs
         job_list = MagicMock()
@@ -259,14 +351,7 @@ class TestSourceLifecycle:
         runner._s3.get_object.side_effect = s3_get
 
         inputs = IngesterInputs(convention_srn=_CONV_SRN)
-        result = await runner._run_job(
-            batch_api,
-            core_api,
-            ingester,
-            inputs,
-            work_dir,
-            files_dir,
-        )
+        result = await runner._run_job(ingester, inputs, work_dir, files_dir)
 
         assert len(result.records) == 2
         assert result.session == {"cursor": "abc"}
@@ -274,12 +359,14 @@ class TestSourceLifecycle:
         batch_api.delete_namespaced_job.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_timeout_raises_external_service_error(self, tmp_path: Path):
+    async def test_timeout_raises_transient_error(self, tmp_path: Path):
         config = _make_config(data_mount_path=str(tmp_path))
         runner = K8sIngesterRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
 
         job_list = MagicMock()
         job_list.items = []
@@ -311,23 +398,18 @@ class TestSourceLifecycle:
         files_dir.mkdir(parents=True)
         inputs = IngesterInputs(convention_srn=_CONV_SRN)
 
-        with pytest.raises(ExternalServiceError, match="[Tt]imed out|[Dd]eadline"):
-            await runner._run_job(
-                batch_api,
-                core_api,
-                ingester,
-                inputs,
-                work_dir,
-                files_dir,
-            )
+        with pytest.raises(TransientError, match="[Tt]imed out|[Dd]eadline"):
+            await runner._run_job(ingester, inputs, work_dir, files_dir)
 
     @pytest.mark.asyncio
-    async def test_oom_raises_external_service_error(self, tmp_path: Path):
+    async def test_oom_raises_oom_error(self, tmp_path: Path):
         config = _make_config(data_mount_path=str(tmp_path))
         runner = K8sIngesterRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
 
         job_list = MagicMock()
         job_list.items = []
@@ -371,15 +453,8 @@ class TestSourceLifecycle:
         files_dir.mkdir(parents=True)
         inputs = IngesterInputs(convention_srn=_CONV_SRN)
 
-        with pytest.raises(ExternalServiceError, match="[Oo]OM"):
-            await runner._run_job(
-                batch_api,
-                core_api,
-                ingester,
-                inputs,
-                work_dir,
-                files_dir,
-            )
+        with pytest.raises(OOMError, match="[Oo]OM"):
+            await runner._run_job(ingester, inputs, work_dir, files_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -392,13 +467,13 @@ class TestConventionSrnFromInputs:
 
     @pytest.mark.asyncio
     async def test_run_uses_convention_srn_from_inputs(self, tmp_path: Path):
-        from unittest.mock import patch
-
         config = _make_config(data_mount_path=str(tmp_path))
         runner = K8sIngesterRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
 
         batch_api = AsyncMock()
         core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
 
         # No existing jobs
         job_list = MagicMock()
@@ -432,11 +507,7 @@ class TestConventionSrnFromInputs:
             convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:my-conv@1.0.0")
         )
 
-        with (
-            patch("kubernetes_asyncio.client.BatchV1Api", return_value=batch_api),
-            patch("kubernetes_asyncio.client.CoreV1Api", return_value=core_api),
-        ):
-            await runner.run(ingester, inputs, files_dir, work_dir)
+        await runner.run(ingester, inputs, files_dir, work_dir)
 
         # Verify convention_srn from inputs ends up in the Job labels
         call_args = batch_api.create_namespaced_job.call_args

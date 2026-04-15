@@ -10,6 +10,7 @@ from pathlib import Path
 from shutil import rmtree
 
 import aiodocker
+from osa.domain.shared.error import OOMError, PermanentError, TransientError
 from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
@@ -42,6 +43,10 @@ class OciHookRunner(HookRunner):
         self._docker = docker
         self._host_data_dir = host_data_dir
         self._container_data_dir = container_data_dir
+
+    async def capture_logs(self, run_id: str) -> str:
+        """OCI containers are deleted after run — logs captured inline during execution."""
+        return ""
 
     async def run(
         self,
@@ -99,19 +104,13 @@ class OciHookRunner(HookRunner):
                     duration_seconds=result_duration,
                 )
             except asyncio.TimeoutError:
-                duration = time.monotonic() - start_time
                 log.error(
                     "Hook timed out",
                     hook=hook.name,
                     run_id=inputs.run_id,
                     timeout=timeout,
                 )
-                return HookResult(
-                    hook_name=hook.name,
-                    status=HookStatus.FAILED,
-                    error_message=f"Hook timed out after {timeout}s",
-                    duration_seconds=duration,
-                )
+                raise TransientError(f"Hook timed out after {timeout}s")
         finally:
             rmtree(staging_dir, onexc=_force_remove)
 
@@ -191,10 +190,7 @@ class OciHookRunner(HookRunner):
                 if tail_text:
                     for line in tail_text.splitlines():
                         print(f"    OOM [{hook.name}] {line}", file=sys.stderr, flush=True)
-                return {
-                    "status": HookStatus.OOM,
-                    "error_message": f"Hook killed by OOM (limit: {hook.runtime.limits.memory})",
-                }
+                raise OOMError(f"Hook killed by OOM (limit: {hook.runtime.limits.memory})")
 
             # Parse progress file
             progress = parse_progress_file(output_dir)
@@ -211,29 +207,21 @@ class OciHookRunner(HookRunner):
             if exit_code != 0:
                 logs = await container.log(stdout=True, stderr=True)
                 logs_str = "".join(logs) if logs else ""
-                return {
-                    "status": HookStatus.FAILED,
-                    "error_message": f"Hook exited with code {exit_code}: {logs_str[:2000]}",
-                    "progress": progress,
-                }
+                raise PermanentError(f"Hook exited with code {exit_code}: {logs_str[:2000]}")
 
             return {
                 "status": HookStatus.PASSED,
                 "progress": progress,
             }
 
+        except (OOMError, PermanentError):
+            raise
         except aiodocker.DockerError as e:
             log.error("Docker error running hook", error=str(e))
-            return {
-                "status": HookStatus.FAILED,
-                "error_message": f"Docker error: {e}",
-            }
+            raise TransientError(f"Docker error: {e}") from e
         except Exception as e:
             log.error("Unexpected error running hook", error=str(e))
-            return {
-                "status": HookStatus.FAILED,
-                "error_message": f"Unexpected error: {e}",
-            }
+            raise TransientError(f"Unexpected error: {e}") from e
         finally:
             if container is not None:
                 try:

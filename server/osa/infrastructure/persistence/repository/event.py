@@ -6,8 +6,6 @@ from typing import TypeVar
 from uuid import uuid4
 
 from sqlalchemy import CursorResult, func, insert, or_, select, update
-from sqlalchemy.dialects.postgresql import INTERVAL
-from sqlalchemy.sql import literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.shared.error import InfrastructureError
@@ -34,6 +32,7 @@ class SQLAlchemyEventRepository(EventRepository):
         self,
         event: Event,
         consumer_groups: set[str],
+        deliver_after: datetime | None = None,
     ) -> None:
         """Save event to append-only log and create delivery rows."""
         now = datetime.now(UTC)
@@ -55,6 +54,7 @@ class SQLAlchemyEventRepository(EventRepository):
                 consumer_group=group,
                 status="pending",
                 retry_count=0,
+                deliver_after=deliver_after,
                 updated_at=now,
             )
             await self._session.execute(delivery_stmt)
@@ -186,21 +186,17 @@ class SQLAlchemyEventRepository(EventRepository):
         """
         now = datetime.now(UTC)
 
-        # Backoff formula: min(30, 5^retry_count) seconds
-        backoff_seconds = func.least(
-            literal(30),
-            func.power(literal(5), deliveries_table.c.retry_count),
-        )
-        backoff_interval = func.cast(func.concat(backoff_seconds, literal(" seconds")), INTERVAL)
-        backoff_eligible = or_(
-            deliveries_table.c.retry_count == 0,
-            deliveries_table.c.updated_at <= func.now() - backoff_interval,
+        # deliver_after: NULL means immediately eligible, otherwise wait
+        deliver_after_eligible = or_(
+            deliveries_table.c.deliver_after.is_(None),
+            deliveries_table.c.deliver_after <= func.now(),
         )
 
         # Select deliveries joined with events
         stmt = (
             select(
                 deliveries_table.c.id,
+                deliveries_table.c.retry_count,
                 events_table.c.event_type,
                 events_table.c.payload,
             )
@@ -209,7 +205,7 @@ class SQLAlchemyEventRepository(EventRepository):
                 deliveries_table.c.consumer_group == consumer_group,
                 deliveries_table.c.status == "pending",
                 events_table.c.event_type.in_(event_types),
-                backoff_eligible,
+                deliver_after_eligible,
             )
             .order_by(events_table.c.created_at.asc())
             .limit(limit)
@@ -234,10 +230,10 @@ class SQLAlchemyEventRepository(EventRepository):
         # Deserialize events and wrap in Delivery envelopes
         deliveries: list[Delivery] = []
         for row in rows:
-            delivery_id, event_type, payload = row
+            delivery_id, retry_count, event_type, payload = row
             event = self._deserialize(event_type, payload)
             if event is not None:
-                deliveries.append(Delivery(id=delivery_id, event=event))
+                deliveries.append(Delivery(id=delivery_id, event=event, retry_count=retry_count))
 
         return ClaimResult(deliveries=deliveries, claimed_at=now)
 
@@ -291,8 +287,14 @@ class SQLAlchemyEventRepository(EventRepository):
         delivery_id: str,
         error: str,
         max_retries: int,
+        deliver_after: datetime | None = None,
     ) -> None:
-        """Mark a delivery as failed with retry logic."""
+        """Mark a delivery as failed with retry logic.
+
+        Args:
+            deliver_after: If set, the delivery won't be eligible for claiming
+                until this timestamp. Used for transient resource backoff.
+        """
         now = datetime.now(UTC)
 
         # Get current retry_count
@@ -318,6 +320,7 @@ class SQLAlchemyEventRepository(EventRepository):
                     status="failed",
                     delivery_error=error,
                     retry_count=new_retry_count,
+                    deliver_after=None,
                     updated_at=now,
                     delivered_at=now,
                 )
@@ -331,6 +334,7 @@ class SQLAlchemyEventRepository(EventRepository):
                     status="pending",
                     delivery_error=error,
                     retry_count=new_retry_count,
+                    deliver_after=deliver_after,
                     claimed_at=None,
                     updated_at=now,
                 )

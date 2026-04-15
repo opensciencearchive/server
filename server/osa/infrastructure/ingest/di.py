@@ -50,7 +50,7 @@ class IngestProvider(Provider):
     # Ingest storage — default (filesystem, for local/Docker)
     @provide(scope=Scope.APP)
     def get_ingest_storage(self, layout: StorageLayout) -> IngestStoragePort:
-        return FilesystemIngestStorage(layout=layout)  # type: ignore[return-value]
+        return FilesystemIngestStorage(layout=layout)
 
     # Ingest storage — K8s (S3 via aioboto3, reuses S3Client from RunnerProvider)
     @provide(when=K8S, scope=Scope.APP)
@@ -59,7 +59,7 @@ class IngestProvider(Provider):
     ) -> IngestStoragePort:
         from osa.infrastructure.s3.ingest_storage import S3IngestStorage
 
-        return S3IngestStorage(  # type: ignore[return-value]
+        return S3IngestStorage(
             s3=s3,
             layout=layout,
             data_mount_path=config.runner.k8s.data_mount_path,

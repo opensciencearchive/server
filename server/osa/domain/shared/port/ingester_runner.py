@@ -20,6 +20,8 @@ class IngesterInputs:
     """Inputs for an ingester container run."""
 
     convention_srn: ConventionSRN
+    ingest_run_id: str = ""
+    batch_index: int = 0
     config: dict[str, Any] | None = None
     since: datetime | None = None
     limit: int | None = None
@@ -46,3 +48,19 @@ class IngesterRunner(Protocol):
         files_dir: Path,
         work_dir: Path,
     ) -> IngesterOutput: ...
+
+    async def capture_logs(self, run_id: str) -> str:
+        """Capture recent container logs for a run.
+
+        Returns the last few lines of container/pod output, or empty string
+        if logs are unavailable. Used for failure diagnostics.
+        """
+        ...
+
+    async def has_capacity(self) -> bool:
+        """Check whether the cluster can schedule more Jobs.
+
+        Returns False if there are pending (unschedulable) Jobs in the namespace.
+        Used by the ingester to avoid submitting work that will just timeout.
+        """
+        ...
