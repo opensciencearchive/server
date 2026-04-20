@@ -40,7 +40,9 @@ class TestSearchRecordsHandler:
         await handler.run(cmd)
 
         mock_service.search_records.assert_called_once_with(
-            filters=[],
+            filter_expr=None,
+            schema_srn=None,
+            convention_srn=None,
             q=None,
             sort="published_at",
             order=SortOrder.DESC,

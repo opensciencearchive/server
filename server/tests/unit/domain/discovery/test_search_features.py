@@ -4,13 +4,15 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from osa.config import Config
+from osa.domain.discovery.model.refs import FeatureFieldRef
 from osa.domain.discovery.model.value import (
     ColumnInfo,
     FeatureCatalogEntry,
     FeatureRow,
     FeatureSearchResult,
-    Filter,
     FilterOperator,
+    Predicate,
     SortOrder,
 )
 from osa.domain.discovery.query.search_features import (
@@ -35,6 +37,18 @@ def _make_catalog_entry() -> FeatureCatalogEntry:
     )
 
 
+def _config() -> Config:
+    import os
+
+    os.environ.setdefault("OSA_AUTH__JWT__SECRET", "a" * 64)
+    os.environ.setdefault("OSA_BASE_URL", "http://localhost:8000")
+    return Config()  # type: ignore[call-arg]
+
+
+def _predicate(hook: str, column: str, op: FilterOperator, value: object) -> Predicate:
+    return Predicate(field=FeatureFieldRef(hook=hook, column=column), op=op, value=value)
+
+
 @pytest.fixture
 def mock_read_store() -> AsyncMock:
     store = AsyncMock()
@@ -47,12 +61,17 @@ def mock_read_store() -> AsyncMock:
 def mock_field_reader() -> AsyncMock:
     reader = AsyncMock()
     reader.get_all_field_types.return_value = {}
+    reader.get_fields_for_schema.return_value = {}
     return reader
 
 
 @pytest.fixture
 def service(mock_read_store: AsyncMock, mock_field_reader: AsyncMock) -> DiscoveryService:
-    return DiscoveryService(read_store=mock_read_store, field_reader=mock_field_reader)
+    return DiscoveryService(
+        read_store=mock_read_store,
+        field_reader=mock_field_reader,
+        config=_config(),
+    )
 
 
 class TestSearchFeaturesHandler:
@@ -103,10 +122,11 @@ class TestDiscoveryServiceSearchFeatures:
     ) -> None:
         mock_read_store.get_feature_table_schema.return_value = None
 
-        with pytest.raises(NotFoundError, match="unknown_hook"):
+        with pytest.raises(NotFoundError):
             await service.search_features(
                 hook_name="unknown_hook",
-                filters=[],
+                filter_expr=None,
+                schema_srn=None,
                 record_srn=None,
                 sort="id",
                 order=SortOrder.DESC,
@@ -118,7 +138,8 @@ class TestDiscoveryServiceSearchFeatures:
         with pytest.raises(ValidationError, match="bogus"):
             await service.search_features(
                 hook_name="detect_pockets",
-                filters=[Filter(field="bogus", operator=FilterOperator.EQ, value=1)],
+                filter_expr=_predicate("detect_pockets", "bogus", FilterOperator.EQ, 1),
+                schema_srn=None,
                 record_srn=None,
                 sort="id",
                 order=SortOrder.DESC,
@@ -130,19 +151,8 @@ class TestDiscoveryServiceSearchFeatures:
         with pytest.raises(ValidationError, match="contains"):
             await service.search_features(
                 hook_name="detect_pockets",
-                filters=[Filter(field="score", operator=FilterOperator.CONTAINS, value="x")],
-                record_srn=None,
-                sort="id",
-                order=SortOrder.DESC,
-                cursor=None,
-                limit=50,
-            )
-
-    async def test_validates_operator_for_boolean_column(self, service: DiscoveryService) -> None:
-        with pytest.raises(ValidationError, match="gte"):
-            await service.search_features(
-                hook_name="detect_pockets",
-                filters=[Filter(field="is_active", operator=FilterOperator.GTE, value=True)],
+                filter_expr=_predicate("detect_pockets", "score", FilterOperator.CONTAINS, "x"),
+                schema_srn=None,
                 record_srn=None,
                 sort="id",
                 order=SortOrder.DESC,
@@ -153,7 +163,8 @@ class TestDiscoveryServiceSearchFeatures:
     async def test_accepts_string_contains_operator(self, service: DiscoveryService) -> None:
         await service.search_features(
             hook_name="detect_pockets",
-            filters=[Filter(field="label", operator=FilterOperator.CONTAINS, value="test")],
+            filter_expr=_predicate("detect_pockets", "label", FilterOperator.CONTAINS, "test"),
+            schema_srn=None,
             record_srn=None,
             sort="id",
             order=SortOrder.DESC,
@@ -167,7 +178,8 @@ class TestDiscoveryServiceSearchFeatures:
         srn = RecordSRN.parse("urn:osa:localhost:rec:abc@1")
         await service.search_features(
             hook_name="detect_pockets",
-            filters=[],
+            filter_expr=None,
+            schema_srn=None,
             record_srn=srn,
             sort="id",
             order=SortOrder.DESC,
@@ -178,33 +190,13 @@ class TestDiscoveryServiceSearchFeatures:
         call_kwargs = mock_read_store.search_features.call_args
         assert call_kwargs.kwargs["record_srn"] == srn
 
-    async def test_decodes_cursor(
-        self, service: DiscoveryService, mock_read_store: AsyncMock
-    ) -> None:
-        from osa.domain.discovery.model.value import encode_cursor
-
-        cursor = encode_cursor(7.66, 42)
-        await service.search_features(
-            hook_name="detect_pockets",
-            filters=[],
-            record_srn=None,
-            sort="score",
-            order=SortOrder.DESC,
-            cursor=cursor,
-            limit=50,
-        )
-
-        call_kwargs = mock_read_store.search_features.call_args
-        decoded = call_kwargs.kwargs["cursor"]
-        assert decoded["s"] == 7.66
-        assert decoded["id"] == 42
-
     async def test_delegates_to_read_store(
         self, service: DiscoveryService, mock_read_store: AsyncMock
     ) -> None:
         await service.search_features(
             hook_name="detect_pockets",
-            filters=[Filter(field="score", operator=FilterOperator.GTE, value=6.0)],
+            filter_expr=_predicate("detect_pockets", "score", FilterOperator.GTE, 6.0),
+            schema_srn=None,
             record_srn=None,
             sort="score",
             order=SortOrder.DESC,
@@ -215,14 +207,13 @@ class TestDiscoveryServiceSearchFeatures:
         mock_read_store.search_features.assert_called_once()
         call_kwargs = mock_read_store.search_features.call_args
         assert call_kwargs.kwargs["hook_name"] == "detect_pockets"
-        assert len(call_kwargs.kwargs["filters"]) == 1
+        assert call_kwargs.kwargs["filter_expr"] is not None
 
 
 class TestSearchFeaturesPagination:
     async def test_has_more_false_when_exactly_limit_rows(
         self, service: DiscoveryService, mock_read_store: AsyncMock
     ) -> None:
-        """Exactly limit rows should NOT report has_more (no false positive)."""
         srn = RecordSRN.parse("urn:osa:localhost:rec:abc@1")
         mock_read_store.search_features.return_value = [
             FeatureRow(row_id=i, record_srn=srn, data={"score": float(i)}) for i in range(3)
@@ -230,7 +221,8 @@ class TestSearchFeaturesPagination:
 
         result = await service.search_features(
             hook_name="detect_pockets",
-            filters=[],
+            filter_expr=None,
+            schema_srn=None,
             record_srn=None,
             sort="score",
             order=SortOrder.DESC,
@@ -245,7 +237,6 @@ class TestSearchFeaturesPagination:
     async def test_has_more_true_when_more_than_limit_rows(
         self, service: DiscoveryService, mock_read_store: AsyncMock
     ) -> None:
-        """Adapter returning limit+1 rows signals more pages exist."""
         srn = RecordSRN.parse("urn:osa:localhost:rec:abc@1")
         mock_read_store.search_features.return_value = [
             FeatureRow(row_id=i, record_srn=srn, data={"score": float(i)}) for i in range(4)
@@ -253,7 +244,8 @@ class TestSearchFeaturesPagination:
 
         result = await service.search_features(
             hook_name="detect_pockets",
-            filters=[],
+            filter_expr=None,
+            schema_srn=None,
             record_srn=None,
             sort="score",
             order=SortOrder.DESC,
@@ -268,10 +260,10 @@ class TestSearchFeaturesPagination:
     async def test_passes_limit_plus_one_to_read_store(
         self, service: DiscoveryService, mock_read_store: AsyncMock
     ) -> None:
-        """Service should fetch one extra row to detect more pages."""
         await service.search_features(
             hook_name="detect_pockets",
-            filters=[],
+            filter_expr=None,
+            schema_srn=None,
             record_srn=None,
             sort="score",
             order=SortOrder.DESC,

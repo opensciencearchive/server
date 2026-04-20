@@ -1,27 +1,24 @@
 """CreateFeatureTables — creates feature tables when a convention is registered."""
 
 import logging
-from uuid import uuid4
 
 from osa.domain.deposition.event.convention_registered import ConventionRegistered
-from osa.domain.feature.event.convention_ready import ConventionReady
 from osa.domain.feature.service.feature import FeatureService
 from osa.domain.shared.error import ConflictError
-from osa.domain.shared.event import EventHandler, EventId
-from osa.domain.shared.outbox import Outbox
+from osa.domain.shared.event import EventHandler
 
 logger = logging.getLogger(__name__)
 
 
 class CreateFeatureTables(EventHandler[ConventionRegistered]):
-    """Creates feature tables for each hook and emits ConventionReady.
+    """Creates feature tables for each hook declared on a registered convention.
 
-    Part of the convention initialization chain:
-    ConventionRegistered → CreateFeatureTables → ConventionReady
+    Readiness is not signalled via a follow-on event — consumers check the
+    ``feature_tables`` + ``metadata_tables`` catalogs at read time instead
+    (research.md §11).
     """
 
     feature_service: FeatureService
-    outbox: Outbox
 
     async def handle(self, event: ConventionRegistered) -> None:
         for hook in event.hooks:
@@ -38,11 +35,3 @@ class CreateFeatureTables(EventHandler[ConventionRegistered]):
                     hook.name,
                     event.convention_srn,
                 )
-
-        await self.outbox.append(
-            ConventionReady(
-                id=EventId(uuid4()),
-                convention_srn=event.convention_srn,
-            )
-        )
-        logger.info("Convention ready: %s", event.convention_srn)

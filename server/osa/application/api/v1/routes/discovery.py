@@ -6,10 +6,7 @@ from dishka.integrations.fastapi import DishkaRoute, FromDishka
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from osa.domain.discovery.model.value import (
-    Filter,
-    SortOrder,
-)
+from osa.domain.discovery.model.value import FilterExpr, SortOrder
 from osa.domain.discovery.query.get_feature_catalog import (
     GetFeatureCatalog,
     GetFeatureCatalogHandler,
@@ -25,6 +22,7 @@ from osa.domain.discovery.query.search_records import (
     SearchRecordsHandler,
     SearchRecordsResult,
 )
+from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
 
 router = APIRouter(
     prefix="/discovery",
@@ -37,7 +35,9 @@ router = APIRouter(
 
 
 class RecordSearchRequest(BaseModel):
-    filters: list[Filter] = []
+    schema_srn: SchemaSRN | None = None
+    convention_srn: ConventionSRN | None = None
+    filter: FilterExpr | None = None
     q: str | None = None
     sort: str = "published_at"
     order: SortOrder = SortOrder.DESC
@@ -56,7 +56,8 @@ class FeatureCatalogResponse(BaseModel):
 
 
 class FeatureSearchRequest(BaseModel):
-    filters: list[Filter] = []
+    schema_srn: SchemaSRN | None = None
+    filter: FilterExpr | None = None
     record_srn: str | None = None
     sort: str = "id"
     order: SortOrder = SortOrder.DESC
@@ -81,7 +82,9 @@ async def search_records(
     """Search and filter published records."""
     result: SearchRecordsResult = await handler.run(
         SearchRecords(
-            filters=body.filters,
+            filter_expr=body.filter,
+            schema_srn=body.schema_srn,
+            convention_srn=body.convention_srn,
             q=body.q,
             sort=body.sort,
             order=body.order,
@@ -115,7 +118,8 @@ async def search_features(
     result: SearchFeaturesResult = await handler.run(
         SearchFeatures(
             hook_name=hook_name,
-            filters=body.filters,
+            filter_expr=body.filter,
+            schema_srn=body.schema_srn,
             record_srn=body.record_srn,
             sort=body.sort,
             order=body.order,

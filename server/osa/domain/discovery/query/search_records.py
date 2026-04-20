@@ -1,17 +1,22 @@
 """SearchRecords query — search and filter published records."""
 
+from typing import Any
+
 from osa.domain.discovery.model.value import (
-    Filter,
+    FilterExpr,
     RecordSearchResult,
     SortOrder,
 )
 from osa.domain.discovery.service.discovery import DiscoveryService
 from osa.domain.shared.authorization.gate import public
+from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
 from osa.domain.shared.query import Query, QueryHandler, Result
 
 
 class SearchRecords(Query):
-    filters: list[Filter] = []
+    filter_expr: FilterExpr | None = None
+    schema_srn: SchemaSRN | None = None
+    convention_srn: ConventionSRN | None = None
     q: str | None = None
     sort: str = "published_at"
     order: SortOrder = SortOrder.DESC
@@ -20,7 +25,7 @@ class SearchRecords(Query):
 
 
 class SearchRecordsResult(Result):
-    results: list[dict]
+    results: list[dict[str, Any]]
     cursor: str | None
     has_more: bool
 
@@ -31,7 +36,9 @@ class SearchRecordsHandler(QueryHandler[SearchRecords, SearchRecordsResult]):
 
     async def run(self, cmd: SearchRecords) -> SearchRecordsResult:
         result: RecordSearchResult = await self.discovery_service.search_records(
-            filters=cmd.filters,
+            filter_expr=cmd.filter_expr,
+            schema_srn=cmd.schema_srn,
+            convention_srn=cmd.convention_srn,
             q=cmd.q,
             sort=cmd.sort,
             order=cmd.order,

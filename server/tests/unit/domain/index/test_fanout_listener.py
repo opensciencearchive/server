@@ -97,6 +97,9 @@ class TestFanOutToIndexBackends:
             record_srn=sample_record_srn,
             source=DepositionSource(id=str(sample_deposition_srn)),
             convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0"),
+            schema_srn=__import__(
+                "osa.domain.shared.model.srn", fromlist=["SchemaSRN"]
+            ).SchemaSRN.parse("urn:osa:localhost:schema:test@1.0.0"),
             metadata=sample_metadata,
         )
 
@@ -137,6 +140,9 @@ class TestFanOutToIndexBackends:
             record_srn=sample_record_srn,
             source=DepositionSource(id=str(sample_deposition_srn)),
             convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0"),
+            schema_srn=__import__(
+                "osa.domain.shared.model.srn", fromlist=["SchemaSRN"]
+            ).SchemaSRN.parse("urn:osa:localhost:schema:test@1.0.0"),
             metadata=sample_metadata,
         )
 
@@ -166,6 +172,9 @@ class TestFanOutToIndexBackends:
             record_srn=sample_record_srn,
             source=DepositionSource(id=str(sample_deposition_srn)),
             convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0"),
+            schema_srn=__import__(
+                "osa.domain.shared.model.srn", fromlist=["SchemaSRN"]
+            ).SchemaSRN.parse("urn:osa:localhost:schema:test@1.0.0"),
             metadata=sample_metadata,
         )
 

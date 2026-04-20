@@ -241,6 +241,11 @@ class Config(BaseSettings):
     runner: RunnerConfig = RunnerConfig()
     host_data_dir: str | None = None  # Host path for OSA_DATA_DIR (sibling container mounts)
 
+    # Discovery filter-tree bounds (feature 076)
+    discovery_max_filter_depth: int = 10
+    discovery_max_predicates: int = 200
+    discovery_max_cross_domain_joins: int = 10
+
     model_config = {
         "env_prefix": "OSA_",
         "env_file": ".env",

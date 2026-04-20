@@ -7,6 +7,7 @@ import sqlalchemy as sa
 from osa.domain.shared.model.hook import ColumnDef
 from osa.domain.shared.model.value import ValueObject
 from osa.infrastructure.persistence.column_mapper import map_column
+from osa.infrastructure.persistence.tables import records_table
 
 FEATURES_SCHEMA = "features"
 
@@ -26,11 +27,12 @@ def build_feature_table(pg_table: str, schema: FeatureSchema) -> sa.Table:
     """Build a SQLAlchemy ``Table`` for a dynamic feature table.
 
     Returns a ``Table`` with auto columns (``id``, ``record_srn``, ``created_at``)
-    plus data columns derived from *schema* via :func:`map_column`, in the
-    ``features`` PG schema.
+    plus data columns derived from *schema*, in the ``features`` PG schema.
 
-    Each call creates a disposable ``MetaData`` — these Tables are used for
-    query building only, not for DDL lifecycle management.
+    ``record_srn`` carries an ``ON DELETE CASCADE`` FK to ``records.srn`` — the
+    FK target is the ``Column`` object itself (not a string reference), so
+    SQLAlchemy resolves it without requiring ``records`` to live in the same
+    disposable ``MetaData`` as the dynamic table.
     """
     data_columns = [map_column(col_def) for col_def in schema.columns]
 
@@ -39,7 +41,13 @@ def build_feature_table(pg_table: str, schema: FeatureSchema) -> sa.Table:
         pg_table,
         metadata,
         sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
-        sa.Column("record_srn", sa.Text, nullable=False, index=True),
+        sa.Column(
+            "record_srn",
+            sa.Text,
+            sa.ForeignKey(records_table.c.srn, ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),

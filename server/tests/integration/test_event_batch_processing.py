@@ -64,6 +64,8 @@ def make_record_published(
         domain=Domain("test.example.com"),
         id=LocalId(str(uuid4())),
     )
+    from osa.domain.shared.model.srn import SchemaSRN
+
     return RecordPublished(
         id=EventId(uuid4()),
         record_srn=RecordSRN(
@@ -73,6 +75,7 @@ def make_record_published(
         ),
         source=DepositionSource(id=str(dep_srn)),
         convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0"),
+        schema_srn=SchemaSRN.parse("urn:osa:localhost:schema:test@1.0.0"),
         metadata=metadata or {"title": "Test Record"},
     )
 

@@ -8,7 +8,7 @@ import pytest
 from osa.domain.record.model.aggregate import Record
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.model.source import DepositionSource
-from osa.domain.shared.model.srn import ConventionSRN, RecordSRN
+from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaSRN
 
 
 def _make_record_srn() -> RecordSRN:
@@ -24,6 +24,7 @@ def _make_record() -> Record:
         srn=_make_record_srn(),
         source=DepositionSource(id="urn:osa:localhost:dep:test-dep"),
         convention_srn=_make_conv_srn(),
+        schema_srn=SchemaSRN.parse("urn:osa:localhost:schema:test@1.0.0"),
         metadata={"title": "Test Protein"},
         published_at=datetime.now(UTC),
     )

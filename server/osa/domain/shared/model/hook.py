@@ -57,7 +57,7 @@ def _format_memory(byte_count: int) -> str:
 
 
 class ColumnDef(ValueObject):
-    """Definition of a single column in a feature table."""
+    """Definition of a single column in a feature or metadata table."""
 
     name: PgIdentifier
     json_type: Literal["string", "number", "integer", "boolean", "array", "object"]

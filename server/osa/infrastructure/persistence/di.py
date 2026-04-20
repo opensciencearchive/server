@@ -60,6 +60,8 @@ from osa.infrastructure.persistence.repository.schema import (
     PostgresSemanticsSchemaRepository,
 )
 from osa.infrastructure.persistence.feature_store import PostgresFeatureStore
+from osa.infrastructure.persistence.metadata_store import PostgresMetadataStore
+from osa.domain.metadata.port.metadata_store import MetadataStore
 from osa.infrastructure.persistence.repository.validation import (
     PostgresValidationRunRepository,
 )
@@ -101,6 +103,11 @@ class PersistenceProvider(Provider):
     @provide(scope=Scope.UOW)
     def get_feature_store(self, engine: AsyncEngine, session: AsyncSession) -> FeatureStore:
         return PostgresFeatureStore(engine=engine, session=session)
+
+    # Metadata store
+    @provide(scope=Scope.UOW)
+    def get_metadata_store(self, engine: AsyncEngine, session: AsyncSession) -> MetadataStore:
+        return PostgresMetadataStore(engine=engine, session=session)
 
     # Semantics repositories
     ontology_repo = provide(
@@ -146,6 +153,7 @@ class PersistenceProvider(Provider):
     def get_record_service(
         self,
         record_repo: RecordRepository,
+        convention_repo: ConventionRepository,
         outbox: Outbox,
         config: Config,
         feature_reader: FeatureReader,
@@ -156,6 +164,7 @@ class PersistenceProvider(Provider):
         """
         return RecordService(
             record_repo=record_repo,
+            convention_repo=convention_repo,
             outbox=outbox,
             node_domain=Domain(config.domain),
             feature_reader=feature_reader,

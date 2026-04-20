@@ -63,7 +63,7 @@ class PostgresFeatureStore(FeatureStore):
             schema = FeatureSchema(columns=columns)
             table = build_feature_table(hook_name, schema)
 
-            # Create table
+            # Create table (FK to records.srn is declared inline on the column)
             await conn.run_sync(table.metadata.create_all, checkfirst=False)
             await conn.execute(
                 feature_tables_table.insert().values(

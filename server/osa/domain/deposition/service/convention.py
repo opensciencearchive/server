@@ -68,6 +68,8 @@ class ConventionService(Service):
             ConventionRegistered(
                 id=EventId(uuid4()),
                 convention_srn=srn,
+                schema_srn=created_schema.srn,
+                schema_fields=created_schema.fields,
                 hooks=convention.hooks,
             )
         )

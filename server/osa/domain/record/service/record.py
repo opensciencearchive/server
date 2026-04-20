@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from osa.domain.deposition.port.convention_repository import ConventionRepository
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.record.model.aggregate import Record
 from osa.domain.record.model.draft import RecordDraft
@@ -14,10 +15,12 @@ from osa.domain.record.port.repository import RecordRepository
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.srn import (
+    ConventionSRN,
     Domain,
     LocalId,
     RecordSRN,
     RecordVersion,
+    SchemaSRN,
 )
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
@@ -32,6 +35,7 @@ class RecordService(Service):
     """Creates and persists Record aggregates from any source."""
 
     record_repo: RecordRepository
+    convention_repo: ConventionRepository
     outbox: Outbox
     node_domain: Domain
     feature_reader: FeatureReader
@@ -49,6 +53,13 @@ class RecordService(Service):
             raise NotFoundError(f"Record not found: {srn}")
         return record
 
+    async def _resolve_schema_srn(self, convention_srn: ConventionSRN) -> SchemaSRN:
+        """Resolve a convention to its schema SRN at publication time."""
+        convention = await self.convention_repo.get(convention_srn)
+        if convention is None:
+            raise NotFoundError(f"Convention not found: {convention_srn}")
+        return convention.schema_srn
+
     async def bulk_publish(self, drafts: list[RecordDraft]) -> list[Record]:
         """Bulk-publish records from an ingest batch.
 
@@ -59,8 +70,15 @@ class RecordService(Service):
         if not drafts:
             return []
 
+        # All drafts in a batch target the same convention (caller contract);
+        # resolve schema_srn once.
+        schema_srn_by_conv: dict[str, SchemaSRN] = {}
+
         records: list[Record] = []
         for draft in drafts:
+            key = str(draft.convention_srn)
+            if key not in schema_srn_by_conv:
+                schema_srn_by_conv[key] = await self._resolve_schema_srn(draft.convention_srn)
             record_srn = RecordSRN(
                 domain=self.node_domain,
                 id=LocalId(str(uuid4())),
@@ -71,6 +89,7 @@ class RecordService(Service):
                     srn=record_srn,
                     source=draft.source,
                     convention_srn=draft.convention_srn,
+                    schema_srn=schema_srn_by_conv[key],
                     metadata=draft.metadata,
                     published_at=datetime.now(UTC),
                 )
@@ -83,6 +102,8 @@ class RecordService(Service):
         """Create and persist a Record from a draft."""
         logger.info(f"Creating record from {draft.source.type} source: {draft.source.id}")
 
+        schema_srn = await self._resolve_schema_srn(draft.convention_srn)
+
         record_srn = RecordSRN(
             domain=self.node_domain,
             id=LocalId(str(uuid4())),
@@ -93,6 +114,7 @@ class RecordService(Service):
             srn=record_srn,
             source=draft.source,
             convention_srn=draft.convention_srn,
+            schema_srn=schema_srn,
             metadata=draft.metadata,
             published_at=datetime.now(UTC),
         )
@@ -105,6 +127,7 @@ class RecordService(Service):
             record_srn=record_srn,
             source=draft.source,
             convention_srn=draft.convention_srn,
+            schema_srn=schema_srn,
             metadata=draft.metadata,
             expected_features=draft.expected_features,
         )

@@ -66,12 +66,14 @@ records_table = Table(
     metadata,
     Column("srn", String, primary_key=True),
     Column("convention_srn", Text, nullable=False),
+    Column("schema_srn", Text, nullable=False),
     Column("source", JSONB, nullable=False),
     Column("metadata", JSONB, nullable=False),
     Column("published_at", DateTime(timezone=True), nullable=False),
 )
 
 Index("idx_records_convention_srn", records_table.c.convention_srn)
+Index("idx_records_schema_srn", records_table.c.schema_srn)
 Index(
     "uq_records_source",
     records_table.c.source["type"].as_string(),
@@ -292,6 +294,26 @@ feature_tables_table = Table(
     Column("schema_version", Integer, nullable=False, default=1),
     Column("created_at", DateTime(timezone=True), nullable=False),
     UniqueConstraint("hook_name", name="uq_feature_tables_hook_name"),
+)
+
+
+# ============================================================================
+# METADATA TABLES CATALOG (Typed Metadata — feature 076)
+# ============================================================================
+metadata_tables_table = Table(
+    "metadata_tables",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("schema_identity", Text, nullable=False),
+    Column("schema_slug", Text, nullable=False),
+    Column("schema_major", Integer, nullable=False),
+    Column("schema_versions", JSONB, nullable=False),
+    Column("pg_table", Text, nullable=False),
+    Column("metadata_schema", JSONB, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("schema_identity", "schema_major", name="uq_metadata_tables_identity_major"),
+    UniqueConstraint("pg_table", name="uq_metadata_tables_pg_table"),
 )
 
 

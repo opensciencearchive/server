@@ -34,8 +34,13 @@ class NotFoundError(DomainError):
 class ValidationError(DomainError):
     """Input validation failed."""
 
-    def __init__(self, message: str, field: str | None = None) -> None:
-        super().__init__(message, code="VALIDATION_ERROR")
+    def __init__(
+        self,
+        message: str,
+        field: str | None = None,
+        code: str | None = None,
+    ) -> None:
+        super().__init__(message, code=code or "VALIDATION_ERROR")
         self.field = field
 
 

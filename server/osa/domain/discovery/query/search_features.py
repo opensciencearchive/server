@@ -2,19 +2,20 @@
 
 from osa.domain.discovery.model.value import (
     FeatureSearchResult,
-    Filter,
+    FilterExpr,
     SortOrder,
 )
 from osa.domain.discovery.service.discovery import DiscoveryService
 from osa.domain.shared.authorization.gate import public
 from osa.domain.shared.error import ValidationError
-from osa.domain.shared.model.srn import RecordSRN
+from osa.domain.shared.model.srn import RecordSRN, SchemaSRN
 from osa.domain.shared.query import Query, QueryHandler, Result
 
 
 class SearchFeatures(Query):
     hook_name: str
-    filters: list[Filter] = []
+    filter_expr: FilterExpr | None = None
+    schema_srn: SchemaSRN | None = None
     record_srn: str | None = None
     sort: str = "id"
     order: SortOrder = SortOrder.DESC
@@ -41,7 +42,8 @@ class SearchFeaturesHandler(QueryHandler[SearchFeatures, SearchFeaturesResult]):
                 raise ValidationError(str(exc), field="record_srn") from exc
         result: FeatureSearchResult = await self.discovery_service.search_features(
             hook_name=cmd.hook_name,
-            filters=cmd.filters,
+            filter_expr=cmd.filter_expr,
+            schema_srn=cmd.schema_srn,
             record_srn=record_srn,
             sort=cmd.sort,
             order=cmd.order,
