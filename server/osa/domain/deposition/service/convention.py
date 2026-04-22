@@ -11,7 +11,13 @@ from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.source import IngesterDefinition
-from osa.domain.shared.model.srn import ConventionSRN, Domain, LocalId, Semver
+from osa.domain.shared.model.srn import (
+    ConventionSRN,
+    Domain,
+    LocalId,
+    SchemaIdentifier,
+    Semver,
+)
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
 
@@ -24,6 +30,7 @@ class ConventionService(Service):
 
     async def create_convention(
         self,
+        id: SchemaIdentifier,
         title: str,
         version: str,
         schema: list[FieldDefinition],
@@ -35,13 +42,14 @@ class ConventionService(Service):
         """Create a convention with an inline schema.
 
         The schema is created as a separate Schema row internally,
-        and the convention references it via schema_srn.
+        and the convention references it via schema_id.
 
         Feature table creation is handled asynchronously by the
         CreateFeatureTables handler reacting to ConventionRegistered.
         """
         # Create Schema row from inline field definitions
         created_schema = await self.schema_service.create_schema(
+            id=id,
             title=title,
             version=version,
             fields=schema,
@@ -56,7 +64,7 @@ class ConventionService(Service):
             srn=srn,
             title=title,
             description=description,
-            schema_srn=created_schema.srn,
+            schema_id=created_schema.id,
             file_requirements=file_requirements,
             hooks=hooks or [],
             ingester=ingester,
@@ -68,7 +76,7 @@ class ConventionService(Service):
             ConventionRegistered(
                 id=EventId(uuid4()),
                 convention_srn=srn,
-                schema_srn=created_schema.srn,
+                schema_id=created_schema.id,
                 schema_fields=created_schema.fields,
                 hooks=convention.hooks,
             )

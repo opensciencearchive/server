@@ -8,10 +8,10 @@ from uuid import uuid4
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.source import DepositionSource
-from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaSRN
+from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaId
 
 
-SCHEMA = SchemaSRN.parse("urn:osa:localhost:schema:test@1.0.0")
+SCHEMA = SchemaId.parse("test@1.0.0")
 
 
 class TestRecordPublishedEnriched:
@@ -23,7 +23,7 @@ class TestRecordPublishedEnriched:
             source=source,
             metadata={"title": "Test"},
             convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0"),
-            schema_srn=SCHEMA,
+            schema_id=SCHEMA,
             expected_features=["pocketeer"],
         )
         assert event.source.type == "deposition"
@@ -36,7 +36,7 @@ class TestRecordPublishedEnriched:
             source=DepositionSource(id="urn:osa:localhost:dep:test"),
             metadata={"title": "Test"},
             convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0"),
-            schema_srn=SCHEMA,
+            schema_id=SCHEMA,
             expected_features=[],
         )
         assert event.convention_srn == ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
@@ -48,7 +48,7 @@ class TestRecordPublishedEnriched:
             source=DepositionSource(id="urn:osa:localhost:dep:test"),
             metadata={"title": "Test"},
             convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0"),
-            schema_srn=SCHEMA,
+            schema_id=SCHEMA,
             expected_features=["pocketeer", "qc_check"],
         )
         assert event.expected_features == ["pocketeer", "qc_check"]

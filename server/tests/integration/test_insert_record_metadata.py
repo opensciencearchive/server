@@ -12,13 +12,13 @@ from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.semantics.model.value import Cardinality, FieldDefinition, FieldType
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.source import DepositionSource
-from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaSRN
+from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaId
 from osa.infrastructure.persistence.metadata_store import PostgresMetadataStore
 from osa.infrastructure.persistence.metadata_table import METADATA_SCHEMA
 
 from tests.integration.conftest import seed_record
 
-SCHEMA_V1 = SchemaSRN.parse("urn:osa:localhost:schema:bio-sample@1.0.0")
+SCHEMA_V1 = SchemaId.parse("bio-sample@1.0.0")
 CONV_SRN = ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
 
 
@@ -45,7 +45,7 @@ def _event(record_srn: RecordSRN, metadata: dict) -> RecordPublished:
         record_srn=record_srn,
         source=DepositionSource(id="dep-1"),
         convention_srn=CONV_SRN,
-        schema_srn=SCHEMA_V1,
+        schema_id=SCHEMA_V1,
         metadata=metadata,
         expected_features=[],
     )
@@ -55,10 +55,15 @@ def _event(record_srn: RecordSRN, metadata: dict) -> RecordPublished:
 class TestInsertRecordMetadata:
     async def test_insert_creates_typed_row(self, pg_engine: AsyncEngine, pg_session: AsyncSession):
         store = PostgresMetadataStore(pg_engine, pg_session)
-        await store.ensure_table(SCHEMA_V1, "bio_sample", _fields())
+        await store.ensure_table(SCHEMA_V1, _fields())
 
         record_srn = RecordSRN.parse("urn:osa:localhost:rec:one@1")
-        await seed_record(pg_engine, srn=str(record_srn), schema_srn=str(SCHEMA_V1))
+        await seed_record(
+            pg_engine,
+            srn=str(record_srn),
+            schema_id=SCHEMA_V1.id.root,
+            schema_version=SCHEMA_V1.version.root,
+        )
 
         handler = InsertRecordMetadata(metadata_service=MetadataService(metadata_store=store))
         await handler.handle(_event(record_srn, {"species": "Homo sapiens", "resolution": 3.5}))
@@ -83,10 +88,15 @@ class TestInsertRecordMetadata:
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
     ):
         store = PostgresMetadataStore(pg_engine, pg_session)
-        await store.ensure_table(SCHEMA_V1, "bio_sample", _fields())
+        await store.ensure_table(SCHEMA_V1, _fields())
 
         record_srn = RecordSRN.parse("urn:osa:localhost:rec:dup@1")
-        await seed_record(pg_engine, srn=str(record_srn), schema_srn=str(SCHEMA_V1))
+        await seed_record(
+            pg_engine,
+            srn=str(record_srn),
+            schema_id=SCHEMA_V1.id.root,
+            schema_version=SCHEMA_V1.version.root,
+        )
 
         handler = InsertRecordMetadata(metadata_service=MetadataService(metadata_store=store))
         event = _event(record_srn, {"species": "Mus musculus", "resolution": 1.0})

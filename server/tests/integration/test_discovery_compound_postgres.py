@@ -13,13 +13,13 @@ from osa.domain.discovery.model.value import (
     SortOrder,
 )
 from osa.domain.semantics.model.value import Cardinality, FieldDefinition, FieldType
-from osa.domain.shared.model.srn import RecordSRN, SchemaSRN
+from osa.domain.shared.model.srn import RecordSRN, SchemaId
 from osa.infrastructure.persistence.adapter.discovery import PostgresDiscoveryReadStore
 from osa.infrastructure.persistence.metadata_store import PostgresMetadataStore
 
 from tests.integration.conftest import seed_record
 
-SCHEMA_V1 = SchemaSRN.parse("urn:osa:localhost:schema:bio-sample@1.0.0")
+SCHEMA_V1 = SchemaId.parse("bio-sample@1.0.0")
 FIELD_TYPES = {"species": FieldType.TEXT, "resolution": FieldType.NUMBER}
 
 
@@ -50,11 +50,11 @@ async def seeded_store(pg_engine: AsyncEngine, pg_session: AsyncSession) -> Post
     )
 
     store = PostgresMetadataStore(pg_engine, pg_session)
-    await store.ensure_table(SCHEMA_V1, "bio_sample", _fields())
+    await store.ensure_table(SCHEMA_V1, _fields())
 
     repo = PostgresSemanticsSchemaRepository(pg_session)
     await repo.save(
-        Schema(srn=SCHEMA_V1, title="bio_sample", fields=_fields(), created_at=datetime.now(UTC))
+        Schema(id=SCHEMA_V1, title="bio_sample", fields=_fields(), created_at=datetime.now(UTC))
     )
 
     rows = [
@@ -65,7 +65,12 @@ async def seeded_store(pg_engine: AsyncEngine, pg_session: AsyncSession) -> Post
     ]
     for rid, sp, res in rows:
         srn = RecordSRN.parse(f"urn:osa:localhost:rec:{rid}@1")
-        await seed_record(pg_engine, srn=str(srn), schema_srn=str(SCHEMA_V1))
+        await seed_record(
+            pg_engine,
+            srn=str(srn),
+            schema_id=SCHEMA_V1.id.root,
+            schema_version=SCHEMA_V1.version.root,
+        )
         await store.insert(SCHEMA_V1, srn, {"species": sp, "resolution": res})
 
     await pg_session.commit()
@@ -89,7 +94,7 @@ class TestCompound:
         )
         results = await read_store.search_records(
             filter_expr=tree,
-            schema_srn=SCHEMA_V1,
+            schema_id=SCHEMA_V1,
             convention_srn=None,
             text_fields=[],
             q=None,
@@ -112,7 +117,7 @@ class TestCompound:
         tree = Not(operand=_pred("species", FilterOperator.EQ, "Homo sapiens"))
         results = await read_store.search_records(
             filter_expr=tree,
-            schema_srn=SCHEMA_V1,
+            schema_id=SCHEMA_V1,
             convention_srn=None,
             text_fields=[],
             q=None,
@@ -143,7 +148,7 @@ class TestCompound:
         )
         results = await read_store.search_records(
             filter_expr=tree,
-            schema_srn=SCHEMA_V1,
+            schema_id=SCHEMA_V1,
             convention_srn=None,
             text_fields=[],
             q=None,

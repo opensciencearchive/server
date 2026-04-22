@@ -66,14 +66,15 @@ records_table = Table(
     metadata,
     Column("srn", String, primary_key=True),
     Column("convention_srn", Text, nullable=False),
-    Column("schema_srn", Text, nullable=False),
+    Column("schema_id", Text, nullable=False),
+    Column("schema_version", Text, nullable=False),
     Column("source", JSONB, nullable=False),
     Column("metadata", JSONB, nullable=False),
     Column("published_at", DateTime(timezone=True), nullable=False),
 )
 
 Index("idx_records_convention_srn", records_table.c.convention_srn)
-Index("idx_records_schema_srn", records_table.c.schema_srn)
+Index("idx_records_schema_id", records_table.c.schema_id)
 Index(
     "uq_records_source",
     records_table.c.source["type"].as_string(),
@@ -257,11 +258,14 @@ Index("idx_ontology_terms_ontology_srn", ontology_terms_table.c.ontology_srn)
 schemas_table = Table(
     "schemas",
     metadata,
-    Column("srn", String, primary_key=True),  # Versioned SRN string
+    Column("id", String, primary_key=True, nullable=False),
+    Column("version", String, primary_key=True, nullable=False),
     Column("title", String(255), nullable=False),
     Column("fields", JSON, nullable=False),  # List of FieldDefinition dicts
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
+
+Index("idx_schemas_id", schemas_table.c.id)
 
 
 # ============================================================================
@@ -270,10 +274,11 @@ schemas_table = Table(
 conventions_table = Table(
     "conventions",
     metadata,
-    Column("srn", String, primary_key=True),  # Versioned SRN string
+    Column("srn", String, primary_key=True),  # Convention SRN stays as-is (published artifact)
     Column("title", String(255), nullable=False),
     Column("description", Text, nullable=True),
-    Column("schema_srn", String, nullable=False),  # Reference to schemas.srn
+    Column("schema_id", String, nullable=False),
+    Column("schema_version", String, nullable=False),
     Column("file_requirements", JSON, nullable=False),  # FileRequirements as dict
     Column("hooks", JSON, nullable=False, default=[]),  # List of HookDefinition dicts
     Column("source", JSON, nullable=True),  # IngesterDefinition as dict
@@ -304,7 +309,7 @@ metadata_tables_table = Table(
     "metadata_tables",
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("schema_identity", Text, nullable=False),
+    Column("schema_id", Text, nullable=False),
     Column("schema_slug", Text, nullable=False),
     Column("schema_major", Integer, nullable=False),
     Column("schema_versions", JSONB, nullable=False),
@@ -312,7 +317,7 @@ metadata_tables_table = Table(
     Column("metadata_schema", JSONB, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
-    UniqueConstraint("schema_identity", "schema_major", name="uq_metadata_tables_identity_major"),
+    UniqueConstraint("schema_id", "schema_major", name="uq_metadata_tables_id_major"),
     UniqueConstraint("pg_table", name="uq_metadata_tables_pg_table"),
 )
 

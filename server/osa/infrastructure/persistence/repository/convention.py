@@ -8,7 +8,7 @@ from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.port.convention_repository import ConventionRepository
 from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.source import IngesterDefinition
-from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
+from osa.domain.shared.model.srn import ConventionSRN, LocalId, SchemaId, Semver
 from osa.infrastructure.persistence.tables import conventions_table
 
 
@@ -17,7 +17,8 @@ def _convention_to_row(convention: Convention) -> dict[str, Any]:
         "srn": str(convention.srn),
         "title": convention.title,
         "description": convention.description,
-        "schema_srn": str(convention.schema_srn),
+        "schema_id": convention.schema_id.id.root,
+        "schema_version": convention.schema_id.version.root,
         "file_requirements": convention.file_requirements.model_dump(),
         "hooks": [h.model_dump() for h in convention.hooks],
         "source": convention.ingester.model_dump() if convention.ingester else None,
@@ -31,7 +32,10 @@ def _row_to_convention(row: dict[str, Any]) -> Convention:
         srn=ConventionSRN.parse(row["srn"]),
         title=row["title"],
         description=row.get("description"),
-        schema_srn=SchemaSRN.parse(row["schema_srn"]),
+        schema_id=SchemaId(
+            id=LocalId(row["schema_id"]),
+            version=Semver.from_string(row["schema_version"]),
+        ),
         file_requirements=FileRequirements.model_validate(row["file_requirements"]),
         hooks=[HookDefinition.model_validate(h) for h in (row.get("hooks") or [])],
         ingester=IngesterDefinition.model_validate(source_data) if source_data else None,

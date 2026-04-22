@@ -4,7 +4,7 @@ from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.shared.model.aggregate import Aggregate
 from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.source import IngesterDefinition
-from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
+from osa.domain.shared.model.srn import ConventionSRN, SchemaId
 
 
 class Convention(Aggregate):
@@ -13,7 +13,7 @@ class Convention(Aggregate):
     srn: ConventionSRN
     title: str
     description: str | None = None
-    schema_srn: SchemaSRN
+    schema_id: SchemaId
     file_requirements: FileRequirements
     hooks: list[HookDefinition] = []
     ingester: IngesterDefinition | None = None

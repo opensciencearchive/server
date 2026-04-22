@@ -18,12 +18,12 @@ class InsertRecordMetadata(EventHandler[RecordPublished]):
 
     async def handle(self, event: RecordPublished) -> None:
         await self.metadata_service.insert(
-            schema_srn=event.schema_srn,
+            schema_id=event.schema_id,
             record_srn=event.record_srn,
             values=event.metadata,
         )
         logger.debug(
             "Inserted metadata row: record=%s schema=%s",
             event.record_srn,
-            event.schema_srn,
+            event.schema_id,
         )

@@ -6,12 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from osa.domain.metadata.service.metadata import MetadataService
 from osa.domain.semantics.model.value import Cardinality, FieldDefinition, FieldType
 from osa.domain.shared.error import ValidationError
-from osa.domain.shared.model.srn import SchemaSRN
+from osa.domain.shared.model.srn import SchemaId
 from osa.infrastructure.persistence.metadata_store import PostgresMetadataStore
 
-IDENTITY = "urn:osa:localhost:schema:bio-sample"
-V1 = SchemaSRN.parse(f"{IDENTITY}@1.0.0")
-V11 = SchemaSRN.parse(f"{IDENTITY}@1.1.0")
+SCHEMA_ID = "bio-sample"
+V1 = SchemaId.parse(f"{SCHEMA_ID}@1.0.0")
+V11 = SchemaId.parse(f"{SCHEMA_ID}@1.1.0")
 
 
 def _orig() -> list[FieldDefinition]:
@@ -35,7 +35,7 @@ def _orig() -> list[FieldDefinition]:
 class TestNonAdditiveRejected:
     async def test_rename_field_rejected(self, pg_engine: AsyncEngine, pg_session: AsyncSession):
         svc = MetadataService(metadata_store=PostgresMetadataStore(pg_engine, pg_session))
-        await svc.ensure_table(V1, "bio_sample", _orig())
+        await svc.ensure_table(V1, _orig())
 
         # New field "organism" is optional so the validator reaches the removal
         # check and reports the dropped "species" field specifically.
@@ -54,13 +54,13 @@ class TestNonAdditiveRejected:
             ),
         ]
         with pytest.raises(ValidationError) as exc:
-            await svc.ensure_table(V11, "bio_sample", renamed)
+            await svc.ensure_table(V11, renamed)
         message = str(exc.value)
         assert "species" in message and "removed" in message
 
     async def test_type_change_rejected(self, pg_engine: AsyncEngine, pg_session: AsyncSession):
         svc = MetadataService(metadata_store=PostgresMetadataStore(pg_engine, pg_session))
-        await svc.ensure_table(V1, "bio_sample", _orig())
+        await svc.ensure_table(V1, _orig())
 
         retyped = [
             FieldDefinition(
@@ -78,13 +78,13 @@ class TestNonAdditiveRejected:
             ),
         ]
         with pytest.raises(ValidationError, match="resolution"):
-            await svc.ensure_table(V11, "bio_sample", retyped)
+            await svc.ensure_table(V11, retyped)
 
     async def test_tightening_required_rejected(
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
     ):
         svc = MetadataService(metadata_store=PostgresMetadataStore(pg_engine, pg_session))
-        await svc.ensure_table(V1, "bio_sample", _orig())
+        await svc.ensure_table(V1, _orig())
 
         tightened = [
             FieldDefinition(
@@ -101,4 +101,4 @@ class TestNonAdditiveRejected:
             ),
         ]
         with pytest.raises(ValidationError, match="resolution"):
-            await svc.ensure_table(V11, "bio_sample", tightened)
+            await svc.ensure_table(V11, tightened)

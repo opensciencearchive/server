@@ -14,11 +14,11 @@ from osa.domain.semantics.model.value import (
     TextConstraints,
 )
 from osa.domain.shared.error import ValidationError
-from osa.domain.shared.model.srn import OntologySRN, SchemaSRN
+from osa.domain.shared.model.srn import OntologySRN, SchemaId
 
 
-def _make_srn(id: str = "test-schema", version: str = "1.0.0") -> SchemaSRN:
-    return SchemaSRN.parse(f"urn:osa:localhost:schema:{id}@{version}")
+def _make_srn(id: str = "test-schema", version: str = "1.0.0") -> SchemaId:
+    return SchemaId.parse(f"{id}@{version}")
 
 
 def _make_text_field(name: str = "title", required: bool = True) -> FieldDefinition:
@@ -33,7 +33,7 @@ def _make_text_field(name: str = "title", required: bool = True) -> FieldDefinit
 class TestSchemaCreation:
     def test_create_with_single_field(self):
         schema = Schema(
-            srn=_make_srn(),
+            id=_make_srn(),
             title="Test Schema",
             fields=[_make_text_field()],
             created_at=datetime.now(UTC),
@@ -43,7 +43,7 @@ class TestSchemaCreation:
 
     def test_create_with_multiple_fields(self):
         schema = Schema(
-            srn=_make_srn(),
+            id=_make_srn(),
             title="scRNA-seq",
             fields=[
                 _make_text_field("title"),
@@ -62,7 +62,7 @@ class TestSchemaCreation:
     def test_create_with_ontology_reference(self):
         onto_srn = OntologySRN.parse("urn:osa:localhost:onto:sex@1.0.0")
         schema = Schema(
-            srn=_make_srn(),
+            id=_make_srn(),
             title="With Ontology",
             fields=[
                 FieldDefinition(
@@ -79,7 +79,7 @@ class TestSchemaCreation:
 
     def test_create_with_text_constraints(self):
         schema = Schema(
-            srn=_make_srn(),
+            id=_make_srn(),
             title="Constrained",
             fields=[
                 FieldDefinition(
@@ -99,7 +99,7 @@ class TestSchemaInvariants:
     def test_rejects_empty_fields(self):
         with pytest.raises(ValidationError, match="at least one field"):
             Schema(
-                srn=_make_srn(),
+                id=_make_srn(),
                 title="Empty",
                 fields=[],
                 created_at=datetime.now(UTC),
@@ -108,7 +108,7 @@ class TestSchemaInvariants:
     def test_rejects_duplicate_field_names(self):
         with pytest.raises(ValidationError, match="Duplicate field names"):
             Schema(
-                srn=_make_srn(),
+                id=_make_srn(),
                 title="Duplicate",
                 fields=[
                     _make_text_field("title"),

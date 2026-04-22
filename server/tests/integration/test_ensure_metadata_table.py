@@ -15,15 +15,15 @@ from osa.domain.metadata.service.metadata import MetadataService
 from osa.domain.semantics.model.schema import Schema
 from osa.domain.semantics.model.value import Cardinality, FieldDefinition, FieldType
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
+from osa.domain.shared.model.srn import ConventionSRN, SchemaId
 from osa.infrastructure.persistence.metadata_store import PostgresMetadataStore
 from osa.infrastructure.persistence.metadata_table import METADATA_SCHEMA
 from osa.infrastructure.persistence.repository.convention import PostgresConventionRepository
 from osa.infrastructure.persistence.repository.schema import PostgresSemanticsSchemaRepository
 
-SCHEMA_IDENTITY = "urn:osa:localhost:schema:bio-sample"
-SCHEMA_V1 = SchemaSRN.parse(f"{SCHEMA_IDENTITY}@1.0.0")
-SCHEMA_V11 = SchemaSRN.parse(f"{SCHEMA_IDENTITY}@1.1.0")
+SCHEMA_ID = "bio-sample"
+SCHEMA_V1 = SchemaId.parse(f"{SCHEMA_ID}@1.0.0")
+SCHEMA_V11 = SchemaId.parse(f"{SCHEMA_ID}@1.1.0")
 
 
 def _fields_v1() -> list[FieldDefinition]:
@@ -49,22 +49,20 @@ def _fields_v11() -> list[FieldDefinition]:
 
 
 async def _seed_schema(
-    session: AsyncSession, srn: SchemaSRN, fields: list[FieldDefinition], title: str = "bio_sample"
+    session: AsyncSession, srn: SchemaId, fields: list[FieldDefinition], title: str = "bio_sample"
 ) -> None:
     repo = PostgresSemanticsSchemaRepository(session)
-    await repo.save(Schema(srn=srn, title=title, fields=fields, created_at=datetime.now(UTC)))
+    await repo.save(Schema(id=srn, title=title, fields=fields, created_at=datetime.now(UTC)))
 
 
-async def _seed_convention(
-    session: AsyncSession, srn: ConventionSRN, schema_srn: SchemaSRN
-) -> None:
+async def _seed_convention(session: AsyncSession, srn: ConventionSRN, schema_id: SchemaId) -> None:
     repo = PostgresConventionRepository(session)
     await repo.save(
         Convention(
             srn=srn,
             title="bio_sample_v1",
             description=None,
-            schema_srn=schema_srn,
+            schema_id=schema_id,
             file_requirements=FileRequirements(accepted_types=[], max_count=0, max_file_size=0),
             hooks=[],
             created_at=datetime.now(UTC),
@@ -74,13 +72,13 @@ async def _seed_convention(
 
 def _event(
     convention_srn: ConventionSRN,
-    schema_srn: SchemaSRN,
+    schema_id: SchemaId,
     schema_fields: list[FieldDefinition],
 ) -> ConventionRegistered:
     return ConventionRegistered(
         id=EventId(uuid4()),
         convention_srn=convention_srn,
-        schema_srn=schema_srn,
+        schema_id=schema_id,
         schema_fields=schema_fields,
         hooks=[],
     )
@@ -91,7 +89,6 @@ async def _make_handler(pg_engine: AsyncEngine, pg_session: AsyncSession) -> Ens
     service = MetadataService(metadata_store=store)
     return EnsureMetadataTable(
         metadata_service=service,
-        schema_repo=PostgresSemanticsSchemaRepository(pg_session),
         convention_repo=PostgresConventionRepository(pg_session),
     )
 

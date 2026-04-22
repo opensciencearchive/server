@@ -41,7 +41,7 @@ class TestSearchRecordsHandler:
 
         mock_service.search_records.assert_called_once_with(
             filter_expr=None,
-            schema_srn=None,
+            schema_id=None,
             convention_srn=None,
             q=None,
             sort="published_at",

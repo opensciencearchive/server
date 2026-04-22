@@ -1,14 +1,14 @@
 """PostgreSQL implementation of MetadataStore.
 
-Schema-keyed DDL lifecycle: one metadata table per (schema_identity, major
-version) pair. The catalog row in ``public.metadata_tables`` is updated in
-lock-step with ALTER ADD COLUMN operations so reads can reconstruct the
-dynamic table shape without reflection.
+Schema-keyed DDL lifecycle: one metadata table per ``(schema_id, major)``
+pair. The catalog row in ``public.metadata_tables`` is updated in lock-step
+with ALTER ADD COLUMN operations so reads can reconstruct the dynamic table
+shape without reflection.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any, Literal, Sequence
 
 import sqlalchemy as sa
@@ -20,10 +20,10 @@ from osa.domain.metadata.port.metadata_store import MetadataStore
 from osa.domain.semantics.model.value import FieldDefinition, FieldType
 from osa.domain.shared.error import ValidationError
 from osa.domain.shared.model.hook import ColumnDef
-from osa.domain.shared.model.srn import RecordSRN, SchemaSRN
+from osa.domain.shared.model.srn import RecordSRN, SchemaId
+from osa.infrastructure.persistence.api_naming import metadata_pg_schema
 from osa.infrastructure.persistence.column_mapper import map_column
 from osa.infrastructure.persistence.metadata_table import (
-    METADATA_SCHEMA,
     MetadataSchema,
     build_metadata_table,
     schema_slug,
@@ -61,12 +61,6 @@ def _field_to_column(field: FieldDefinition) -> ColumnDef:
     )
 
 
-def _identity_of(schema_srn: SchemaSRN) -> str:
-    """Return the version-stripped schema SRN (the schema identity)."""
-    rendered = str(schema_srn)
-    return rendered.split("@", 1)[0]
-
-
 class PostgresMetadataStore(MetadataStore):
     """DDL + DML for per-schema typed metadata tables."""
 
@@ -76,26 +70,25 @@ class PostgresMetadataStore(MetadataStore):
 
     async def ensure_table(
         self,
-        schema_srn: SchemaSRN,
-        schema_title: str,
+        schema_id: SchemaId,
         fields: list[FieldDefinition],
     ) -> None:
-        identity = _identity_of(schema_srn)
-        major = int(schema_srn.version.root.split(".")[0])
-        slug = schema_slug(schema_title)
+        id_str = schema_id.id.root
+        major = schema_id.major
+        slug = schema_slug(id_str)
         pg_table = f"{slug}_v{major}"
 
         columns = [_field_to_column(f) for f in fields]
         metadata_schema = MetadataSchema(columns=columns)
 
         async with self._engine.begin() as conn:
-            await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{METADATA_SCHEMA}"'))
+            await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{metadata_pg_schema()}"'))
 
             existing = (
                 (
                     await conn.execute(
                         select(metadata_tables_table).where(
-                            metadata_tables_table.c.schema_identity == identity,
+                            metadata_tables_table.c.schema_id == id_str,
                             metadata_tables_table.c.schema_major == major,
                         )
                     )
@@ -110,10 +103,10 @@ class PostgresMetadataStore(MetadataStore):
                 now = datetime.now(UTC)
                 await conn.execute(
                     metadata_tables_table.insert().values(
-                        schema_identity=identity,
+                        schema_id=id_str,
                         schema_slug=slug,
                         schema_major=major,
-                        schema_versions=[str(schema_srn)],
+                        schema_versions=[schema_id.render()],
                         pg_table=pg_table,
                         metadata_schema=metadata_schema.model_dump(),
                         created_at=now,
@@ -132,9 +125,10 @@ class PostgresMetadataStore(MetadataStore):
             new_columns = [
                 c for c in columns if c.name not in {s.name for s in stored_schema.columns}
             ]
+            rendered = schema_id.render()
             if not new_columns:
-                if str(schema_srn) not in stored_versions:
-                    stored_versions.append(str(schema_srn))
+                if rendered not in stored_versions:
+                    stored_versions.append(rendered)
                     await conn.execute(
                         metadata_tables_table.update()
                         .where(metadata_tables_table.c.id == existing["id"])
@@ -150,8 +144,8 @@ class PostgresMetadataStore(MetadataStore):
                 await conn.execute(text(_alter_add_column_stmt(pg_table, col_def)))
 
             merged_columns = stored_schema.columns + new_columns
-            if str(schema_srn) not in stored_versions:
-                stored_versions.append(str(schema_srn))
+            if rendered not in stored_versions:
+                stored_versions.append(rendered)
             await conn.execute(
                 metadata_tables_table.update()
                 .where(metadata_tables_table.c.id == existing["id"])
@@ -164,18 +158,18 @@ class PostgresMetadataStore(MetadataStore):
 
     async def insert(
         self,
-        schema_srn: SchemaSRN,
+        schema_id: SchemaId,
         record_srn: RecordSRN,
         values: dict[str, Any],
     ) -> None:
-        identity = _identity_of(schema_srn)
-        major = int(schema_srn.version.root.split(".")[0])
+        id_str = schema_id.id.root
+        major = schema_id.major
 
         catalog_row = (
             (
                 await self._session.execute(
                     select(metadata_tables_table).where(
-                        metadata_tables_table.c.schema_identity == identity,
+                        metadata_tables_table.c.schema_id == id_str,
                         metadata_tables_table.c.schema_major == major,
                     )
                 )
@@ -186,18 +180,23 @@ class PostgresMetadataStore(MetadataStore):
 
         if catalog_row is None:
             raise ValidationError(
-                f"No metadata table registered for schema {schema_srn} "
-                f"(identity={identity}, major={major}). "
+                f"No metadata table registered for schema {schema_id.render()} "
+                f"(id={id_str}, major={major}). "
                 "Ensure the convention has been registered first.",
-                field="schema_srn",
+                field="schema_id",
             )
 
         schema = MetadataSchema.model_validate(catalog_row["metadata_schema"])
         pg_table = catalog_row["pg_table"]
         table = build_metadata_table(pg_table, schema)
 
-        known = {c.name for c in schema.columns}
-        payload = {k: v for k, v in values.items() if k in known}
+        col_by_name = {c.name: c for c in schema.columns}
+        payload: dict[str, Any] = {}
+        for k, v in values.items():
+            col = col_by_name.get(k)
+            if col is None:
+                continue
+            payload[k] = _coerce_value(col, v)
         payload["record_srn"] = str(record_srn)
 
         stmt = insert(table).values(**payload)
@@ -251,9 +250,25 @@ def _alter_add_column_stmt(pg_table: str, col_def: ColumnDef) -> str:
     sql_type = _column_type_sql(map_column(col_def).type)
     null_sql = "" if not col_def.required else " NOT NULL"
     return (
-        f'ALTER TABLE "{METADATA_SCHEMA}"."{pg_table}" '
+        f'ALTER TABLE "{metadata_pg_schema()}"."{pg_table}" '
         f'ADD COLUMN IF NOT EXISTS "{col_def.name}" {sql_type}{null_sql}'
     )
+
+
+def _coerce_value(col: ColumnDef, value: Any) -> Any:
+    """Coerce a JSONB-read value to match its typed PG column.
+
+    ``records.metadata`` is JSONB, so date/datetime fields come back as ISO
+    strings. asyncpg won't auto-parse those for DATE / TIMESTAMP columns —
+    we parse here based on the declared column format.
+    """
+    if value is None:
+        return None
+    if col.json_type == "string" and col.format == "date":
+        return value if isinstance(value, date) else date.fromisoformat(value)
+    if col.json_type == "string" and col.format == "date-time":
+        return value if isinstance(value, datetime) else datetime.fromisoformat(value)
+    return value
 
 
 def _column_type_sql(sa_type: Any) -> str:

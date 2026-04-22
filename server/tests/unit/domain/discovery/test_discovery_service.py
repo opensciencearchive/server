@@ -22,10 +22,10 @@ from osa.domain.discovery.model.value import (
 from osa.domain.discovery.service.discovery import DiscoveryService
 from osa.domain.semantics.model.value import FieldType
 from osa.domain.shared.error import ValidationError
-from osa.domain.shared.model.srn import RecordSRN, SchemaSRN
+from osa.domain.shared.model.srn import RecordSRN, SchemaId
 
 
-SCHEMA_SRN = SchemaSRN.parse("urn:osa:localhost:schema:bio-sample@1.0.0")
+SCHEMA_SRN = SchemaId.parse("bio-sample@1.0.0")
 
 
 def _config() -> Config:
@@ -84,7 +84,7 @@ class TestSearchRecordsValidation:
         with pytest.raises(ValidationError, match="Unknown metadata field 'bogus'"):
             await service.search_records(
                 filter_expr=_eq("bogus", "x"),
-                schema_srn=SCHEMA_SRN,
+                schema_id=SCHEMA_SRN,
                 convention_srn=None,
                 q=None,
                 sort="published_at",
@@ -101,7 +101,7 @@ class TestSearchRecordsValidation:
                     op=FilterOperator.CONTAINS,
                     value="x",
                 ),
-                schema_srn=SCHEMA_SRN,
+                schema_id=SCHEMA_SRN,
                 convention_srn=None,
                 q=None,
                 sort="published_at",
@@ -114,7 +114,7 @@ class TestSearchRecordsValidation:
         with pytest.raises(ValidationError, match="Unknown sort field"):
             await service.search_records(
                 filter_expr=None,
-                schema_srn=SCHEMA_SRN,
+                schema_id=SCHEMA_SRN,
                 convention_srn=None,
                 q=None,
                 sort="nonexistent",
@@ -126,7 +126,7 @@ class TestSearchRecordsValidation:
     async def test_accepts_published_at_sort(self, service: DiscoveryService) -> None:
         result = await service.search_records(
             filter_expr=None,
-            schema_srn=SCHEMA_SRN,
+            schema_id=SCHEMA_SRN,
             convention_srn=None,
             q=None,
             sort="published_at",
@@ -139,7 +139,7 @@ class TestSearchRecordsValidation:
     async def test_accepts_metadata_field_sort(self, service: DiscoveryService) -> None:
         result = await service.search_records(
             filter_expr=None,
-            schema_srn=SCHEMA_SRN,
+            schema_id=SCHEMA_SRN,
             convention_srn=None,
             q=None,
             sort="resolution",
@@ -153,7 +153,7 @@ class TestSearchRecordsValidation:
         with pytest.raises(ValidationError, match="limit"):
             await service.search_records(
                 filter_expr=None,
-                schema_srn=SCHEMA_SRN,
+                schema_id=SCHEMA_SRN,
                 convention_srn=None,
                 q=None,
                 sort="published_at",
@@ -166,7 +166,7 @@ class TestSearchRecordsValidation:
         with pytest.raises(ValidationError, match="limit"):
             await service.search_records(
                 filter_expr=None,
-                schema_srn=SCHEMA_SRN,
+                schema_id=SCHEMA_SRN,
                 convention_srn=None,
                 q=None,
                 sort="published_at",
@@ -188,7 +188,7 @@ class TestSearchRecordsValidation:
         with pytest.raises(ValidationError, match="Free-text search is unavailable"):
             await svc.search_records(
                 filter_expr=None,
-                schema_srn=SCHEMA_SRN,
+                schema_id=SCHEMA_SRN,
                 convention_srn=None,
                 q="kinase",
                 sort="published_at",
@@ -204,7 +204,7 @@ class TestSearchRecordsDelegation:
     ) -> None:
         await service.search_records(
             filter_expr=_eq("method", "X-ray"),
-            schema_srn=SCHEMA_SRN,
+            schema_id=SCHEMA_SRN,
             convention_srn=None,
             q=None,
             sort="published_at",
@@ -226,7 +226,7 @@ class TestSearchRecordsDelegation:
         cursor = encode_cursor("2026-01-01", "urn:osa:localhost:rec:abc@1")
         await service.search_records(
             filter_expr=None,
-            schema_srn=SCHEMA_SRN,
+            schema_id=SCHEMA_SRN,
             convention_srn=None,
             q=None,
             sort="published_at",
@@ -244,7 +244,7 @@ class TestSearchRecordsDelegation:
         with pytest.raises(ValidationError, match="cursor"):
             await service.search_records(
                 filter_expr=None,
-                schema_srn=SCHEMA_SRN,
+                schema_id=SCHEMA_SRN,
                 convention_srn=None,
                 q=None,
                 sort="published_at",
@@ -264,7 +264,7 @@ class TestSearchRecordsDelegation:
 
         result = await service.search_records(
             filter_expr=None,
-            schema_srn=SCHEMA_SRN,
+            schema_id=SCHEMA_SRN,
             convention_srn=None,
             q=None,
             sort="published_at",
@@ -286,7 +286,7 @@ class TestSearchRecordsDelegation:
 
         result = await service.search_records(
             filter_expr=None,
-            schema_srn=SCHEMA_SRN,
+            schema_id=SCHEMA_SRN,
             convention_srn=None,
             q=None,
             sort="published_at",
@@ -297,6 +297,69 @@ class TestSearchRecordsDelegation:
 
         assert result.cursor is None
         assert result.has_more is False
+
+
+class TestSchemaRequiredGuards:
+    """With the JSONB filter fallback removed, any query that resolves against
+    metadata fields must pin a schema."""
+
+    async def test_metadata_predicate_without_schema_raises(
+        self, service: DiscoveryService
+    ) -> None:
+        with pytest.raises(ValidationError) as exc:
+            await service.search_records(
+                filter_expr=_eq("title", "x"),
+                schema_id=None,
+                convention_srn=None,
+                q=None,
+                sort="published_at",
+                order=SortOrder.DESC,
+                cursor=None,
+                limit=20,
+            )
+        assert exc.value.code == "schema_required_for_metadata_query"
+
+    async def test_non_default_sort_without_schema_raises(self, service: DiscoveryService) -> None:
+        with pytest.raises(ValidationError) as exc:
+            await service.search_records(
+                filter_expr=None,
+                schema_id=None,
+                convention_srn=None,
+                q=None,
+                sort="resolution",
+                order=SortOrder.DESC,
+                cursor=None,
+                limit=20,
+            )
+        assert exc.value.code == "schema_required_for_metadata_sort"
+
+    async def test_q_without_schema_raises(self, service: DiscoveryService) -> None:
+        with pytest.raises(ValidationError) as exc:
+            await service.search_records(
+                filter_expr=None,
+                schema_id=None,
+                convention_srn=None,
+                q="kinase",
+                sort="published_at",
+                order=SortOrder.DESC,
+                cursor=None,
+                limit=20,
+            )
+        assert exc.value.code == "schema_required_for_free_text_search"
+
+    async def test_plain_listing_without_schema_succeeds(self, service: DiscoveryService) -> None:
+        """No filter, default sort, no q → unscoped listing is allowed."""
+        result = await service.search_records(
+            filter_expr=None,
+            schema_id=None,
+            convention_srn=None,
+            q=None,
+            sort="published_at",
+            order=SortOrder.DESC,
+            cursor=None,
+            limit=20,
+        )
+        assert result.results == []
 
 
 class TestFilterBounds:
@@ -310,7 +373,7 @@ class TestFilterBounds:
         with pytest.raises(ValidationError, match="filter_depth_exceeded|depth"):
             await service.search_records(
                 filter_expr=tree,
-                schema_srn=SCHEMA_SRN,
+                schema_id=SCHEMA_SRN,
                 convention_srn=None,
                 q=None,
                 sort="published_at",
@@ -343,7 +406,7 @@ class TestFeatureCursorEncoding:
         result = await service.search_features(
             hook_name="detect_pockets",
             filter_expr=None,
-            schema_srn=None,
+            schema_id=None,
             record_srn=None,
             sort="score",
             order=SortOrder.DESC,

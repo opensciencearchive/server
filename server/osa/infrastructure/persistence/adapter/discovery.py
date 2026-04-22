@@ -21,7 +21,6 @@ from sqlalchemy import (
     true,
     union_all,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.discovery.model.refs import FeatureFieldRef, MetadataFieldRef
@@ -41,7 +40,7 @@ from osa.domain.discovery.model.value import (
 from osa.domain.semantics.model.value import FieldType
 from osa.domain.shared.error import ValidationError
 from osa.domain.shared.model.hook import ColumnDef
-from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaSRN
+from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaId
 from osa.infrastructure.persistence.feature_table import (
     FeatureSchema,
     build_feature_table,
@@ -123,7 +122,7 @@ class PostgresFieldDefinitionReader:
         self.session = session
 
     async def get_all_field_types(self) -> dict[str, FieldType]:
-        stmt = select(schemas_table.c.srn, schemas_table.c.fields)
+        stmt = select(schemas_table.c.fields)
         result = await self.session.execute(stmt)
         rows = result.mappings().all()
 
@@ -142,9 +141,11 @@ class PostgresFieldDefinitionReader:
 
         return field_map
 
-    async def get_fields_for_schema(self, schema_srn: SchemaSRN) -> dict[str, FieldType]:
-        rendered = str(schema_srn)
-        stmt = select(schemas_table.c.fields).where(schemas_table.c.srn == rendered)
+    async def get_fields_for_schema(self, schema_id: SchemaId) -> dict[str, FieldType]:
+        stmt = select(schemas_table.c.fields).where(
+            schemas_table.c.id == schema_id.id.root,
+            schemas_table.c.version == schema_id.version.root,
+        )
         result = await self.session.execute(stmt)
         row = result.mappings().first()
         if row is None:
@@ -161,7 +162,7 @@ class PostgresDiscoveryReadStore:
     async def search_records(
         self,
         filter_expr: FilterExpr | None,
-        schema_srn: SchemaSRN | None,
+        schema_id: SchemaId | None,
         convention_srn: ConventionSRN | None,
         text_fields: list[str],
         q: str | None,
@@ -176,8 +177,8 @@ class PostgresDiscoveryReadStore:
 
         metadata_table = None
         metadata_schema: MetadataSchema | None = None
-        if schema_srn is not None:
-            catalog = await self._metadata_catalog_for(schema_srn)
+        if schema_id is not None:
+            catalog = await self._metadata_catalog_for(schema_id)
             if catalog is not None:
                 metadata_schema = MetadataSchema.model_validate(catalog["metadata_schema"])
                 metadata_table = build_metadata_table(catalog["pg_table"], metadata_schema)
@@ -197,7 +198,6 @@ class PostgresDiscoveryReadStore:
                     metadata_t=metadata_table,
                     metadata_schema=metadata_schema,
                     feature_joins=feature_joins,
-                    field_types=ft_map,
                 )
             )
 
@@ -300,13 +300,13 @@ class PostgresDiscoveryReadStore:
             return []
 
         parsed = [
-            (row["hook_name"], FeatureSchema.model_validate(row["feature_schema"]), row["pg_table"])
+            (row["hook_name"], FeatureSchema.model_validate(row["feature_schema"]))
             for row in catalog_rows
         ]
 
         count_parts = []
-        for hook_name, schema, pg_table in parsed:
-            ft = build_feature_table(pg_table, schema)
+        for hook_name, schema in parsed:
+            ft = build_feature_table(hook_name, schema)
             count_parts.append(
                 select(
                     literal(hook_name).label("hook_name"),
@@ -322,7 +322,7 @@ class PostgresDiscoveryReadStore:
                 columns=_to_column_info(schema.columns),
                 record_count=counts_by_hook.get(hook_name, 0),
             )
-            for hook_name, schema, _pg_table in parsed
+            for hook_name, schema in parsed
         ]
 
     async def get_feature_table_schema(self, hook_name: str) -> FeatureCatalogEntry | None:
@@ -346,7 +346,7 @@ class PostgresDiscoveryReadStore:
         self,
         hook_name: str,
         filter_expr: FilterExpr | None,
-        schema_srn: SchemaSRN | None,
+        schema_id: SchemaId | None,
         record_srn: RecordSRN | None,
         sort: str,
         order: SortOrder,
@@ -354,22 +354,20 @@ class PostgresDiscoveryReadStore:
         limit: int,
     ) -> list[FeatureRow]:
         pg_table_stmt = select(
-            feature_tables_table.c.pg_table,
             feature_tables_table.c.feature_schema,
         ).where(feature_tables_table.c.hook_name == hook_name)
         pg_result = await self.session.execute(pg_table_stmt)
         pg_row = pg_result.mappings().first()
         if pg_row is None:
             return []
-        pg_table: str = pg_row["pg_table"]
         schema = FeatureSchema.model_validate(pg_row["feature_schema"])
 
-        ft = build_feature_table(pg_table, schema)
+        ft = build_feature_table(hook_name, schema)
 
         metadata_table = None
         metadata_schema: MetadataSchema | None = None
-        if schema_srn is not None:
-            catalog = await self._metadata_catalog_for(schema_srn)
+        if schema_id is not None:
+            catalog = await self._metadata_catalog_for(schema_id)
             if catalog is not None:
                 metadata_schema = MetadataSchema.model_validate(catalog["metadata_schema"])
                 metadata_table = build_metadata_table(catalog["pg_table"], metadata_schema)
@@ -448,13 +446,11 @@ class PostgresDiscoveryReadStore:
 
     # ---------------- compilation helpers ----------------
 
-    async def _metadata_catalog_for(self, schema_srn: SchemaSRN) -> dict[str, Any] | None:
-        """Look up the metadata table catalog row for a Schema SRN."""
-        identity = str(schema_srn).split("@", 1)[0]
-        major = int(schema_srn.version.root.split(".")[0])
+    async def _metadata_catalog_for(self, schema_id: SchemaId) -> dict[str, Any] | None:
+        """Look up the metadata table catalog row for a SchemaId."""
         stmt = select(metadata_tables_table).where(
-            metadata_tables_table.c.schema_identity == identity,
-            metadata_tables_table.c.schema_major == major,
+            metadata_tables_table.c.schema_id == schema_id.id.root,
+            metadata_tables_table.c.schema_major == schema_id.major,
         )
         result = await self.session.execute(stmt)
         row = result.mappings().first()
@@ -472,14 +468,13 @@ class PostgresDiscoveryReadStore:
             return {}
         stmt = select(
             feature_tables_table.c.hook_name,
-            feature_tables_table.c.pg_table,
             feature_tables_table.c.feature_schema,
         ).where(feature_tables_table.c.hook_name.in_(hooks))
         result = await self.session.execute(stmt)
         joins: dict[str, Any] = {}
         for row in result.mappings():
             schema = FeatureSchema.model_validate(row["feature_schema"])
-            joins[row["hook_name"]] = build_feature_table(row["pg_table"], schema)
+            joins[row["hook_name"]] = build_feature_table(row["hook_name"], schema)
         missing = hooks - joins.keys()
         if missing:
             raise ValidationError(
@@ -497,7 +492,6 @@ class PostgresDiscoveryReadStore:
         metadata_t: Any,
         metadata_schema: MetadataSchema | None,
         feature_joins: dict[str, Any],
-        field_types: dict[str, FieldType],
     ) -> Any:
         if isinstance(expr, Predicate):
             return self._compile_predicate(
@@ -505,7 +499,6 @@ class PostgresDiscoveryReadStore:
                 metadata_t=metadata_t,
                 metadata_schema=metadata_schema,
                 feature_joins=feature_joins,
-                field_types=field_types,
             )
         if isinstance(expr, And):
             return and_(
@@ -516,7 +509,6 @@ class PostgresDiscoveryReadStore:
                         metadata_t=metadata_t,
                         metadata_schema=metadata_schema,
                         feature_joins=feature_joins,
-                        field_types=field_types,
                     )
                     for op in expr.operands
                 ]
@@ -530,7 +522,6 @@ class PostgresDiscoveryReadStore:
                         metadata_t=metadata_t,
                         metadata_schema=metadata_schema,
                         feature_joins=feature_joins,
-                        field_types=field_types,
                     )
                     for op in expr.operands
                 ]
@@ -543,7 +534,6 @@ class PostgresDiscoveryReadStore:
                     metadata_t=metadata_t,
                     metadata_schema=metadata_schema,
                     feature_joins=feature_joins,
-                    field_types=field_types,
                 )
             )
         raise ValidationError(f"Unsupported filter node: {type(expr).__name__}")
@@ -562,7 +552,7 @@ class PostgresDiscoveryReadStore:
             if isinstance(expr.field, MetadataFieldRef):
                 if metadata_t is None:
                     raise ValidationError(
-                        f"Metadata ref {expr.field.dotted()!r} requires schema_srn to be set.",
+                        f"Metadata ref {expr.field.dotted()!r} requires schema_id to be set.",
                         field=expr.field.dotted(),
                         code="metadata_ref_requires_schema",
                     )
@@ -629,21 +619,19 @@ class PostgresDiscoveryReadStore:
         metadata_t: Any,
         metadata_schema: MetadataSchema | None,
         feature_joins: dict[str, Any],
-        field_types: dict[str, FieldType],
     ) -> Any:
         if isinstance(predicate.field, MetadataFieldRef):
-            # Prefer the typed projection when a schema is pinned.
-            if metadata_t is not None and metadata_schema is not None:
-                col = metadata_t.c[predicate.field.field]
-                return _apply_scalar_op(col, predicate.op, predicate.value)
-            # Otherwise compile against the canonical records.metadata JSONB.
-            return _apply_jsonb_op(
-                records_table,
-                field=predicate.field.field,
-                op=predicate.op,
-                value=predicate.value,
-                field_type=field_types.get(predicate.field.field),
-            )
+            if metadata_t is None or metadata_schema is None:
+                raise ValidationError(
+                    f"Metadata predicate on {predicate.field.dotted()!r} requires "
+                    "the request to pin a 'schema' ('<id>@<semver>'). "
+                    "Unscoped metadata filtering is not supported — the typed table "
+                    "is the only filter path.",
+                    field=predicate.field.dotted(),
+                    code="schema_required_for_metadata_query",
+                )
+            col = metadata_t.c[predicate.field.field]
+            return _apply_scalar_op(col, predicate.op, predicate.value)
 
         assert isinstance(predicate.field, FeatureFieldRef)
         tbl = feature_joins.get(predicate.field.hook)
@@ -655,63 +643,6 @@ class PostgresDiscoveryReadStore:
             )
         col = tbl.c[predicate.field.column]
         return _apply_scalar_op(col, predicate.op, predicate.value)
-
-
-def _apply_jsonb_op(
-    records_t: Any,
-    *,
-    field: str,
-    op: FilterOperator,
-    value: Any,
-    field_type: FieldType | None,
-) -> Any:
-    """Compile a metadata-field predicate against the canonical ``records.metadata`` JSONB.
-
-    Used when no ``schema_srn`` is pinned (cross-schema / unscoped listings).
-    Equality uses JSONB containment (GIN-indexed); range ops cast the extracted
-    text to the appropriate type driven by ``field_type`` when known.
-    """
-    meta = records_t.c.metadata
-
-    if op == FilterOperator.EQ:
-        return meta.op("@>")(cast(func.json_build_object(field, value), JSONB))
-    if op == FilterOperator.NEQ:
-        return not_(meta.op("@>")(cast(func.json_build_object(field, value), JSONB)))
-    if op == FilterOperator.IS_NULL:
-        # Absent key OR present-but-null both count as "null".
-        return or_(not_(meta.has_key(field)), meta[field].astext.is_(None))
-    if op == FilterOperator.IN:
-        if not isinstance(value, list):
-            raise ValidationError(
-                "Operator 'in' requires a list value.",
-                field=field,
-                code="invalid_value_for_op",
-            )
-        return meta[field].astext.in_([str(v) for v in value])
-    if op == FilterOperator.CONTAINS:
-        return meta[field].astext.ilike(f"%{_escape_like(str(value))}%", escape="\\")
-    if op in (FilterOperator.GT, FilterOperator.GTE, FilterOperator.LT, FilterOperator.LTE):
-        if field_type == FieldType.NUMBER:
-            col_expr = cast(meta[field].astext, Float)
-            typed_value: Any = float(value)
-        elif field_type == FieldType.DATE:
-            col_expr = cast(meta[field].astext, Date)
-            typed_value = str(value)
-        else:
-            col_expr = cast(meta[field].astext, String)
-            typed_value = str(value)
-        if op == FilterOperator.GT:
-            return col_expr > typed_value
-        if op == FilterOperator.GTE:
-            return col_expr >= typed_value
-        if op == FilterOperator.LT:
-            return col_expr < typed_value
-        return col_expr <= typed_value
-    raise ValidationError(
-        f"Unsupported operator for JSONB fallback: {op}",
-        field=field,
-        code="unsupported_operator",
-    )
 
 
 def _apply_scalar_op(col: Any, op: FilterOperator, value: Any) -> Any:

@@ -19,7 +19,7 @@ from osa.domain.shared.model.srn import (
     DepositionSRN,
     Domain,
     LocalId,
-    SchemaSRN,
+    SchemaId,
 )
 from osa.domain.shared.outbox import Outbox
 
@@ -28,8 +28,8 @@ def _make_conv_srn() -> ConventionSRN:
     return ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
 
 
-def _make_schema_srn() -> SchemaSRN:
-    return SchemaSRN.parse("urn:osa:localhost:schema:test@1.0.0")
+def _make_schema_id() -> SchemaId:
+    return SchemaId.parse("test@1.0.0")
 
 
 def _make_convention() -> Convention:
@@ -37,7 +37,7 @@ def _make_convention() -> Convention:
         srn=_make_conv_srn(),
         title="Test Convention",
         description=None,
-        schema_srn=_make_schema_srn(),
+        schema_id=_make_schema_id(),
         file_requirements=FileRequirements(accepted_types=[], max_count=0, max_file_size=0),
         hooks=[],
         created_at=datetime.now(UTC),
@@ -113,7 +113,7 @@ class TestRecordService:
         assert record is not None
         assert record.source == sample_draft.source
         assert record.convention_srn == sample_draft.convention_srn
-        assert record.schema_srn == _make_schema_srn()
+        assert record.schema_id == _make_schema_id()
         assert record.metadata == sample_draft.metadata
         mock_record_repo.save.assert_called_once()
 
@@ -136,7 +136,7 @@ class TestRecordService:
         assert event.record_srn == record.srn
         assert event.source == sample_draft.source
         assert event.convention_srn == sample_draft.convention_srn
-        assert event.schema_srn == _make_schema_srn()
+        assert event.schema_id == _make_schema_id()
         assert event.expected_features == sample_draft.expected_features
         assert event.metadata == sample_draft.metadata
 

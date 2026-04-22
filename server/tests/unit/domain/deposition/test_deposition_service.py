@@ -21,7 +21,7 @@ from osa.domain.deposition.event.metadata_updated import MetadataUpdatedEvent
 from osa.domain.deposition.event.submitted import DepositionSubmittedEvent
 from osa.domain.deposition.service.deposition import DepositionService
 from osa.domain.shared.error import NotFoundError, ValidationError
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, Domain, SchemaSRN
+from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, Domain, SchemaId
 
 
 def _make_dep_srn(id: str = "test-dep") -> DepositionSRN:
@@ -32,8 +32,8 @@ def _make_conv_srn(id: str = "test-conv", version: str = "1.0.0") -> ConventionS
     return ConventionSRN.parse(f"urn:osa:localhost:conv:{id}@{version}")
 
 
-def _make_schema_srn(id: str = "test-schema", version: str = "1.0.0") -> SchemaSRN:
-    return SchemaSRN.parse(f"urn:osa:localhost:schema:{id}@{version}")
+def _make_schema_id(id: str = "test-schema", version: str = "1.0.0") -> SchemaId:
+    return SchemaId.parse(f"{id}@{version}")
 
 
 def _make_file_reqs(**overrides) -> FileRequirements:
@@ -51,7 +51,7 @@ def _make_convention(**overrides) -> Convention:
     defaults = dict(
         srn=_make_conv_srn(),
         title="Test Convention",
-        schema_srn=_make_schema_srn(),
+        schema_id=_make_schema_id(),
         file_requirements=_make_file_reqs(),
         created_at=datetime.now(UTC),
     )

@@ -1,12 +1,17 @@
 from datetime import UTC, datetime
-from uuid import uuid4
 
 from osa.domain.semantics.model.schema import Schema
 from osa.domain.semantics.model.value import FieldDefinition, FieldType, TermConstraints
 from osa.domain.semantics.port.ontology_repository import OntologyRepository
 from osa.domain.semantics.port.schema_repository import SchemaRepository
-from osa.domain.shared.error import NotFoundError, ValidationError
-from osa.domain.shared.model.srn import Domain, LocalId, SchemaSRN, Semver
+from osa.domain.shared.error import ConflictError, NotFoundError, ValidationError
+from osa.domain.shared.model.srn import (
+    Domain,
+    LocalId,
+    SchemaId,
+    SchemaIdentifier,
+    Semver,
+)
 from osa.domain.shared.service import Service
 
 
@@ -17,6 +22,7 @@ class SchemaService(Service):
 
     async def create_schema(
         self,
+        id: SchemaIdentifier,
         title: str,
         version: str,
         fields: list[FieldDefinition],
@@ -35,13 +41,18 @@ class SchemaService(Service):
                         f"(referenced by field '{field.name}')"
                     )
 
-        srn = SchemaSRN(
-            domain=self.node_domain,
-            id=LocalId(str(uuid4())[:20]),
+        schema_id = SchemaId(
+            id=LocalId(id.root),
             version=Semver.from_string(version),
         )
+        existing = await self.schema_repo.get(schema_id)
+        if existing is not None:
+            raise ConflictError(
+                f"Schema already exists: {schema_id.render()}",
+                code="schema_already_exists",
+            )
         schema = Schema(
-            srn=srn,
+            id=schema_id,
             title=title,
             fields=fields,
             created_at=datetime.now(UTC),
@@ -49,10 +60,10 @@ class SchemaService(Service):
         await self.schema_repo.save(schema)
         return schema
 
-    async def get_schema(self, srn: SchemaSRN) -> Schema:
-        schema = await self.schema_repo.get(srn)
+    async def get_schema(self, schema_id: SchemaId) -> Schema:
+        schema = await self.schema_repo.get(schema_id)
         if schema is None:
-            raise NotFoundError(f"Schema not found: {srn}")
+            raise NotFoundError(f"Schema not found: {schema_id}")
         return schema
 
     async def list_schemas(

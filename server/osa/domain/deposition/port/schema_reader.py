@@ -1,7 +1,7 @@
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Protocol
 
-from osa.domain.shared.model.srn import SchemaSRN
+from osa.domain.shared.model.srn import SchemaId
 from osa.domain.shared.port import Port
 
 if TYPE_CHECKING:
@@ -12,7 +12,7 @@ class SchemaReader(Port, Protocol):
     """Read-only cross-domain port for reading schemas from the deposition domain."""
 
     @abstractmethod
-    async def get_schema(self, srn: SchemaSRN) -> "Schema | None": ...
+    async def get_schema(self, schema_id: SchemaId) -> "Schema | None": ...
 
     @abstractmethod
-    async def schema_exists(self, srn: SchemaSRN) -> bool: ...
+    async def schema_exists(self, schema_id: SchemaId) -> bool: ...

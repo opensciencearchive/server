@@ -17,10 +17,10 @@ from osa.domain.discovery.model.value import (
 from osa.domain.discovery.service.discovery import DiscoveryService
 from osa.domain.semantics.model.value import FieldType
 from osa.domain.shared.error import ValidationError
-from osa.domain.shared.model.srn import SchemaSRN
+from osa.domain.shared.model.srn import SchemaId
 
 
-SCHEMA = SchemaSRN.parse("urn:osa:localhost:schema:bio-sample@1.0.0")
+SCHEMA = SchemaId.parse("bio-sample@1.0.0")
 
 
 def _config() -> Config:
@@ -59,7 +59,7 @@ class TestOrNot:
         )
         await svc.search_records(
             filter_expr=tree,
-            schema_srn=SCHEMA,
+            schema_id=SCHEMA,
             convention_srn=None,
             q=None,
             sort="published_at",
@@ -73,7 +73,7 @@ class TestOrNot:
         tree = Not(operand=_pred("title", FilterOperator.EQ, "X"))
         await svc.search_records(
             filter_expr=tree,
-            schema_srn=SCHEMA,
+            schema_id=SCHEMA,
             convention_srn=None,
             q=None,
             sort="published_at",
@@ -98,7 +98,7 @@ class TestOrNot:
         )
         await svc.search_records(
             filter_expr=tree,
-            schema_srn=SCHEMA,
+            schema_id=SCHEMA,
             convention_srn=None,
             q=None,
             sort="published_at",
@@ -120,7 +120,7 @@ class TestCompoundDisabledFlag:
         with pytest.raises(ValidationError, match="compound_disabled|Compound"):
             await svc.search_records(
                 filter_expr=tree,
-                schema_srn=SCHEMA,
+                schema_id=SCHEMA,
                 convention_srn=None,
                 q=None,
                 sort="published_at",

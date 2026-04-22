@@ -15,6 +15,7 @@ from osa.domain.feature.handler import (
 )
 from osa.domain.ingest.handler import PublishBatch, RunHooks, RunIngester
 from osa.domain.metadata.handler.ensure_metadata_table import EnsureMetadataTable
+from osa.domain.metadata.handler.insert_batch_metadata import InsertBatchMetadata
 from osa.domain.metadata.handler.insert_record_metadata import InsertRecordMetadata
 from osa.domain.record.handler import ConvertDepositionToRecord
 from osa.domain.shared.event import EventHandler
@@ -42,6 +43,7 @@ _CORE_HANDLERS: list[type[EventHandler[Any]]] = [
     # Metadata handlers (feature 076)
     EnsureMetadataTable,
     InsertRecordMetadata,
+    InsertBatchMetadata,
     # Ingest handlers
     RunIngester,
     RunHooks,

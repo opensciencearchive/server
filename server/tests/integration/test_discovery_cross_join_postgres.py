@@ -8,14 +8,14 @@ from osa.domain.discovery.model.value import And, FilterOperator, Predicate, Sor
 from osa.domain.semantics.model.value import Cardinality, FieldDefinition, FieldType
 from osa.domain.shared.error import ValidationError
 from osa.domain.shared.model.hook import ColumnDef
-from osa.domain.shared.model.srn import RecordSRN, SchemaSRN
+from osa.domain.shared.model.srn import RecordSRN, SchemaId
 from osa.infrastructure.persistence.adapter.discovery import PostgresDiscoveryReadStore
 from osa.infrastructure.persistence.feature_store import PostgresFeatureStore
 from osa.infrastructure.persistence.metadata_store import PostgresMetadataStore
 
 from tests.integration.conftest import seed_record
 
-SCHEMA_V1 = SchemaSRN.parse("urn:osa:localhost:schema:bio-sample@1.0.0")
+SCHEMA_V1 = SchemaId.parse("bio-sample@1.0.0")
 FIELD_TYPES = {"species": FieldType.TEXT}
 
 
@@ -46,7 +46,7 @@ async def seeded_both(pg_engine: AsyncEngine, pg_session: AsyncSession):
     )
 
     mstore = PostgresMetadataStore(pg_engine, pg_session)
-    await mstore.ensure_table(SCHEMA_V1, "bio_sample", _metadata_fields())
+    await mstore.ensure_table(SCHEMA_V1, _metadata_fields())
 
     fstore = PostgresFeatureStore(pg_engine, pg_session)
     await fstore.create_table("cell_classifier", _feature_columns())
@@ -54,7 +54,7 @@ async def seeded_both(pg_engine: AsyncEngine, pg_session: AsyncSession):
     repo = PostgresSemanticsSchemaRepository(pg_session)
     await repo.save(
         Schema(
-            srn=SCHEMA_V1,
+            id=SCHEMA_V1,
             title="bio_sample",
             fields=_metadata_fields(),
             created_at=datetime.now(UTC),
@@ -70,7 +70,12 @@ async def seeded_both(pg_engine: AsyncEngine, pg_session: AsyncSession):
         ("rec-r3", "Mus musculus", 0.95),
     ]:
         srn = RecordSRN.parse(f"urn:osa:localhost:rec:{rid}@1")
-        await seed_record(pg_engine, srn=str(srn), schema_srn=str(SCHEMA_V1))
+        await seed_record(
+            pg_engine,
+            srn=str(srn),
+            schema_id=SCHEMA_V1.id.root,
+            schema_version=SCHEMA_V1.version.root,
+        )
         await mstore.insert(SCHEMA_V1, srn, {"species": sp})
         await fstore.insert_features("cell_classifier", str(srn), [{"confidence": conf}])
 
@@ -100,7 +105,7 @@ class TestCrossDomainJoin:
         )
         results = await read_store.search_records(
             filter_expr=tree,
-            schema_srn=SCHEMA_V1,
+            schema_id=SCHEMA_V1,
             convention_srn=None,
             text_fields=[],
             q=None,
@@ -125,7 +130,7 @@ class TestCrossDomainJoin:
         with pytest.raises(ValidationError, match="Unknown feature hook"):
             await read_store.search_records(
                 filter_expr=tree,
-                schema_srn=SCHEMA_V1,
+                schema_id=SCHEMA_V1,
                 convention_srn=None,
                 text_fields=[],
                 q=None,

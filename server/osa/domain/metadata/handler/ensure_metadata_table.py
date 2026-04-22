@@ -7,7 +7,6 @@ import logging
 from osa.domain.deposition.event.convention_registered import ConventionRegistered
 from osa.domain.deposition.port.convention_repository import ConventionRepository
 from osa.domain.metadata.service.metadata import MetadataService
-from osa.domain.semantics.port.schema_repository import SchemaRepository
 from osa.domain.shared.error import DomainError, NotFoundError
 from osa.domain.shared.event import EventHandler
 
@@ -23,7 +22,6 @@ class EnsureMetadataTable(EventHandler[ConventionRegistered]):
     """
 
     metadata_service: MetadataService
-    schema_repo: SchemaRepository
     convention_repo: ConventionRepository
 
     async def handle(self, event: ConventionRegistered) -> None:
@@ -31,20 +29,15 @@ class EnsureMetadataTable(EventHandler[ConventionRegistered]):
         if convention is None:
             raise NotFoundError(f"Convention not found: {event.convention_srn}")
 
-        schema = await self.schema_repo.get(event.schema_srn)
-        if schema is None:
-            raise NotFoundError(f"Schema not found: {event.schema_srn}")
-
         try:
             await self.metadata_service.ensure_table(
-                schema_srn=event.schema_srn,
-                schema_title=schema.title,
+                schema_id=event.schema_id,
                 fields=event.schema_fields,
             )
         except DomainError:
             logger.exception(
                 "EnsureMetadataTable failed: convention=%s schema=%s",
                 event.convention_srn,
-                event.schema_srn,
+                event.schema_id,
             )
             raise

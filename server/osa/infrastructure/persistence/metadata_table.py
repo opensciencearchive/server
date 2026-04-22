@@ -13,10 +13,13 @@ import sqlalchemy as sa
 
 from osa.domain.shared.model.hook import ColumnDef
 from osa.domain.shared.model.value import ValueObject
+from osa.infrastructure.persistence.api_naming import metadata_pg_schema
 from osa.infrastructure.persistence.column_mapper import map_column
 from osa.infrastructure.persistence.tables import records_table
 
-METADATA_SCHEMA = "metadata"
+# Back-compat re-export for callers that import the constant directly.
+# Prefer ``metadata_pg_schema()`` in new code.
+METADATA_SCHEMA = metadata_pg_schema()
 
 AUTO_COLUMN_NAMES = frozenset({"id", "record_srn", "created_at"})
 
@@ -76,7 +79,7 @@ def build_metadata_table(pg_table: str, schema: MetadataSchema) -> sa.Table:
             server_default=sa.func.now(),
         ),
         *data_columns,
-        schema=METADATA_SCHEMA,
+        schema=metadata_pg_schema(),
     )
 
 

@@ -8,14 +8,14 @@ from osa.domain.discovery.model.value import (
 from osa.domain.discovery.service.discovery import DiscoveryService
 from osa.domain.shared.authorization.gate import public
 from osa.domain.shared.error import ValidationError
-from osa.domain.shared.model.srn import RecordSRN, SchemaSRN
+from osa.domain.shared.model.srn import RecordSRN, SchemaId
 from osa.domain.shared.query import Query, QueryHandler, Result
 
 
 class SearchFeatures(Query):
     hook_name: str
     filter_expr: FilterExpr | None = None
-    schema_srn: SchemaSRN | None = None
+    schema_id: SchemaId | None = None
     record_srn: str | None = None
     sort: str = "id"
     order: SortOrder = SortOrder.DESC
@@ -43,7 +43,7 @@ class SearchFeaturesHandler(QueryHandler[SearchFeatures, SearchFeaturesResult]):
         result: FeatureSearchResult = await self.discovery_service.search_features(
             hook_name=cmd.hook_name,
             filter_expr=cmd.filter_expr,
-            schema_srn=cmd.schema_srn,
+            schema_id=cmd.schema_id,
             record_srn=record_srn,
             sort=cmd.sort,
             order=cmd.order,

@@ -23,7 +23,8 @@ async def _insert_record(session: AsyncSession, srn: str, published_at: datetime
         records_table.insert().values(
             srn=srn,
             convention_srn="urn:osa:localhost:conv:test@1.0.0",
-            schema_srn="urn:osa:localhost:schema:test@1.0.0",
+            schema_id="test",
+            schema_version="1.0.0",
             source={"type": "test", "id": srn},
             metadata={},
             published_at=published_at,
@@ -45,7 +46,7 @@ class TestDiscoveryPaginationPublishedAt:
 
         first_page = await store.search_records(
             filter_expr=None,
-            schema_srn=None,
+            schema_id=None,
             convention_srn=None,
             text_fields=[],
             q=None,
@@ -64,7 +65,7 @@ class TestDiscoveryPaginationPublishedAt:
 
         second_page = await store.search_records(
             filter_expr=None,
-            schema_srn=None,
+            schema_id=None,
             convention_srn=None,
             text_fields=[],
             q=None,

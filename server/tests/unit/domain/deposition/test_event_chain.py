@@ -26,7 +26,7 @@ from osa.domain.shared.model.srn import (
     ConventionSRN,
     DepositionSRN,
     RecordSRN,
-    SchemaSRN,
+    SchemaId,
     ValidationRunSRN,
 )
 from osa.domain.validation.event.validation_completed import ValidationCompleted
@@ -34,8 +34,8 @@ from osa.domain.validation.handler.validate_deposition import ValidateDeposition
 from osa.domain.validation.model import RunStatus
 
 
-def _make_schema_srn() -> SchemaSRN:
-    return SchemaSRN.parse("urn:osa:localhost:schema:test@1.0.0")
+def _make_schema_id() -> SchemaId:
+    return SchemaId.parse("test@1.0.0")
 
 
 def _make_dep_srn() -> DepositionSRN:
@@ -268,7 +268,7 @@ class TestInsertRecordFeatures:
             source=DepositionSource(id=str(_make_dep_srn())),
             metadata={"title": "Test"},
             convention_srn=_make_conv_srn(),
-            schema_srn=_make_schema_srn(),
+            schema_id=_make_schema_id(),
             expected_features=["pocket_detect"],
         )
         await handler.handle(event)

@@ -16,15 +16,15 @@ from osa.domain.shared.model.hook import (
     OciConfig,
     TableFeatureSpec,
 )
-from osa.domain.shared.model.srn import ConventionSRN, Domain, SchemaSRN
+from osa.domain.shared.model.srn import ConventionSRN, Domain, SchemaId, SchemaIdentifier
 
 
 def _make_conv_srn(id: str = "test-conv", version: str = "1.0.0") -> ConventionSRN:
     return ConventionSRN.parse(f"urn:osa:localhost:conv:{id}@{version}")
 
 
-def _make_schema_srn(id: str = "test-schema", version: str = "1.0.0") -> SchemaSRN:
-    return SchemaSRN.parse(f"urn:osa:localhost:schema:{id}@{version}")
+def _make_schema_id(id: str = "test-schema", version: str = "1.0.0") -> SchemaId:
+    return SchemaId.parse(f"{id}@{version}")
 
 
 def _make_field_defs() -> list[FieldDefinition]:
@@ -71,7 +71,8 @@ def _make_service(
     mock_schema_service = schema_service or AsyncMock()
     if not schema_service:
         mock_schema = AsyncMock()
-        mock_schema.srn = _make_schema_srn()
+        mock_schema.id = _make_schema_id()
+        mock_schema.fields = []
         mock_schema_service.create_schema.return_value = mock_schema
 
     return ConventionService(
@@ -88,11 +89,13 @@ class TestConventionServiceCreate:
         conv_repo = AsyncMock()
         schema_service = AsyncMock()
         mock_schema = AsyncMock()
-        mock_schema.srn = _make_schema_srn()
+        mock_schema.id = _make_schema_id()
+        mock_schema.fields = []
         schema_service.create_schema.return_value = mock_schema
 
         service = _make_service(conv_repo, schema_service)
         result = await service.create_convention(
+            id=SchemaIdentifier("test-schema"),
             title="Test Convention",
             version="1.0.0",
             schema=_make_field_defs(),
@@ -106,6 +109,7 @@ class TestConventionServiceCreate:
     async def test_create_convention_generates_srn(self):
         service = _make_service()
         result = await service.create_convention(
+            id=SchemaIdentifier("test-schema"),
             title="Test",
             version="1.0.0",
             schema=_make_field_defs(),
@@ -119,6 +123,7 @@ class TestConventionServiceCreate:
         service = _make_service(outbox=outbox)
         hooks = [_make_hook_def()]
         result = await service.create_convention(
+            id=SchemaIdentifier("test-schema"),
             title="With Hooks",
             version="1.0.0",
             schema=_make_field_defs(),
@@ -136,6 +141,7 @@ class TestConventionServiceCreate:
         outbox = AsyncMock()
         service = _make_service(outbox=outbox)
         await service.create_convention(
+            id=SchemaIdentifier("test-schema"),
             title="No Hooks",
             version="1.0.0",
             schema=_make_field_defs(),
@@ -151,7 +157,7 @@ class TestConventionServiceGet:
         conv = Convention(
             srn=_make_conv_srn(),
             title="Test",
-            schema_srn=_make_schema_srn(),
+            schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
             created_at=datetime.now(UTC),
         )
@@ -178,7 +184,7 @@ class TestConventionServiceList:
         conv = Convention(
             srn=_make_conv_srn(),
             title="Test",
-            schema_srn=_make_schema_srn(),
+            schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
             created_at=datetime.now(UTC),
         )

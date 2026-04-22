@@ -126,7 +126,7 @@ class TestDiscoveryServiceSearchFeatures:
             await service.search_features(
                 hook_name="unknown_hook",
                 filter_expr=None,
-                schema_srn=None,
+                schema_id=None,
                 record_srn=None,
                 sort="id",
                 order=SortOrder.DESC,
@@ -139,7 +139,7 @@ class TestDiscoveryServiceSearchFeatures:
             await service.search_features(
                 hook_name="detect_pockets",
                 filter_expr=_predicate("detect_pockets", "bogus", FilterOperator.EQ, 1),
-                schema_srn=None,
+                schema_id=None,
                 record_srn=None,
                 sort="id",
                 order=SortOrder.DESC,
@@ -152,7 +152,7 @@ class TestDiscoveryServiceSearchFeatures:
             await service.search_features(
                 hook_name="detect_pockets",
                 filter_expr=_predicate("detect_pockets", "score", FilterOperator.CONTAINS, "x"),
-                schema_srn=None,
+                schema_id=None,
                 record_srn=None,
                 sort="id",
                 order=SortOrder.DESC,
@@ -164,7 +164,7 @@ class TestDiscoveryServiceSearchFeatures:
         await service.search_features(
             hook_name="detect_pockets",
             filter_expr=_predicate("detect_pockets", "label", FilterOperator.CONTAINS, "test"),
-            schema_srn=None,
+            schema_id=None,
             record_srn=None,
             sort="id",
             order=SortOrder.DESC,
@@ -179,7 +179,7 @@ class TestDiscoveryServiceSearchFeatures:
         await service.search_features(
             hook_name="detect_pockets",
             filter_expr=None,
-            schema_srn=None,
+            schema_id=None,
             record_srn=srn,
             sort="id",
             order=SortOrder.DESC,
@@ -196,7 +196,7 @@ class TestDiscoveryServiceSearchFeatures:
         await service.search_features(
             hook_name="detect_pockets",
             filter_expr=_predicate("detect_pockets", "score", FilterOperator.GTE, 6.0),
-            schema_srn=None,
+            schema_id=None,
             record_srn=None,
             sort="score",
             order=SortOrder.DESC,
@@ -222,7 +222,7 @@ class TestSearchFeaturesPagination:
         result = await service.search_features(
             hook_name="detect_pockets",
             filter_expr=None,
-            schema_srn=None,
+            schema_id=None,
             record_srn=None,
             sort="score",
             order=SortOrder.DESC,
@@ -245,7 +245,7 @@ class TestSearchFeaturesPagination:
         result = await service.search_features(
             hook_name="detect_pockets",
             filter_expr=None,
-            schema_srn=None,
+            schema_id=None,
             record_srn=None,
             sort="score",
             order=SortOrder.DESC,
@@ -263,7 +263,7 @@ class TestSearchFeaturesPagination:
         await service.search_features(
             hook_name="detect_pockets",
             filter_expr=None,
-            schema_srn=None,
+            schema_id=None,
             record_srn=None,
             sort="score",
             order=SortOrder.DESC,

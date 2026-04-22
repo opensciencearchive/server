@@ -6,16 +6,16 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from osa.domain.semantics.model.value import Cardinality, FieldDefinition, FieldType
 from osa.domain.shared.error import ValidationError
-from osa.domain.shared.model.srn import RecordSRN, SchemaSRN
+from osa.domain.shared.model.srn import RecordSRN, SchemaId
 from osa.infrastructure.persistence.metadata_store import PostgresMetadataStore
 from osa.infrastructure.persistence.metadata_table import METADATA_SCHEMA
 
 from tests.integration.conftest import seed_record
 
-SCHEMA_IDENTITY = "urn:osa:localhost:schema:bio-sample"
-SCHEMA_V1 = SchemaSRN.parse(f"{SCHEMA_IDENTITY}@1.0.0")
-SCHEMA_V11 = SchemaSRN.parse(f"{SCHEMA_IDENTITY}@1.1.0")
-SCHEMA_V2 = SchemaSRN.parse(f"{SCHEMA_IDENTITY}@2.0.0")
+SCHEMA_ID = "bio-sample"
+SCHEMA_V1 = SchemaId.parse(f"{SCHEMA_ID}@1.0.0")
+SCHEMA_V11 = SchemaId.parse(f"{SCHEMA_ID}@1.1.0")
+SCHEMA_V2 = SchemaId.parse(f"{SCHEMA_ID}@2.0.0")
 
 
 def _fields_v1() -> list[FieldDefinition]:
@@ -95,7 +95,7 @@ class TestEnsureTable:
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
     ):
         store = PostgresMetadataStore(pg_engine, pg_session)
-        await store.ensure_table(SCHEMA_V1, "bio_sample", _fields_v1())
+        await store.ensure_table(SCHEMA_V1, _fields_v1())
 
         assert await _table_exists(pg_engine, "bio_sample_v1")
         cols = await _column_names(pg_engine, "bio_sample_v1")
@@ -106,14 +106,14 @@ class TestEnsureTable:
             row = (
                 await conn.execute(
                     text(
-                        "SELECT schema_identity, schema_major, pg_table, schema_versions "
-                        "FROM metadata_tables WHERE schema_identity = :id"
+                        "SELECT schema_id, schema_major, pg_table, schema_versions "
+                        "FROM metadata_tables WHERE schema_id = :id"
                     ),
-                    {"id": SCHEMA_IDENTITY},
+                    {"id": SCHEMA_ID},
                 )
             ).first()
         assert row is not None
-        assert row[0] == SCHEMA_IDENTITY
+        assert row[0] == SCHEMA_ID
         assert row[1] == 1
         assert row[2] == "bio_sample_v1"
         assert str(SCHEMA_V1) in row[3]
@@ -122,15 +122,15 @@ class TestEnsureTable:
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
     ):
         store = PostgresMetadataStore(pg_engine, pg_session)
-        await store.ensure_table(SCHEMA_V1, "bio_sample", _fields_v1())
+        await store.ensure_table(SCHEMA_V1, _fields_v1())
         # Second call with same SRN should not raise and should not duplicate catalog rows.
-        await store.ensure_table(SCHEMA_V1, "bio_sample", _fields_v1())
+        await store.ensure_table(SCHEMA_V1, _fields_v1())
 
         async with pg_engine.begin() as conn:
             count = (
                 await conn.execute(
-                    text("SELECT COUNT(*) FROM metadata_tables WHERE schema_identity = :id"),
-                    {"id": SCHEMA_IDENTITY},
+                    text("SELECT COUNT(*) FROM metadata_tables WHERE schema_id = :id"),
+                    {"id": SCHEMA_ID},
                 )
             ).scalar()
         assert count == 1
@@ -139,7 +139,7 @@ class TestEnsureTable:
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
     ):
         store = PostgresMetadataStore(pg_engine, pg_session)
-        await store.ensure_table(SCHEMA_V1, "bio_sample", _fields_v1())
+        await store.ensure_table(SCHEMA_V1, _fields_v1())
 
         async with pg_engine.begin() as conn:
             constraint = (
@@ -162,10 +162,15 @@ class TestEnsureTable:
 class TestInsert:
     async def test_insert_typed_row(self, pg_engine: AsyncEngine, pg_session: AsyncSession):
         store = PostgresMetadataStore(pg_engine, pg_session)
-        await store.ensure_table(SCHEMA_V1, "bio_sample", _fields_v1())
+        await store.ensure_table(SCHEMA_V1, _fields_v1())
 
         record_srn = RecordSRN.parse("urn:osa:localhost:rec:abc@1")
-        await seed_record(pg_engine, srn=str(record_srn), schema_srn=str(SCHEMA_V1))
+        await seed_record(
+            pg_engine,
+            srn=str(record_srn),
+            schema_id=SCHEMA_V1.id.root,
+            schema_version=SCHEMA_V1.version.root,
+        )
 
         await store.insert(
             SCHEMA_V1,
@@ -192,10 +197,15 @@ class TestInsert:
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
     ):
         store = PostgresMetadataStore(pg_engine, pg_session)
-        await store.ensure_table(SCHEMA_V1, "bio_sample", _fields_v1())
+        await store.ensure_table(SCHEMA_V1, _fields_v1())
 
         record_srn = RecordSRN.parse("urn:osa:localhost:rec:dup@1")
-        await seed_record(pg_engine, srn=str(record_srn), schema_srn=str(SCHEMA_V1))
+        await seed_record(
+            pg_engine,
+            srn=str(record_srn),
+            schema_id=SCHEMA_V1.id.root,
+            schema_version=SCHEMA_V1.version.root,
+        )
 
         await store.insert(SCHEMA_V1, record_srn, {"species": "Mus musculus", "resolution": 1.0})
         await store.insert(SCHEMA_V1, record_srn, {"species": "Mus musculus", "resolution": 1.0})
@@ -209,14 +219,71 @@ class TestInsert:
             ).scalar()
         assert count == 1
 
+    async def test_insert_coerces_iso_date_string_to_date_column(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession
+    ):
+        """JSONB-stored metadata hands date/datetime values back as ISO strings;
+        asyncpg won't auto-parse those to DATE / TIMESTAMP. The store must
+        coerce them based on the declared column format."""
+        fields = [
+            FieldDefinition(
+                name="species",
+                type=FieldType.TEXT,
+                required=True,
+                cardinality=Cardinality.EXACTLY_ONE,
+            ),
+            FieldDefinition(
+                name="collected_on",
+                type=FieldType.DATE,
+                required=True,
+                cardinality=Cardinality.EXACTLY_ONE,
+            ),
+        ]
+        dated_schema = SchemaId.parse("dated-sample@1.0.0")
+        store = PostgresMetadataStore(pg_engine, pg_session)
+        await store.ensure_table(dated_schema, fields)
+
+        record_srn = RecordSRN.parse("urn:osa:localhost:rec:dated@1")
+        await seed_record(
+            pg_engine,
+            srn=str(record_srn),
+            schema_id=dated_schema.id.root,
+            schema_version=dated_schema.version.root,
+        )
+
+        # Value as it would arrive from records.metadata JSONB — a string,
+        # not a datetime.date. Must not raise.
+        await store.insert(
+            dated_schema,
+            record_srn,
+            {"species": "Homo sapiens", "collected_on": "2026-04-17"},
+        )
+        await pg_session.commit()
+
+        async with pg_engine.begin() as conn:
+            row = (
+                await conn.execute(
+                    text(f'SELECT collected_on FROM "{METADATA_SCHEMA}"."dated_sample_v1"')
+                )
+            ).first()
+        from datetime import date
+
+        assert row is not None
+        assert row[0] == date(2026, 4, 17)
+
     async def test_cascade_delete_removes_metadata_row(
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
     ):
         store = PostgresMetadataStore(pg_engine, pg_session)
-        await store.ensure_table(SCHEMA_V1, "bio_sample", _fields_v1())
+        await store.ensure_table(SCHEMA_V1, _fields_v1())
 
         record_srn = RecordSRN.parse("urn:osa:localhost:rec:cascade@1")
-        await seed_record(pg_engine, srn=str(record_srn), schema_srn=str(SCHEMA_V1))
+        await seed_record(
+            pg_engine,
+            srn=str(record_srn),
+            schema_id=SCHEMA_V1.id.root,
+            schema_version=SCHEMA_V1.version.root,
+        )
         await store.insert(SCHEMA_V1, record_srn, {"species": "Cascade", "resolution": 0.1})
         await pg_session.commit()
 
@@ -238,27 +305,27 @@ class TestInsert:
 class TestAdditiveEvolution:
     async def test_add_column_on_minor_bump(self, pg_engine: AsyncEngine, pg_session: AsyncSession):
         store = PostgresMetadataStore(pg_engine, pg_session)
-        await store.ensure_table(SCHEMA_V1, "bio_sample", _fields_v1())
+        await store.ensure_table(SCHEMA_V1, _fields_v1())
         cols_before = await _column_names(pg_engine, "bio_sample_v1")
         assert "collection_site" not in cols_before
 
-        await store.ensure_table(SCHEMA_V11, "bio_sample", _fields_v11_additive())
+        await store.ensure_table(SCHEMA_V11, _fields_v11_additive())
         cols_after = await _column_names(pg_engine, "bio_sample_v1")
         assert "collection_site" in cols_after
 
     async def test_catalog_lineage_appended(self, pg_engine: AsyncEngine, pg_session: AsyncSession):
         store = PostgresMetadataStore(pg_engine, pg_session)
-        await store.ensure_table(SCHEMA_V1, "bio_sample", _fields_v1())
-        await store.ensure_table(SCHEMA_V11, "bio_sample", _fields_v11_additive())
+        await store.ensure_table(SCHEMA_V1, _fields_v1())
+        await store.ensure_table(SCHEMA_V11, _fields_v11_additive())
 
         async with pg_engine.begin() as conn:
             versions = (
                 await conn.execute(
                     text(
                         "SELECT schema_versions FROM metadata_tables "
-                        "WHERE schema_identity = :id AND schema_major = 1"
+                        "WHERE schema_id = :id AND schema_major = 1"
                     ),
-                    {"id": SCHEMA_IDENTITY},
+                    {"id": SCHEMA_ID},
                 )
             ).scalar()
         assert str(SCHEMA_V1) in versions
@@ -269,16 +336,16 @@ class TestAdditiveEvolution:
 class TestNonAdditiveRejection:
     async def test_rename_raises(self, pg_engine: AsyncEngine, pg_session: AsyncSession):
         store = PostgresMetadataStore(pg_engine, pg_session)
-        await store.ensure_table(SCHEMA_V1, "bio_sample", _fields_v1())
+        await store.ensure_table(SCHEMA_V1, _fields_v1())
 
         with pytest.raises(ValidationError, match="Non-additive"):
-            await store.ensure_table(SCHEMA_V11, "bio_sample", _fields_rename())
+            await store.ensure_table(SCHEMA_V11, _fields_rename())
 
     async def test_required_new_field_raises(
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
     ):
         store = PostgresMetadataStore(pg_engine, pg_session)
-        await store.ensure_table(SCHEMA_V1, "bio_sample", _fields_v1())
+        await store.ensure_table(SCHEMA_V1, _fields_v1())
 
         bad = _fields_v1() + [
             FieldDefinition(
@@ -289,4 +356,4 @@ class TestNonAdditiveRejection:
             )
         ]
         with pytest.raises(ValidationError, match="required"):
-            await store.ensure_table(SCHEMA_V11, "bio_sample", bad)
+            await store.ensure_table(SCHEMA_V11, bad)

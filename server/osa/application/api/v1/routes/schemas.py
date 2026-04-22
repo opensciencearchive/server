@@ -18,7 +18,8 @@ from osa.domain.semantics.query.list_schemas import (
     ListSchemasHandler,
     SchemaList,
 )
-from osa.domain.shared.model.srn import SchemaSRN
+from osa.domain.shared.error import ValidationError
+from osa.domain.shared.model.srn import SchemaId
 
 router = APIRouter(prefix="/schemas", tags=["Schemas"], route_class=DishkaRoute)
 
@@ -31,12 +32,17 @@ async def create_schema(
     return await handler.run(body)
 
 
-@router.get("/{srn:path}", response_model=SchemaDetail)
+@router.get("/{schema:path}", response_model=SchemaDetail)
 async def get_schema(
-    srn: str,
+    schema: str,
     handler: FromDishka[GetSchemaHandler],
 ) -> SchemaDetail:
-    return await handler.run(GetSchema(srn=SchemaSRN.parse(srn)))
+    """Fetch a schema by its short id+version, e.g. ``"pdb-structure@1.0.0"``."""
+    try:
+        sid = SchemaId.parse(schema)
+    except ValueError as exc:
+        raise ValidationError(str(exc), field="schema") from exc
+    return await handler.run(GetSchema(schema_id=sid))
 
 
 @router.get("", response_model=SchemaList)

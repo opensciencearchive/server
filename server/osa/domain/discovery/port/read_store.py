@@ -13,14 +13,14 @@ if TYPE_CHECKING:
         SortOrder,
     )
     from osa.domain.semantics.model.value import FieldType
-    from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaSRN
+    from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaId
 
 
 class DiscoveryReadStore(Protocol):
     async def search_records(
         self,
         filter_expr: "FilterExpr | None",
-        schema_srn: "SchemaSRN | None",
+        schema_id: "SchemaId | None",
         convention_srn: "ConventionSRN | None",
         text_fields: list[str],
         q: str | None,
@@ -41,7 +41,7 @@ class DiscoveryReadStore(Protocol):
         self,
         hook_name: str,
         filter_expr: "FilterExpr | None",
-        schema_srn: "SchemaSRN | None",
+        schema_id: "SchemaId | None",
         record_srn: "RecordSRN | None",
         sort: str,
         order: "SortOrder",

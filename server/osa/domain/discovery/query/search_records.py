@@ -9,13 +9,13 @@ from osa.domain.discovery.model.value import (
 )
 from osa.domain.discovery.service.discovery import DiscoveryService
 from osa.domain.shared.authorization.gate import public
-from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
+from osa.domain.shared.model.srn import ConventionSRN, SchemaId
 from osa.domain.shared.query import Query, QueryHandler, Result
 
 
 class SearchRecords(Query):
     filter_expr: FilterExpr | None = None
-    schema_srn: SchemaSRN | None = None
+    schema_id: SchemaId | None = None
     convention_srn: ConventionSRN | None = None
     q: str | None = None
     sort: str = "published_at"
@@ -37,7 +37,7 @@ class SearchRecordsHandler(QueryHandler[SearchRecords, SearchRecordsResult]):
     async def run(self, cmd: SearchRecords) -> SearchRecordsResult:
         result: RecordSearchResult = await self.discovery_service.search_records(
             filter_expr=cmd.filter_expr,
-            schema_srn=cmd.schema_srn,
+            schema_id=cmd.schema_id,
             convention_srn=cmd.convention_srn,
             q=cmd.q,
             sort=cmd.sort,

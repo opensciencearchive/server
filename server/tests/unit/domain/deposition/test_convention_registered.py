@@ -14,15 +14,15 @@ from osa.domain.shared.model.hook import (
     OciConfig,
     TableFeatureSpec,
 )
-from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
+from osa.domain.shared.model.srn import ConventionSRN, SchemaId
 
 
 def _make_conv_srn() -> ConventionSRN:
     return ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
 
 
-def _make_schema_srn() -> SchemaSRN:
-    return SchemaSRN.parse("urn:osa:localhost:schema:test@1.0.0")
+def _make_schema_id() -> SchemaId:
+    return SchemaId.parse("test@1.0.0")
 
 
 def _make_hook_definition(name: str = "pocket_detect") -> HookDefinition:
@@ -46,7 +46,7 @@ class TestConventionRegisteredWithHooks:
         event = ConventionRegistered(
             id=EventId(uuid4()),
             convention_srn=_make_conv_srn(),
-            schema_srn=_make_schema_srn(),
+            schema_id=_make_schema_id(),
             schema_fields=[],
             hooks=hooks,
         )
@@ -60,7 +60,7 @@ class TestConventionRegisteredWithHooks:
         event = ConventionRegistered(
             id=EventId(uuid4()),
             convention_srn=_make_conv_srn(),
-            schema_srn=_make_schema_srn(),
+            schema_id=_make_schema_id(),
         )
 
         assert event.hooks == []
@@ -71,7 +71,7 @@ class TestConventionRegisteredWithHooks:
         event = ConventionRegistered(
             id=EventId(uuid4()),
             convention_srn=_make_conv_srn(),
-            schema_srn=_make_schema_srn(),
+            schema_id=_make_schema_id(),
             schema_fields=[],
             hooks=hooks,
         )

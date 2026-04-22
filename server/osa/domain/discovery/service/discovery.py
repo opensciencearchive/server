@@ -34,7 +34,7 @@ from osa.domain.discovery.port.field_definition_reader import FieldDefinitionRea
 from osa.domain.discovery.port.read_store import DiscoveryReadStore
 from osa.domain.semantics.model.value import FieldType
 from osa.domain.shared.error import NotFoundError, ValidationError
-from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaSRN
+from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaId
 from osa.domain.shared.service import Service
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ class DiscoveryService(Service):
     async def search_records(
         self,
         filter_expr: FilterExpr | None,
-        schema_srn: SchemaSRN | None,
+        schema_id: SchemaId | None,
         convention_srn: ConventionSRN | None,
         q: str | None,
         sort: str,
@@ -69,22 +69,37 @@ class DiscoveryService(Service):
         if limit < 1 or limit > 100:
             raise ValidationError("limit must be between 1 and 100", field="limit")
 
-        schema_field_map: dict[str, FieldType] = {}
-        if schema_srn is not None:
-            schema_field_map = await self.field_reader.get_fields_for_schema(schema_srn)
+        if sort != "published_at" and schema_id is None:
+            raise ValidationError(
+                f"Sorting by '{sort}' requires the request to pin a 'schema' "
+                "('<id>@<semver>'). Plain listings must sort by 'published_at'.",
+                field="sort",
+                code="schema_required_for_metadata_sort",
+            )
 
-        global_field_map = await self.field_reader.get_all_field_types()
-        effective_field_map = schema_field_map or global_field_map
+        if q and schema_id is None:
+            raise ValidationError(
+                "Free-text search ('q') requires the request to pin a 'schema' "
+                "('<id>@<semver>'). Without a schema, the server cannot resolve "
+                "which metadata fields are text-indexed.",
+                field="q",
+                code="schema_required_for_free_text_search",
+            )
+
+        schema_field_map: dict[str, FieldType] = {}
+        if schema_id is not None:
+            schema_field_map = await self.field_reader.get_fields_for_schema(schema_id)
 
         if filter_expr is not None:
             self._validate_tree(filter_expr, allow_compound=allow_compound)
-            await self._validate_refs(filter_expr, schema_srn, effective_field_map)
+            await self._validate_refs(filter_expr, schema_id, schema_field_map)
 
-        # Sort field validation
-        if sort != "published_at" and sort not in effective_field_map:
+        # Sort field validation (against pinned schema)
+        if sort != "published_at" and sort not in schema_field_map:
             raise ValidationError(
-                f"Unknown sort field '{sort}': not defined in registered schema",
+                f"Unknown sort field '{sort}': not defined in the pinned schema.",
                 field="sort",
+                code="unknown_sort_field",
             )
 
         decoded_cursor: dict[str, Any] | None = None
@@ -95,19 +110,18 @@ class DiscoveryService(Service):
                 raise ValidationError(str(exc), field="cursor") from exc
 
         text_fields = [
-            name
-            for name, ft in effective_field_map.items()
-            if ft in (FieldType.TEXT, FieldType.URL)
+            name for name, ft in schema_field_map.items() if ft in (FieldType.TEXT, FieldType.URL)
         ]
         if q and not text_fields:
             raise ValidationError(
-                "Free-text search is unavailable: no text or URL fields are registered",
+                "Free-text search is unavailable: the pinned schema defines no text or URL fields.",
                 field="q",
+                code="no_text_fields_in_schema",
             )
 
         results = await self.read_store.search_records(
             filter_expr=filter_expr,
-            schema_srn=schema_srn,
+            schema_id=schema_id,
             convention_srn=convention_srn,
             text_fields=text_fields,
             q=q,
@@ -115,7 +129,7 @@ class DiscoveryService(Service):
             order=order,
             cursor=decoded_cursor,
             limit=limit + 1,
-            field_types=effective_field_map,
+            field_types=schema_field_map,
         )
 
         has_more = len(results) > limit
@@ -143,7 +157,7 @@ class DiscoveryService(Service):
         self,
         hook_name: str,
         filter_expr: FilterExpr | None,
-        schema_srn: SchemaSRN | None,
+        schema_id: SchemaId | None,
         record_srn: RecordSRN | None,
         sort: str,
         order: SortOrder,
@@ -163,8 +177,8 @@ class DiscoveryService(Service):
         col_map["record_srn"] = "string"
 
         schema_field_map: dict[str, FieldType] = {}
-        if schema_srn is not None:
-            schema_field_map = await self.field_reader.get_fields_for_schema(schema_srn)
+        if schema_id is not None:
+            schema_field_map = await self.field_reader.get_fields_for_schema(schema_id)
 
         if filter_expr is not None:
             self._validate_tree(filter_expr, allow_compound=allow_compound)
@@ -189,7 +203,7 @@ class DiscoveryService(Service):
         rows = await self.read_store.search_features(
             hook_name=hook_name,
             filter_expr=filter_expr,
-            schema_srn=schema_srn,
+            schema_id=schema_id,
             record_srn=record_srn,
             sort=sort,
             order=order,
@@ -259,24 +273,26 @@ class DiscoveryService(Service):
     async def _validate_refs(
         self,
         expr: FilterExpr,
-        schema_srn: SchemaSRN | None,
+        schema_id: SchemaId | None,
         field_map: dict[str, FieldType],
     ) -> None:
         """Resolve each predicate's field and check operator compatibility."""
         feature_catalog: dict[str, dict[str, str]] | None = None
         for p in _iter_predicates(expr):
             if isinstance(p.field, MetadataFieldRef):
-                if schema_srn is None and not field_map:
+                if schema_id is None:
                     raise ValidationError(
-                        f"Unknown metadata field '{p.field.field}': "
-                        "no schema_srn provided and no registered schemas.",
+                        f"Metadata predicate on {p.field.dotted()!r} requires "
+                        "the request to pin a 'schema' ('<id>@<semver>'). "
+                        "Unscoped metadata filtering is not supported — the typed "
+                        "metadata table is the only filter path.",
                         field=p.field.dotted(),
-                        code="unknown_field",
+                        code="schema_required_for_metadata_query",
                     )
                 field_name = p.field.field
                 if field_name not in field_map:
                     raise ValidationError(
-                        f"Unknown metadata field '{field_name}' for the provided schema.",
+                        f"Unknown metadata field '{field_name}' for the pinned schema.",
                         field=p.field.dotted(),
                         code="unknown_field",
                     )

@@ -15,10 +15,10 @@ from osa.domain.discovery.model.value import (
 from osa.domain.discovery.service.discovery import DiscoveryService
 from osa.domain.semantics.model.value import FieldType
 from osa.domain.shared.error import ValidationError
-from osa.domain.shared.model.srn import SchemaSRN
+from osa.domain.shared.model.srn import SchemaId
 
 
-SCHEMA = SchemaSRN.parse("urn:osa:localhost:schema:bio-sample@1.0.0")
+SCHEMA = SchemaId.parse("bio-sample@1.0.0")
 
 
 def _config(overrides: dict | None = None) -> Config:
@@ -78,7 +78,7 @@ class TestAndOnlyTrees:
         )
         await svc.search_records(
             filter_expr=tree,
-            schema_srn=SCHEMA,
+            schema_id=SCHEMA,
             convention_srn=None,
             q=None,
             sort="published_at",
@@ -99,7 +99,7 @@ class TestBoundsEnforced:
         with pytest.raises(ValidationError, match="depth"):
             await svc.search_records(
                 filter_expr=tree,
-                schema_srn=SCHEMA,
+                schema_id=SCHEMA,
                 convention_srn=None,
                 q=None,
                 sort="published_at",
@@ -120,7 +120,7 @@ class TestBoundsEnforced:
         with pytest.raises(ValidationError, match="predicate leaves"):
             await svc.search_records(
                 filter_expr=tree,
-                schema_srn=SCHEMA,
+                schema_id=SCHEMA,
                 convention_srn=None,
                 q=None,
                 sort="published_at",
@@ -171,7 +171,7 @@ class TestBoundsEnforced:
         with pytest.raises(ValidationError, match="distinct feature hooks"):
             await svc.search_records(
                 filter_expr=tree,
-                schema_srn=SCHEMA,
+                schema_id=SCHEMA,
                 convention_srn=None,
                 q=None,
                 sort="published_at",
@@ -187,7 +187,7 @@ class TestUnknownField:
         with pytest.raises(ValidationError, match="Unknown metadata field"):
             await svc.search_records(
                 filter_expr=_pred("bogus", FilterOperator.EQ, "x"),
-                schema_srn=SCHEMA,
+                schema_id=SCHEMA,
                 convention_srn=None,
                 q=None,
                 sort="published_at",

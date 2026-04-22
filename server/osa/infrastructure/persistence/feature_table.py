@@ -6,10 +6,13 @@ import sqlalchemy as sa
 
 from osa.domain.shared.model.hook import ColumnDef
 from osa.domain.shared.model.value import ValueObject
+from osa.infrastructure.persistence.api_naming import feature_pg_schema, feature_pg_table
 from osa.infrastructure.persistence.column_mapper import map_column
 from osa.infrastructure.persistence.tables import records_table
 
-FEATURES_SCHEMA = "features"
+# Back-compat re-export for callers that import the constant directly.
+# Prefer ``feature_pg_schema()`` in new code.
+FEATURES_SCHEMA = feature_pg_schema()
 
 AUTO_COLUMN_NAMES = frozenset({"id", "record_srn", "created_at"})
 
@@ -23,11 +26,15 @@ class FeatureSchema(ValueObject):
     columns: list[ColumnDef] = []
 
 
-def build_feature_table(pg_table: str, schema: FeatureSchema) -> sa.Table:
+def build_feature_table(api_feature_name: str, schema: FeatureSchema) -> sa.Table:
     """Build a SQLAlchemy ``Table`` for a dynamic feature table.
 
+    *api_feature_name* is the ``<hook>`` segment from the API's
+    ``features.<hook>.<column>`` path. The PG table name is resolved through
+    :func:`feature_pg_table` — identity today but kept as a seam.
+
     Returns a ``Table`` with auto columns (``id``, ``record_srn``, ``created_at``)
-    plus data columns derived from *schema*, in the ``features`` PG schema.
+    plus data columns derived from *schema*, in the features PG schema.
 
     ``record_srn`` carries an ``ON DELETE CASCADE`` FK to ``records.srn`` — the
     FK target is the ``Column`` object itself (not a string reference), so
@@ -38,7 +45,7 @@ def build_feature_table(pg_table: str, schema: FeatureSchema) -> sa.Table:
 
     metadata = sa.MetaData()
     return sa.Table(
-        pg_table,
+        feature_pg_table(api_feature_name),
         metadata,
         sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
         sa.Column(
@@ -55,7 +62,7 @@ def build_feature_table(pg_table: str, schema: FeatureSchema) -> sa.Table:
             server_default=sa.func.now(),
         ),
         *data_columns,
-        schema=FEATURES_SCHEMA,
+        schema=feature_pg_schema(),
     )
 
 

@@ -22,7 +22,8 @@ from osa.domain.discovery.query.search_records import (
     SearchRecordsHandler,
     SearchRecordsResult,
 )
-from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
+from osa.domain.shared.error import ValidationError
+from osa.domain.shared.model.srn import ConventionSRN, SchemaId
 
 router = APIRouter(
     prefix="/discovery",
@@ -35,7 +36,9 @@ router = APIRouter(
 
 
 class RecordSearchRequest(BaseModel):
-    schema_srn: SchemaSRN | None = None
+    schema: str | None = None
+    """Short-form schema identity: ``"<id>@<semver>"`` (e.g. ``"pdb-structure@1.0.0"``)."""
+
     convention_srn: ConventionSRN | None = None
     filter: FilterExpr | None = None
     q: str | None = None
@@ -56,7 +59,9 @@ class FeatureCatalogResponse(BaseModel):
 
 
 class FeatureSearchRequest(BaseModel):
-    schema_srn: SchemaSRN | None = None
+    schema: str | None = None
+    """Short-form schema identity, optional. See RecordSearchRequest.schema."""
+
     filter: FilterExpr | None = None
     record_srn: str | None = None
     sort: str = "id"
@@ -71,6 +76,24 @@ class FeatureSearchResponse(BaseModel):
     has_more: bool
 
 
+def _parse_schema(value: str | None) -> SchemaId | None:
+    if value is None:
+        return None
+    if "@" not in value:
+        raise ValidationError(
+            f"Schema {value!r} must be fully qualified as '<id>@<semver>' "
+            "(e.g. 'pdb-structure@1.0.0'). Family-level scoping "
+            "(id alone, resolving to the latest version across a schema family) "
+            "is planned but not yet supported.",
+            field="schema",
+            code="cross_scope_not_yet_supported",
+        )
+    try:
+        return SchemaId.parse(value)
+    except ValueError as exc:
+        raise ValidationError(str(exc), field="schema") from exc
+
+
 # ── Routes ──
 
 
@@ -83,7 +106,7 @@ async def search_records(
     result: SearchRecordsResult = await handler.run(
         SearchRecords(
             filter_expr=body.filter,
-            schema_srn=body.schema_srn,
+            schema_id=_parse_schema(body.schema),
             convention_srn=body.convention_srn,
             q=body.q,
             sort=body.sort,
@@ -119,7 +142,7 @@ async def search_features(
         SearchFeatures(
             hook_name=hook_name,
             filter_expr=body.filter,
-            schema_srn=body.schema_srn,
+            schema_id=_parse_schema(body.schema),
             record_srn=body.record_srn,
             sort=body.sort,
             order=body.order,

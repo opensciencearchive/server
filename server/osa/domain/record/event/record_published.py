@@ -4,21 +4,20 @@ from typing import Any
 
 from osa.domain.shared.event import Event, EventId
 from osa.domain.shared.model.source import RecordSource
-from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaSRN
+from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaId
 
 
 class RecordPublished(Event):
     """Emitted when a record is published and ready for indexing.
 
-    Enriched with source, convention_srn, schema_srn, and expected_features so
-    downstream consumers (metadata insertion, feature insertion, indexing) can
-    operate without querying record/convention repositories.
+    Carries ``schema_id`` so downstream consumers (metadata insertion,
+    indexing) operate in terms of short-form identity rather than full URNs.
     """
 
     id: EventId
     record_srn: RecordSRN
     source: RecordSource
     convention_srn: ConventionSRN
-    schema_srn: SchemaSRN
+    schema_id: SchemaId
     metadata: dict[str, Any]
     expected_features: list[str] = []

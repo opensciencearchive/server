@@ -1,10 +1,9 @@
 """Record mapper - converts between domain and persistence.
 
-Feature 076 adds ``schema_srn`` as a first-class linkage and keeps ``metadata``
-as the canonical JSONB store. The typed ``metadata.<schema_slug>_v<major>``
-table is a discovery-optimized projection maintained asynchronously by the
-``InsertRecordMetadata`` event handler; it is not the source of truth for
-record metadata.
+Feature 076 adds ``schema_id`` + ``schema_version`` columns so a Record's
+typed linkage is first-class. ``metadata`` remains the canonical JSONB store;
+the typed ``metadata.<schema_slug>_v<major>`` table is a discovery-optimized
+projection maintained asynchronously by ``InsertRecordMetadata``.
 """
 
 from datetime import datetime
@@ -14,7 +13,7 @@ from pydantic import TypeAdapter
 
 from osa.domain.record.model.aggregate import Record
 from osa.domain.shared.model.source import RecordSource
-from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaSRN
+from osa.domain.shared.model.srn import ConventionSRN, LocalId, RecordSRN, SchemaId, Semver
 
 _source_adapter = TypeAdapter(RecordSource)
 
@@ -31,7 +30,10 @@ def row_to_record(row: dict[str, Any]) -> Record:
         srn=RecordSRN.parse(row["srn"]),
         source=source,
         convention_srn=ConventionSRN.parse(row["convention_srn"]),
-        schema_srn=SchemaSRN.parse(row["schema_srn"]),
+        schema_id=SchemaId(
+            id=LocalId(row["schema_id"]),
+            version=Semver.from_string(row["schema_version"]),
+        ),
         metadata=row.get("metadata") or {},
         published_at=published_at,
     )
@@ -42,7 +44,8 @@ def record_to_dict(record: Record) -> dict[str, Any]:
     return {
         "srn": str(record.srn),
         "convention_srn": str(record.convention_srn),
-        "schema_srn": str(record.schema_srn),
+        "schema_id": record.schema_id.id.root,
+        "schema_version": record.schema_id.version.root,
         "source": _source_adapter.dump_python(record.source, mode="json"),
         "metadata": record.metadata,
         "published_at": record.published_at,

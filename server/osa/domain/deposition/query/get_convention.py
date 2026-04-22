@@ -5,7 +5,7 @@ from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.shared.authorization.gate import public
 from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.source import IngesterDefinition
-from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
+from osa.domain.shared.model.srn import ConventionSRN, SchemaId
 from osa.domain.shared.query import Query, QueryHandler, Result
 
 
@@ -17,7 +17,7 @@ class ConventionDetail(Result):
     srn: ConventionSRN
     title: str
     description: str | None
-    schema_srn: SchemaSRN
+    schema_id: SchemaId
     file_requirements: FileRequirements
     hooks: list[HookDefinition]
     ingester: IngesterDefinition | None = None
@@ -34,7 +34,7 @@ class GetConventionHandler(QueryHandler[GetConvention, ConventionDetail]):
             srn=conv.srn,
             title=conv.title,
             description=conv.description,
-            schema_srn=conv.schema_srn,
+            schema_id=conv.schema_id,
             file_requirements=conv.file_requirements,
             hooks=conv.hooks,
             ingester=conv.ingester,
