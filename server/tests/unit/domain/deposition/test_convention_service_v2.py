@@ -84,6 +84,7 @@ def _make_service(
     return ConventionService(
         convention_repo=conv_repo or AsyncMock(),
         schema_service=mock_schema_service,
+        metadata_service=AsyncMock(),
         outbox=outbox or AsyncMock(),
         node_domain=Domain("localhost"),
     )

@@ -41,3 +41,15 @@ class MetadataStore(Protocol):
     ) -> None:
         """Upsert a record's typed metadata row into the schema's table."""
         ...
+
+    async def insert_many(
+        self,
+        schema_id: "SchemaId",
+        rows: "list[tuple[RecordSRN, dict[str, Any]]]",
+    ) -> None:
+        """Bulk upsert typed metadata rows — one multi-row SQL statement.
+
+        All rows must belong to the same schema; callers group by schema_id
+        before calling. Empty ``rows`` is a no-op.
+        """
+        ...

@@ -90,6 +90,7 @@ def _make_service(
     return RecordService(
         record_repo=record_repo,
         convention_repo=convention_repo,
+        metadata_service=AsyncMock(),
         outbox=outbox,
         node_domain=node_domain,
         feature_reader=AsyncMock(),

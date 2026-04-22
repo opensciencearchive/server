@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from osa.domain.deposition.port.convention_repository import ConventionRepository
+from osa.domain.metadata.service.metadata import MetadataService
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.record.model.aggregate import Record
 from osa.domain.record.model.draft import RecordDraft
@@ -36,6 +37,7 @@ class RecordService(Service):
 
     record_repo: RecordRepository
     convention_repo: ConventionRepository
+    metadata_service: MetadataService
     outbox: Outbox
     node_domain: Domain
     feature_reader: FeatureReader
@@ -96,6 +98,19 @@ class RecordService(Service):
             )
 
         published = await self.record_repo.save_many(records)
+
+        # Dual-write typed metadata projection in the same transaction.
+        # Group by schema_id — each schema has its own typed table. Use the
+        # rendered string as the dict key because SchemaId holds unhashable
+        # RootModel fields (LocalId, Semver).
+        by_schema: dict[str, tuple[SchemaId, list[tuple[RecordSRN, dict[str, Any]]]]] = {}
+        for r in published:
+            key = r.schema_id.render()
+            entry = by_schema.setdefault(key, (r.schema_id, []))
+            entry[1].append((r.srn, r.metadata))
+        for schema_id, typed_rows in by_schema.values():
+            await self.metadata_service.insert_many(schema_id, typed_rows)
+
         return published
 
     async def publish_record(self, draft: RecordDraft) -> Record:
@@ -121,6 +136,13 @@ class RecordService(Service):
 
         await self.record_repo.save(record)
         logger.info(f"Record persisted: {record_srn}")
+
+        # Dual-write typed metadata projection in the same transaction.
+        await self.metadata_service.insert(
+            schema_id=schema_id,
+            record_srn=record_srn,
+            values=draft.metadata,
+        )
 
         published = RecordPublished(
             id=EventId(uuid4()),

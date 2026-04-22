@@ -162,6 +162,16 @@ class PostgresMetadataStore(MetadataStore):
         record_srn: RecordSRN,
         values: dict[str, Any],
     ) -> None:
+        await self.insert_many(schema_id, [(record_srn, values)])
+
+    async def insert_many(
+        self,
+        schema_id: SchemaId,
+        rows: list[tuple[RecordSRN, dict[str, Any]]],
+    ) -> None:
+        if not rows:
+            return
+
         id_str = schema_id.id.root
         major = schema_id.major
 
@@ -191,16 +201,28 @@ class PostgresMetadataStore(MetadataStore):
         table = build_metadata_table(pg_table, schema)
 
         col_by_name = {c.name: c for c in schema.columns}
-        payload: dict[str, Any] = {}
-        for k, v in values.items():
-            col = col_by_name.get(k)
-            if col is None:
-                continue
-            payload[k] = _coerce_value(col, v)
-        payload["record_srn"] = str(record_srn)
+        known_names = set(col_by_name.keys())
 
-        stmt = insert(table).values(**payload)
-        update_cols = {c: stmt.excluded[c] for c in payload.keys() if c != "record_srn"}
+        payloads: list[dict[str, Any]] = []
+        for record_srn, values in rows:
+            payload: dict[str, Any] = {}
+            for k, v in values.items():
+                col = col_by_name.get(k)
+                if col is None:
+                    continue
+                payload[k] = _coerce_value(col, v)
+            payload["record_srn"] = str(record_srn)
+            payloads.append(payload)
+
+        # Uniform column set across all rows — asyncpg multi-row insert requires it.
+        # Fill missing columns with None so every payload has the same keys.
+        all_keys: set[str] = {"record_srn"} | known_names
+        for p in payloads:
+            for k in all_keys:
+                p.setdefault(k, None)
+
+        stmt = insert(table).values(payloads)
+        update_cols = {c: stmt.excluded[c] for c in all_keys if c != "record_srn"}
         if update_cols:
             stmt = stmt.on_conflict_do_update(
                 index_elements=[table.c.record_srn],

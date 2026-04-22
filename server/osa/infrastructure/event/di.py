@@ -14,9 +14,6 @@ from osa.domain.feature.handler import (
     InsertRecordFeatures,
 )
 from osa.domain.ingest.handler import PublishBatch, RunHooks, RunIngester
-from osa.domain.metadata.handler.ensure_metadata_table import EnsureMetadataTable
-from osa.domain.metadata.handler.insert_batch_metadata import InsertBatchMetadata
-from osa.domain.metadata.handler.insert_record_metadata import InsertRecordMetadata
 from osa.domain.record.handler import ConvertDepositionToRecord
 from osa.domain.shared.event import EventHandler
 from osa.domain.shared.event_log import EventLog
@@ -40,10 +37,8 @@ _CORE_HANDLERS: list[type[EventHandler[Any]]] = [
     CreateFeatureTables,
     InsertRecordFeatures,
     InsertBatchFeatures,
-    # Metadata handlers (feature 076)
-    EnsureMetadataTable,
-    InsertRecordMetadata,
-    InsertBatchMetadata,
+    # Metadata projection is now synchronous (dual-write inside RecordService /
+    # ConventionService) — no event handlers required for it.
     # Ingest handlers
     RunIngester,
     RunHooks,

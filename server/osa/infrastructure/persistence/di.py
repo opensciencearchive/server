@@ -12,6 +12,7 @@ from osa.domain.deposition.port.ontology_reader import OntologyReader
 from osa.domain.deposition.port.repository import DepositionRepository
 from osa.domain.deposition.port.schema_reader import SchemaReader
 from osa.domain.deposition.port.storage import FileStoragePort
+from osa.domain.metadata.service.metadata import MetadataService
 from osa.domain.record.port.feature_reader import FeatureReader
 from osa.domain.record.port.repository import RecordRepository
 from osa.domain.record.query.get_record import GetRecordHandler
@@ -154,6 +155,7 @@ class PersistenceProvider(Provider):
         self,
         record_repo: RecordRepository,
         convention_repo: ConventionRepository,
+        metadata_service: MetadataService,
         outbox: Outbox,
         config: Config,
         feature_reader: FeatureReader,
@@ -165,6 +167,7 @@ class PersistenceProvider(Provider):
         return RecordService(
             record_repo=record_repo,
             convention_repo=convention_repo,
+            metadata_service=metadata_service,
             outbox=outbox,
             node_domain=Domain(config.domain),
             feature_reader=feature_reader,

@@ -193,6 +193,7 @@ class TestRecordServiceFeatureEnrichment:
         service = RecordService(
             record_repo=mock_repo,
             convention_repo=AsyncMock(),
+            metadata_service=AsyncMock(),
             outbox=mock_outbox,
             node_domain=Domain("localhost"),
             feature_reader=mock_reader,

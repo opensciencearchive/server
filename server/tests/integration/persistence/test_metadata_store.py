@@ -219,6 +219,100 @@ class TestInsert:
             ).scalar()
         assert count == 1
 
+    async def test_insert_many_bulk_upserts_rows(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession
+    ):
+        store = PostgresMetadataStore(pg_engine, pg_session)
+        await store.ensure_table(SCHEMA_V1, _fields_v1())
+
+        record_srns = [RecordSRN.parse(f"urn:osa:localhost:rec:bulk-{i}@1") for i in range(5)]
+        for srn in record_srns:
+            await seed_record(
+                pg_engine,
+                srn=str(srn),
+                schema_id=SCHEMA_V1.id.root,
+                schema_version=SCHEMA_V1.version.root,
+            )
+
+        rows = [
+            (srn, {"species": f"species-{i}", "resolution": float(i)})
+            for i, srn in enumerate(record_srns)
+        ]
+        await store.insert_many(SCHEMA_V1, rows)
+        await pg_session.commit()
+
+        async with pg_engine.begin() as conn:
+            count = (
+                await conn.execute(
+                    text(f'SELECT COUNT(*) FROM "{METADATA_SCHEMA}"."bio_sample_v1"')
+                )
+            ).scalar()
+        assert count == 5
+
+    async def test_insert_many_empty_rows_noop(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession
+    ):
+        store = PostgresMetadataStore(pg_engine, pg_session)
+        await store.ensure_table(SCHEMA_V1, _fields_v1())
+        # Must not raise, must not hit the DB
+        await store.insert_many(SCHEMA_V1, [])
+
+    async def test_insert_many_coerces_dates_per_row(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession
+    ):
+        """Every row in a batch gets type coercion applied independently."""
+        from datetime import date
+
+        fields = [
+            FieldDefinition(
+                name="species",
+                type=FieldType.TEXT,
+                required=True,
+                cardinality=Cardinality.EXACTLY_ONE,
+            ),
+            FieldDefinition(
+                name="collected_on",
+                type=FieldType.DATE,
+                required=True,
+                cardinality=Cardinality.EXACTLY_ONE,
+            ),
+        ]
+        dated_schema = SchemaId.parse("dated-bulk@1.0.0")
+        store = PostgresMetadataStore(pg_engine, pg_session)
+        await store.ensure_table(dated_schema, fields)
+
+        srns = [RecordSRN.parse(f"urn:osa:localhost:rec:dated-bulk-{i}@1") for i in range(3)]
+        for srn in srns:
+            await seed_record(
+                pg_engine,
+                srn=str(srn),
+                schema_id=dated_schema.id.root,
+                schema_version=dated_schema.version.root,
+            )
+
+        rows = [
+            (srns[0], {"species": "A", "collected_on": "2026-01-01"}),
+            (srns[1], {"species": "B", "collected_on": "2026-02-02"}),
+            (srns[2], {"species": "C", "collected_on": "2026-03-03"}),
+        ]
+        await store.insert_many(dated_schema, rows)
+        await pg_session.commit()
+
+        async with pg_engine.begin() as conn:
+            result = (
+                await conn.execute(
+                    text(
+                        f"SELECT species, collected_on "
+                        f'FROM "{METADATA_SCHEMA}"."dated_bulk_v1" ORDER BY species'
+                    )
+                )
+            ).all()
+        assert [(r[0], r[1]) for r in result] == [
+            ("A", date(2026, 1, 1)),
+            ("B", date(2026, 2, 2)),
+            ("C", date(2026, 3, 3)),
+        ]
+
     async def test_insert_coerces_iso_date_string_to_date_column(
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
     ):

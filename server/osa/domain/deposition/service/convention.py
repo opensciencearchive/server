@@ -5,6 +5,7 @@ from osa.domain.deposition.event.convention_registered import ConventionRegister
 from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.port.convention_repository import ConventionRepository
+from osa.domain.metadata.service.metadata import MetadataService
 from osa.domain.semantics.model.value import FieldDefinition
 from osa.domain.semantics.service.schema import SchemaService
 from osa.domain.shared.error import NotFoundError
@@ -25,6 +26,7 @@ from osa.domain.shared.service import Service
 class ConventionService(Service):
     convention_repo: ConventionRepository
     schema_service: SchemaService
+    metadata_service: MetadataService
     outbox: Outbox
     node_domain: Domain
 
@@ -53,6 +55,14 @@ class ConventionService(Service):
             title=title,
             version=version,
             fields=schema,
+        )
+
+        # Create (or additively evolve) the typed metadata table in the same
+        # transaction — no async window where records can publish against a
+        # convention whose typed table doesn't exist yet.
+        await self.metadata_service.ensure_table(
+            schema_id=created_schema.id,
+            fields=created_schema.fields,
         )
 
         srn = ConventionSRN(

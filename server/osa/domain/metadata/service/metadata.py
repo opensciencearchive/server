@@ -29,3 +29,10 @@ class MetadataService(Service):
         values: dict[str, Any],
     ) -> None:
         await self.metadata_store.insert(schema_id, record_srn, values)
+
+    async def insert_many(
+        self,
+        schema_id: SchemaId,
+        rows: list[tuple[RecordSRN, dict[str, Any]]],
+    ) -> None:
+        await self.metadata_store.insert_many(schema_id, rows)
