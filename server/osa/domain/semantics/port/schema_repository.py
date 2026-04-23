@@ -1,7 +1,7 @@
 from abc import abstractmethod
 from typing import TYPE_CHECKING, List, Protocol
 
-from osa.domain.shared.model.srn import SchemaSRN
+from osa.domain.shared.model.srn import SchemaId
 from osa.domain.shared.port import Port
 
 if TYPE_CHECKING:
@@ -13,7 +13,7 @@ class SchemaRepository(Port, Protocol):
     async def save(self, schema: "Schema") -> None: ...
 
     @abstractmethod
-    async def get(self, srn: SchemaSRN) -> "Schema | None": ...
+    async def get(self, schema_id: SchemaId) -> "Schema | None": ...
 
     @abstractmethod
     async def list(
@@ -21,4 +21,4 @@ class SchemaRepository(Port, Protocol):
     ) -> "List[Schema]": ...
 
     @abstractmethod
-    async def exists(self, srn: SchemaSRN) -> bool: ...
+    async def exists(self, schema_id: SchemaId) -> bool: ...

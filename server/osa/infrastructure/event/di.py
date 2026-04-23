@@ -37,6 +37,8 @@ _CORE_HANDLERS: list[type[EventHandler[Any]]] = [
     CreateFeatureTables,
     InsertRecordFeatures,
     InsertBatchFeatures,
+    # Metadata projection is now synchronous (dual-write inside RecordService /
+    # ConventionService) — no event handlers required for it.
     # Ingest handlers
     RunIngester,
     RunHooks,

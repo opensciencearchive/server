@@ -3,7 +3,7 @@ from osa.domain.shared.model.srn import (
     SRN,
     RecordSRN,
     DepositionSRN,
-    SchemaSRN,
+    SchemaId,
     ResourceType,
 )
 
@@ -17,12 +17,12 @@ class TestSRN:
         assert srn.version is not None
         assert srn.version.root == 1
 
-    def test_parse_schema_srn(self):
-        raw = "urn:osa:node-1:schema:my-schema@1.0.0"
-        srn = SchemaSRN.parse(raw)
-        assert srn.type == ResourceType.schema
-        assert srn.id.root == "my-schema"
-        assert str(srn.version) == "1.0.0"
+    def test_parse_schema_id(self):
+        sid = SchemaId.parse("my-schema@1.0.0")
+        assert sid.id.root == "my-schema"
+        assert str(sid.version) == "1.0.0"
+        assert sid.major == 1
+        assert sid.render() == "my-schema@1.0.0"
 
     def test_render_srn(self):
         srn = DepositionSRN.parse("urn:osa:node-1:dep:abc-123")

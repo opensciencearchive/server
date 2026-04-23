@@ -20,7 +20,7 @@ from osa.domain.shared.model.source import (
     IngesterScheduleConfig,
     InitialRunConfig,
 )
-from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
+from osa.domain.shared.model.srn import ConventionSRN, SchemaId
 from osa.infrastructure.persistence.repository.convention import (
     PostgresConventionRepository,
 )
@@ -30,7 +30,7 @@ def _make_convention(
     *,
     srn: str = "urn:osa:localhost:conv:test-convention-001@1.0.0",
     title: str = "Test Convention",
-    schema_srn: str = "urn:osa:localhost:schema:test-schema-001@1.0.0",
+    schema_id: str = "test-schema-001@1.0.0",
     hooks: list[HookDefinition] | None = None,
     ingester: IngesterDefinition | None = None,
 ) -> Convention:
@@ -38,7 +38,7 @@ def _make_convention(
         srn=ConventionSRN.parse(srn),
         title=title,
         description="A test convention for integration tests",
-        schema_srn=SchemaSRN.parse(schema_srn),
+        schema_id=SchemaId.parse(schema_id),
         file_requirements=FileRequirements(
             accepted_types=[".csv", ".h5ad"],
             min_count=1,
@@ -99,7 +99,7 @@ class TestConventionRepoRoundTrip:
         assert str(got.srn) == str(conv.srn)
         assert got.title == conv.title
         assert got.description == conv.description
-        assert str(got.schema_srn) == str(conv.schema_srn)
+        assert str(got.schema_id) == str(conv.schema_id)
         assert got.file_requirements == conv.file_requirements
         assert len(got.hooks) == 1
         assert got.hooks[0].runtime.image == hook.runtime.image

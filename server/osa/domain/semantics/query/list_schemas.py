@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from osa.domain.semantics.service.schema import SchemaService
 from osa.domain.shared.authorization.gate import public
-from osa.domain.shared.model.srn import SchemaSRN
+from osa.domain.shared.model.srn import SchemaId
 from osa.domain.shared.query import Query, QueryHandler, Result
 
 
@@ -13,7 +13,7 @@ class ListSchemas(Query):
 
 
 class SchemaSummary(BaseModel):
-    srn: SchemaSRN
+    id: SchemaId
     title: str
     field_count: int
     created_at: datetime
@@ -32,7 +32,7 @@ class ListSchemasHandler(QueryHandler[ListSchemas, SchemaList]):
         return SchemaList(
             items=[
                 SchemaSummary(
-                    srn=s.srn,
+                    id=s.id,
                     title=s.title,
                     field_count=len(s.fields),
                     created_at=s.created_at,

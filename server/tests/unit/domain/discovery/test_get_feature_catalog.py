@@ -10,7 +10,16 @@ from osa.domain.discovery.query.get_feature_catalog import (
     GetFeatureCatalogHandler,
     GetFeatureCatalogResult,
 )
+from osa.config import Config
 from osa.domain.discovery.service.discovery import DiscoveryService
+
+
+def _config() -> Config:
+    import os
+
+    os.environ.setdefault("OSA_AUTH__JWT__SECRET", "a" * 64)
+    os.environ.setdefault("OSA_BASE_URL", "http://localhost:8000")
+    return Config()  # type: ignore[call-arg]
 
 
 @pytest.fixture
@@ -22,12 +31,17 @@ def mock_read_store() -> AsyncMock:
 def mock_field_reader() -> AsyncMock:
     reader = AsyncMock()
     reader.get_all_field_types.return_value = {}
+    reader.get_fields_for_schema.return_value = {}
     return reader
 
 
 @pytest.fixture
 def service(mock_read_store: AsyncMock, mock_field_reader: AsyncMock) -> DiscoveryService:
-    return DiscoveryService(read_store=mock_read_store, field_reader=mock_field_reader)
+    return DiscoveryService(
+        read_store=mock_read_store,
+        field_reader=mock_field_reader,
+        config=_config(),
+    )
 
 
 class TestGetFeatureCatalogHandler:

@@ -1,19 +1,26 @@
 """Unit tests for RecordService."""
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
+from osa.domain.deposition.model.convention import Convention
+from osa.domain.deposition.model.value import FileRequirements
+from osa.domain.deposition.port.convention_repository import ConventionRepository
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.record.model.draft import RecordDraft
 from osa.domain.record.port.repository import RecordRepository
 from osa.domain.record.service.record import RecordService
-from osa.domain.shared.model.source import (
-    DepositionSource,
-    IngestSource,
+from osa.domain.shared.model.source import DepositionSource, IngestSource
+from osa.domain.shared.model.srn import (
+    ConventionSRN,
+    DepositionSRN,
+    Domain,
+    LocalId,
+    SchemaId,
 )
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, Domain, LocalId
 from osa.domain.shared.outbox import Outbox
 
 
@@ -21,10 +28,33 @@ def _make_conv_srn() -> ConventionSRN:
     return ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
 
 
+def _make_schema_id() -> SchemaId:
+    return SchemaId.parse("test@1.0.0")
+
+
+def _make_convention() -> Convention:
+    return Convention(
+        srn=_make_conv_srn(),
+        title="Test Convention",
+        description=None,
+        schema_id=_make_schema_id(),
+        file_requirements=FileRequirements(accepted_types=[], max_count=0, max_file_size=0),
+        hooks=[],
+        created_at=datetime.now(UTC),
+    )
+
+
 @pytest.fixture
 def mock_record_repo() -> RecordRepository:
     repo = MagicMock(spec=RecordRepository)
     repo.save = AsyncMock()
+    return repo
+
+
+@pytest.fixture
+def mock_convention_repo() -> ConventionRepository:
+    repo = MagicMock(spec=ConventionRepository)
+    repo.get = AsyncMock(return_value=_make_convention())
     return repo
 
 
@@ -51,28 +81,40 @@ def sample_draft(node_domain: Domain) -> RecordDraft:
     )
 
 
+def _make_service(
+    record_repo: RecordRepository,
+    convention_repo: ConventionRepository,
+    outbox: Outbox,
+    node_domain: Domain,
+) -> RecordService:
+    return RecordService(
+        record_repo=record_repo,
+        convention_repo=convention_repo,
+        metadata_service=AsyncMock(),
+        outbox=outbox,
+        node_domain=node_domain,
+        feature_reader=AsyncMock(),
+    )
+
+
 class TestRecordService:
     @pytest.mark.asyncio
     async def test_publish_record_creates_record(
         self,
         mock_record_repo: RecordRepository,
+        mock_convention_repo: ConventionRepository,
         mock_outbox: Outbox,
         node_domain: Domain,
         sample_draft: RecordDraft,
     ):
-        """Service should create and persist a Record from a draft."""
-        service = RecordService(
-            record_repo=mock_record_repo,
-            outbox=mock_outbox,
-            node_domain=node_domain,
-            feature_reader=AsyncMock(),
-        )
+        service = _make_service(mock_record_repo, mock_convention_repo, mock_outbox, node_domain)
 
         record = await service.publish_record(sample_draft)
 
         assert record is not None
         assert record.source == sample_draft.source
         assert record.convention_srn == sample_draft.convention_srn
+        assert record.schema_id == _make_schema_id()
         assert record.metadata == sample_draft.metadata
         mock_record_repo.save.assert_called_once()
 
@@ -80,17 +122,12 @@ class TestRecordService:
     async def test_publish_record_emits_record_published_event(
         self,
         mock_record_repo: RecordRepository,
+        mock_convention_repo: ConventionRepository,
         mock_outbox: Outbox,
         node_domain: Domain,
         sample_draft: RecordDraft,
     ):
-        """Service should emit RecordPublished event with source-agnostic fields."""
-        service = RecordService(
-            record_repo=mock_record_repo,
-            outbox=mock_outbox,
-            node_domain=node_domain,
-            feature_reader=AsyncMock(),
-        )
+        service = _make_service(mock_record_repo, mock_convention_repo, mock_outbox, node_domain)
 
         record = await service.publish_record(sample_draft)
 
@@ -100,6 +137,7 @@ class TestRecordService:
         assert event.record_srn == record.srn
         assert event.source == sample_draft.source
         assert event.convention_srn == sample_draft.convention_srn
+        assert event.schema_id == _make_schema_id()
         assert event.expected_features == sample_draft.expected_features
         assert event.metadata == sample_draft.metadata
 
@@ -107,17 +145,12 @@ class TestRecordService:
     async def test_publish_record_creates_version_1(
         self,
         mock_record_repo: RecordRepository,
+        mock_convention_repo: ConventionRepository,
         mock_outbox: Outbox,
         node_domain: Domain,
         sample_draft: RecordDraft,
     ):
-        """New records should be version 1."""
-        service = RecordService(
-            record_repo=mock_record_repo,
-            outbox=mock_outbox,
-            node_domain=node_domain,
-            feature_reader=AsyncMock(),
-        )
+        service = _make_service(mock_record_repo, mock_convention_repo, mock_outbox, node_domain)
 
         record = await service.publish_record(sample_draft)
 
@@ -125,16 +158,14 @@ class TestRecordService:
 
 
 class TestRecordServiceIngestSource:
-    """US2: Verify ingest-sourced records publish correctly."""
-
     @pytest.mark.asyncio
     async def test_publish_with_ingest_source(
         self,
         mock_record_repo: RecordRepository,
+        mock_convention_repo: ConventionRepository,
         mock_outbox: Outbox,
         node_domain: Domain,
     ):
-        """IngestSource draft produces correct Record + RecordPublished event."""
         draft = RecordDraft(
             source=IngestSource(
                 id="run-123-pdb-456",
@@ -146,12 +177,7 @@ class TestRecordServiceIngestSource:
             expected_features=["pocket_detect"],
         )
 
-        service = RecordService(
-            record_repo=mock_record_repo,
-            outbox=mock_outbox,
-            node_domain=node_domain,
-            feature_reader=AsyncMock(),
-        )
+        service = _make_service(mock_record_repo, mock_convention_repo, mock_outbox, node_domain)
 
         record = await service.publish_record(draft)
 

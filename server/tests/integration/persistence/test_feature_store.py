@@ -111,16 +111,21 @@ class TestFeatureStoreCreateTable:
 @pytest.mark.asyncio
 class TestFeatureStoreInsert:
     async def test_insert_features(self, pg_engine: AsyncEngine, pg_session: AsyncSession):
+        from tests.integration.conftest import seed_record
+
         store = PostgresFeatureStore(pg_engine, pg_session)
         hook = _make_hook(name="insert_hook")
         await store.create_table("insert_hook", hook.feature.columns)
+
+        record_srn = "urn:osa:localhost:rec:rec-001@1"
+        await seed_record(pg_engine, srn=record_srn)
 
         rows = [
             {"score": 0.95, "label": "good"},
             {"score": 0.42, "label": "poor"},
             {"score": 0.78, "label": None},
         ]
-        count = await store.insert_features("insert_hook", "urn:osa:localhost:rec:rec-001@1", rows)
+        count = await store.insert_features("insert_hook", record_srn, rows)
         assert count == 3
 
         # Verify data is in the table
@@ -171,6 +176,11 @@ class TestFeatureStoreJsonbColumns:
             assert col_types["metadata"] == "jsonb"
             assert col_types["count"] == "bigint"
 
+        from tests.integration.conftest import seed_record
+
+        record_srn = "urn:osa:localhost:rec:rec-jsonb@1"
+        await seed_record(pg_engine, srn=record_srn)
+
         # Insert data with JSONB values
         rows = [
             {
@@ -179,5 +189,5 @@ class TestFeatureStoreJsonbColumns:
                 "count": 42,
             }
         ]
-        count = await store.insert_features("jsonb_hook", "urn:osa:localhost:rec:rec-jsonb@1", rows)
+        count = await store.insert_features("jsonb_hook", record_srn, rows)
         assert count == 1

@@ -34,9 +34,9 @@ class UploadSpreadsheetHandler(CommandHandler[UploadSpreadsheet, SpreadsheetUplo
         if convention is None:
             raise NotFoundError(f"Convention not found: {dep.convention_srn}")
 
-        schema = await self.schema_reader.get_schema(convention.schema_srn)
+        schema = await self.schema_reader.get_schema(convention.schema_id)
         if schema is None:
-            raise NotFoundError(f"Schema not found: {convention.schema_srn}")
+            raise NotFoundError(f"Schema not found: {convention.schema_id}")
 
         parse_result = self.spreadsheet.parse_upload(schema, cmd.content)
 

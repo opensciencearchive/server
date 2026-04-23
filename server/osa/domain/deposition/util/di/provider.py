@@ -20,6 +20,7 @@ from osa.domain.deposition.query.list_conventions import ListConventionsHandler
 from osa.domain.deposition.query.list_depositions import ListDepositionsHandler
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.deposition.service.deposition import DepositionService
+from osa.domain.metadata.service.metadata import MetadataService
 from osa.domain.semantics.service.schema import SchemaService
 from osa.domain.shared.model.srn import Domain
 from osa.domain.shared.outbox import Outbox
@@ -51,12 +52,14 @@ class DepositionProvider(Provider):
         self,
         convention_repo: ConventionRepository,
         schema_service: SchemaService,
+        metadata_service: MetadataService,
         outbox: Outbox,
         config: Config,
     ) -> ConventionService:
         return ConventionService(
             convention_repo=convention_repo,
             schema_service=schema_service,
+            metadata_service=metadata_service,
             outbox=outbox,
             node_domain=Domain(config.domain),
         )

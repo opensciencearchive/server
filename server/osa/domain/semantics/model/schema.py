@@ -3,13 +3,13 @@ from datetime import datetime
 from osa.domain.semantics.model.value import FieldDefinition
 from osa.domain.shared.error import ValidationError
 from osa.domain.shared.model.aggregate import Aggregate
-from osa.domain.shared.model.srn import SchemaSRN
+from osa.domain.shared.model.srn import SchemaId
 
 
 class Schema(Aggregate):
     """An immutable, versioned definition of metadata structure."""
 
-    srn: SchemaSRN
+    id: SchemaId
     title: str
     fields: list[FieldDefinition]
     created_at: datetime

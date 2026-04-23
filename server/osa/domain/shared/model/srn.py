@@ -51,7 +51,30 @@ class LocalId(RootModel[str]):
     def _validate(cls, v: str) -> str:
         v = v.strip().lower()
         if not cls._re.match(v):
-            raise ValueError("invalid LocalId (20–64 chars, [a-z0-9-])")
+            raise ValueError("invalid LocalId (3–64 chars, [a-z0-9-])")
+        return v
+
+
+class SchemaIdentifier(RootModel[str]):
+    """Human-readable schema slug. Narrower than :class:`LocalId`:
+
+    - must start with a letter (so it can drive a PG table name without
+      quoting the leading character)
+    - 3–64 chars total, ``[a-z0-9-]``
+
+    Validated strictly (no case-folding / whitespace-stripping) — a typo like
+    ``"PDB-Structure"`` should surface loudly rather than silently normalise.
+    """
+
+    _re: ClassVar[re.Pattern] = re.compile(r"^[a-z][a-z0-9\-]{2,63}$")
+
+    @field_validator("root")
+    @classmethod
+    def _validate(cls, v: str) -> str:
+        if not cls._re.match(v):
+            raise ValueError(
+                "invalid schema id: must be 3–64 chars of [a-z0-9-] and start with a letter"
+            )
         return v
 
 
@@ -280,3 +303,55 @@ class SnapshotSRN(SRN):
 class EventSRN(SRN):
     type: ResourceType = Field(default=ResourceType.evt, frozen=True)
     version: None = None
+
+
+# ---------- Schema identity (short form — internal primitive) ----------
+
+
+class SchemaId(ValueObject):
+    """Short-form schema identity. The internal primitive for all non-
+    federation code paths.
+
+    A schema is unambiguously identified by ``(id, version)`` within a single
+    OSA node — the publishing domain and resource-type segments of the full
+    :class:`SchemaSRN` URN carry no information at the internal layer (the
+    domain is always the node's own; the type is always ``schema``).
+
+    Use :class:`SchemaSRN` only at federation edges (exports, snapshot
+    manifests, inter-node references) where the publishing node's domain
+    becomes meaningful.
+
+    Wire form: ``"<id>@<semver>"`` (e.g., ``"pdb-structure@1.0.0"``).
+    """
+
+    id: LocalId
+    version: Semver
+
+    @property
+    def major(self) -> int:
+        """Major version component — the shared typed-table key."""
+        return int(self.version.root.split(".")[0])
+
+    def render(self) -> str:
+        return f"{self.id.root}@{self.version.root}"
+
+    def __str__(self) -> str:
+        return self.render()
+
+    @classmethod
+    def parse(cls, value: str) -> "SchemaId":
+        """Parse wire form ``"<id>@<semver>"``.
+
+        Raises ``ValueError`` on malformed input.
+        """
+        if not isinstance(value, str) or "@" not in value:
+            raise ValueError(f"SchemaId must be '<id>@<semver>', got {value!r}")
+        id_part, version_part = value.split("@", 1)
+        return cls(id=LocalId(id_part), version=Semver.from_string(version_part))
+
+    @classmethod
+    def from_srn(cls, srn: "SchemaSRN") -> "SchemaId":
+        return cls(id=srn.id, version=srn.version)
+
+    def to_srn(self, domain: Domain) -> "SchemaSRN":
+        return SchemaSRN(domain=domain, id=self.id, version=self.version)

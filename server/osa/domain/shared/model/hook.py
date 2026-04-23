@@ -16,6 +16,14 @@ from osa.domain.shared.model.value import ValueObject
 # Safe for use as PG identifiers, file path components, and env var values.
 PgIdentifier = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,62}$")]
 
+# Hook names compose into PG identifiers alongside fixed prefixes/suffixes —
+# notably the per-hook FK constraint ``fk_features_{name}_record_srn`` (23
+# chars of overhead). PG's identifier limit is 63 chars, so cap hook names at
+# 40 to keep every derived identifier inside the limit without surprise
+# truncation. Column names use plain ``PgIdentifier`` because they don't get
+# composed into longer names.
+HookName = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,39}$")]
+
 _MEMORY_RE = re.compile(r"^(\d+(?:\.\d+)?)(g|m|k)?i?$")
 
 _GIB = 1024 * 1024 * 1024
@@ -57,7 +65,7 @@ def _format_memory(byte_count: int) -> str:
 
 
 class ColumnDef(ValueObject):
-    """Definition of a single column in a feature table."""
+    """Definition of a single column in a feature or metadata table."""
 
     name: PgIdentifier
     json_type: Literal["string", "number", "integer", "boolean", "array", "object"]
@@ -115,7 +123,7 @@ class TableFeatureSpec(FeatureSpec):
 class HookDefinition(ValueObject):
     """Complete specification for a hook: how it runs + what it produces."""
 
-    name: PgIdentifier
+    name: HookName
     runtime: Annotated[OciConfig, Field(discriminator="type")]
     feature: Annotated[TableFeatureSpec, Field(discriminator="kind")]
 

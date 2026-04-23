@@ -12,7 +12,7 @@ from osa.domain.deposition.port.schema_reader import SchemaReader
 from osa.domain.semantics.model.ontology import Ontology, Term
 from osa.domain.semantics.model.schema import Schema
 from osa.domain.semantics.model.value import FieldDefinition
-from osa.domain.shared.model.srn import OntologySRN, SchemaSRN
+from osa.domain.shared.model.srn import LocalId, OntologySRN, SchemaId, Semver
 from osa.infrastructure.persistence.tables import (
     ontologies_table,
     ontology_terms_table,
@@ -20,12 +20,18 @@ from osa.infrastructure.persistence.tables import (
 )
 
 
+def _where_schema(schema_id: SchemaId):
+    return (schemas_table.c.id == schema_id.id.root) & (
+        schemas_table.c.version == schema_id.version.root
+    )
+
+
 class SchemaReaderAdapter(SchemaReader):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def get_schema(self, srn: SchemaSRN) -> Schema | None:
-        stmt = select(schemas_table).where(schemas_table.c.srn == str(srn))
+    async def get_schema(self, schema_id: SchemaId) -> Schema | None:
+        stmt = select(schemas_table).where(_where_schema(schema_id))
         result = await self.session.execute(stmt)
         row = result.mappings().first()
         if not row:
@@ -33,14 +39,17 @@ class SchemaReaderAdapter(SchemaReader):
         row_dict = dict(row)
         fields = [FieldDefinition.model_validate(f) for f in row_dict["fields"]]
         return Schema(
-            srn=SchemaSRN.parse(row_dict["srn"]),
+            id=SchemaId(
+                id=LocalId(row_dict["id"]),
+                version=Semver.from_string(row_dict["version"]),
+            ),
             title=row_dict["title"],
             fields=fields,
             created_at=row_dict["created_at"],
         )
 
-    async def schema_exists(self, srn: SchemaSRN) -> bool:
-        stmt = select(schemas_table.c.srn).where(schemas_table.c.srn == str(srn))
+    async def schema_exists(self, schema_id: SchemaId) -> bool:
+        stmt = select(schemas_table.c.id).where(_where_schema(schema_id))
         result = await self.session.execute(stmt)
         return result.first() is not None
 

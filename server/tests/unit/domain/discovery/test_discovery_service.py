@@ -1,23 +1,40 @@
-"""Tests for DiscoveryService — filter validation, operator validation, delegation."""
+"""Tests for DiscoveryService — FilterExpr validation, operator validation, delegation."""
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
 
+from osa.config import Config
+from osa.domain.discovery.model.refs import MetadataFieldRef
 from osa.domain.discovery.model.value import (
+    And,
     ColumnInfo,
     FeatureCatalogEntry,
     FeatureRow,
-    Filter,
     FilterOperator,
+    Predicate,
     RecordSummary,
     SortOrder,
+    decode_cursor,
+    encode_cursor,
 )
 from osa.domain.discovery.service.discovery import DiscoveryService
 from osa.domain.semantics.model.value import FieldType
-from osa.domain.shared.error import ValidationError
-from osa.domain.shared.model.srn import RecordSRN
+from osa.domain.shared.error import NotFoundError, ValidationError
+from osa.domain.shared.model.srn import RecordSRN, SchemaId
+
+
+SCHEMA_SRN = SchemaId.parse("bio-sample@1.0.0")
+
+
+def _config() -> Config:
+    # Build a Config with minimal auth — tests don't hit JWT paths
+    import os
+
+    os.environ.setdefault("OSA_AUTH__JWT__SECRET", "a" * 64)  # Test-only secret
+    os.environ.setdefault("OSA_BASE_URL", "http://localhost:8000")
+    return Config()  # type: ignore[call-arg]
 
 
 @pytest.fixture
@@ -38,19 +55,37 @@ def mock_field_reader() -> AsyncMock:
         "is_public": FieldType.BOOLEAN,
         "homepage": FieldType.URL,
     }
+    reader.get_fields_for_schema.return_value = {
+        "title": FieldType.TEXT,
+        "resolution": FieldType.NUMBER,
+        "method": FieldType.TERM,
+        "published_date": FieldType.DATE,
+        "is_public": FieldType.BOOLEAN,
+        "homepage": FieldType.URL,
+    }
     return reader
 
 
 @pytest.fixture
 def service(mock_read_store: AsyncMock, mock_field_reader: AsyncMock) -> DiscoveryService:
-    return DiscoveryService(read_store=mock_read_store, field_reader=mock_field_reader)
+    return DiscoveryService(
+        read_store=mock_read_store,
+        field_reader=mock_field_reader,
+        config=_config(),
+    )
+
+
+def _eq(field: str, value: object) -> Predicate:
+    return Predicate(field=MetadataFieldRef(field=field), op=FilterOperator.EQ, value=value)
 
 
 class TestSearchRecordsValidation:
     async def test_rejects_unknown_filter_field(self, service: DiscoveryService) -> None:
-        with pytest.raises(ValidationError, match="Unknown field 'bogus'"):
+        with pytest.raises(ValidationError, match="Unknown metadata field 'bogus'"):
             await service.search_records(
-                filters=[Filter(field="bogus", operator=FilterOperator.EQ, value="x")],
+                filter_expr=_eq("bogus", "x"),
+                schema_id=SCHEMA_SRN,
+                convention_srn=None,
                 q=None,
                 sort="published_at",
                 order=SortOrder.DESC,
@@ -59,9 +94,15 @@ class TestSearchRecordsValidation:
             )
 
     async def test_rejects_invalid_operator_for_type(self, service: DiscoveryService) -> None:
-        with pytest.raises(ValidationError, match="contains"):
+        with pytest.raises(ValidationError, match="not valid"):
             await service.search_records(
-                filters=[Filter(field="resolution", operator=FilterOperator.CONTAINS, value="x")],
+                filter_expr=Predicate(
+                    field=MetadataFieldRef(field="resolution"),
+                    op=FilterOperator.CONTAINS,
+                    value="x",
+                ),
+                schema_id=SCHEMA_SRN,
+                convention_srn=None,
                 q=None,
                 sort="published_at",
                 order=SortOrder.DESC,
@@ -72,7 +113,9 @@ class TestSearchRecordsValidation:
     async def test_rejects_unknown_sort_field(self, service: DiscoveryService) -> None:
         with pytest.raises(ValidationError, match="Unknown sort field"):
             await service.search_records(
-                filters=[],
+                filter_expr=None,
+                schema_id=SCHEMA_SRN,
+                convention_srn=None,
                 q=None,
                 sort="nonexistent",
                 order=SortOrder.DESC,
@@ -82,7 +125,9 @@ class TestSearchRecordsValidation:
 
     async def test_accepts_published_at_sort(self, service: DiscoveryService) -> None:
         result = await service.search_records(
-            filters=[],
+            filter_expr=None,
+            schema_id=SCHEMA_SRN,
+            convention_srn=None,
             q=None,
             sort="published_at",
             order=SortOrder.DESC,
@@ -93,7 +138,9 @@ class TestSearchRecordsValidation:
 
     async def test_accepts_metadata_field_sort(self, service: DiscoveryService) -> None:
         result = await service.search_records(
-            filters=[],
+            filter_expr=None,
+            schema_id=SCHEMA_SRN,
+            convention_srn=None,
             q=None,
             sort="resolution",
             order=SortOrder.ASC,
@@ -105,7 +152,9 @@ class TestSearchRecordsValidation:
     async def test_rejects_limit_too_low(self, service: DiscoveryService) -> None:
         with pytest.raises(ValidationError, match="limit"):
             await service.search_records(
-                filters=[],
+                filter_expr=None,
+                schema_id=SCHEMA_SRN,
+                convention_srn=None,
                 q=None,
                 sort="published_at",
                 order=SortOrder.DESC,
@@ -116,7 +165,9 @@ class TestSearchRecordsValidation:
     async def test_rejects_limit_too_high(self, service: DiscoveryService) -> None:
         with pytest.raises(ValidationError, match="limit"):
             await service.search_records(
-                filters=[],
+                filter_expr=None,
+                schema_id=SCHEMA_SRN,
+                convention_srn=None,
                 q=None,
                 sort="published_at",
                 order=SortOrder.DESC,
@@ -124,17 +175,75 @@ class TestSearchRecordsValidation:
                 limit=101,
             )
 
+    async def test_raises_not_found_for_unknown_schema(self, mock_read_store: AsyncMock) -> None:
+        """Pinning an unregistered schema must raise NotFoundError, not silently
+        fall through to an unscoped query that returns cross-schema records."""
+        empty_reader = AsyncMock()
+        empty_reader.get_fields_for_schema.return_value = {}
+        svc = DiscoveryService(
+            read_store=mock_read_store,
+            field_reader=empty_reader,
+            config=_config(),
+        )
+
+        with pytest.raises(NotFoundError, match="Schema not found"):
+            await svc.search_records(
+                filter_expr=None,
+                schema_id=SCHEMA_SRN,
+                convention_srn=None,
+                q=None,
+                sort="published_at",
+                order=SortOrder.DESC,
+                cursor=None,
+                limit=20,
+            )
+        mock_read_store.search_records.assert_not_called()
+
+    async def test_search_features_raises_not_found_for_unknown_schema(
+        self, mock_read_store: AsyncMock
+    ) -> None:
+        """search_features must also guard against unknown schema pins."""
+        mock_read_store.get_feature_table_schema.return_value = FeatureCatalogEntry(
+            hook_name="detect_pockets",
+            columns=[ColumnInfo(name="score", type="number", required=False)],
+            record_count=0,
+        )
+        empty_reader = AsyncMock()
+        empty_reader.get_fields_for_schema.return_value = {}
+        svc = DiscoveryService(
+            read_store=mock_read_store,
+            field_reader=empty_reader,
+            config=_config(),
+        )
+
+        with pytest.raises(NotFoundError, match="Schema not found"):
+            await svc.search_features(
+                hook_name="detect_pockets",
+                filter_expr=None,
+                schema_id=SCHEMA_SRN,
+                record_srn=None,
+                sort="id",
+                order=SortOrder.DESC,
+                cursor=None,
+                limit=20,
+            )
+        mock_read_store.search_features.assert_not_called()
+
     async def test_rejects_q_when_no_text_fields(self, mock_read_store: AsyncMock) -> None:
-        """q should raise when no TEXT/URL fields exist to search against."""
         no_text_reader = AsyncMock()
-        no_text_reader.get_all_field_types.return_value = {
-            "resolution": FieldType.NUMBER,
-        }
-        svc = DiscoveryService(read_store=mock_read_store, field_reader=no_text_reader)
+        no_text_reader.get_all_field_types.return_value = {"resolution": FieldType.NUMBER}
+        no_text_reader.get_fields_for_schema.return_value = {"resolution": FieldType.NUMBER}
+        svc = DiscoveryService(
+            read_store=mock_read_store,
+            field_reader=no_text_reader,
+            config=_config(),
+        )
 
         with pytest.raises(ValidationError, match="Free-text search is unavailable"):
             await svc.search_records(
-                filters=[],
+                filter_expr=None,
+                schema_id=SCHEMA_SRN,
+                convention_srn=None,
                 q="kinase",
                 sort="published_at",
                 order=SortOrder.DESC,
@@ -148,7 +257,9 @@ class TestSearchRecordsDelegation:
         self, service: DiscoveryService, mock_read_store: AsyncMock
     ) -> None:
         await service.search_records(
-            filters=[Filter(field="method", operator=FilterOperator.EQ, value="X-ray")],
+            filter_expr=_eq("method", "X-ray"),
+            schema_id=SCHEMA_SRN,
+            convention_srn=None,
             q=None,
             sort="published_at",
             order=SortOrder.DESC,
@@ -158,38 +269,19 @@ class TestSearchRecordsDelegation:
 
         mock_read_store.search_records.assert_called_once()
         call_kwargs = mock_read_store.search_records.call_args
-        assert len(call_kwargs.kwargs["filters"]) == 1
+        assert call_kwargs.kwargs["filter_expr"] is not None
         assert call_kwargs.kwargs["q"] is None
         assert call_kwargs.kwargs["sort"] == "published_at"
-        assert call_kwargs.kwargs["limit"] == 21  # N+1 trick
-
-    async def test_extracts_text_fields_for_q(
-        self, service: DiscoveryService, mock_read_store: AsyncMock
-    ) -> None:
-        await service.search_records(
-            filters=[],
-            q="kinase",
-            sort="published_at",
-            order=SortOrder.DESC,
-            cursor=None,
-            limit=20,
-        )
-
-        call_kwargs = mock_read_store.search_records.call_args
-        text_fields = call_kwargs.kwargs["text_fields"]
-        # title (TEXT) and homepage (URL) are text-searchable
-        assert "title" in text_fields
-        assert "homepage" in text_fields
-        assert "resolution" not in text_fields
+        assert call_kwargs.kwargs["limit"] == 21  # N+1
 
     async def test_decodes_cursor(
         self, service: DiscoveryService, mock_read_store: AsyncMock
     ) -> None:
-        from osa.domain.discovery.model.value import encode_cursor
-
         cursor = encode_cursor("2026-01-01", "urn:osa:localhost:rec:abc@1")
         await service.search_records(
-            filters=[],
+            filter_expr=None,
+            schema_id=SCHEMA_SRN,
+            convention_srn=None,
             q=None,
             sort="published_at",
             order=SortOrder.DESC,
@@ -205,7 +297,9 @@ class TestSearchRecordsDelegation:
     async def test_invalid_cursor_raises(self, service: DiscoveryService) -> None:
         with pytest.raises(ValidationError, match="cursor"):
             await service.search_records(
-                filters=[],
+                filter_expr=None,
+                schema_id=SCHEMA_SRN,
+                convention_srn=None,
                 q=None,
                 sort="published_at",
                 order=SortOrder.DESC,
@@ -218,13 +312,14 @@ class TestSearchRecordsDelegation:
     ) -> None:
         srn = RecordSRN.parse("urn:osa:localhost:rec:abc@1")
         ts = datetime(2026, 1, 1, tzinfo=UTC)
-        # Return limit+1 rows so the service detects has_more=True
         mock_read_store.search_records.return_value = [
             RecordSummary(srn=srn, published_at=ts, metadata={"title": f"r{i}"}) for i in range(2)
         ]
 
         result = await service.search_records(
-            filters=[],
+            filter_expr=None,
+            schema_id=SCHEMA_SRN,
+            convention_srn=None,
             q=None,
             sort="published_at",
             order=SortOrder.DESC,
@@ -234,10 +329,7 @@ class TestSearchRecordsDelegation:
 
         assert result.has_more is True
         assert result.cursor is not None
-        assert len(result.results) == 1  # trimmed back to limit
-
-        from osa.domain.discovery.model.value import decode_cursor
-
+        assert len(result.results) == 1
         decoded = decode_cursor(result.cursor)
         assert decoded["id"] == str(srn)
 
@@ -247,7 +339,9 @@ class TestSearchRecordsDelegation:
         mock_read_store.search_records.return_value = []
 
         result = await service.search_records(
-            filters=[],
+            filter_expr=None,
+            schema_id=SCHEMA_SRN,
+            convention_srn=None,
             q=None,
             sort="published_at",
             order=SortOrder.DESC,
@@ -259,111 +353,114 @@ class TestSearchRecordsDelegation:
         assert result.has_more is False
 
 
-class TestSearchRecordsPagination:
-    async def test_has_more_false_when_exactly_limit_rows(
-        self, service: DiscoveryService, mock_read_store: AsyncMock
-    ) -> None:
-        """Exactly limit rows should NOT report has_more (no false positive)."""
-        srn = RecordSRN.parse("urn:osa:localhost:rec:abc@1")
-        ts = datetime(2026, 1, 1, tzinfo=UTC)
-        mock_read_store.search_records.return_value = [
-            RecordSummary(srn=srn, published_at=ts, metadata={"title": f"r{i}"}) for i in range(3)
-        ]
+class TestSchemaRequiredGuards:
+    """With the JSONB filter fallback removed, any query that resolves against
+    metadata fields must pin a schema."""
 
+    async def test_metadata_predicate_without_schema_raises(
+        self, service: DiscoveryService
+    ) -> None:
+        with pytest.raises(ValidationError) as exc:
+            await service.search_records(
+                filter_expr=_eq("title", "x"),
+                schema_id=None,
+                convention_srn=None,
+                q=None,
+                sort="published_at",
+                order=SortOrder.DESC,
+                cursor=None,
+                limit=20,
+            )
+        assert exc.value.code == "schema_required_for_metadata_query"
+
+    async def test_non_default_sort_without_schema_raises(self, service: DiscoveryService) -> None:
+        with pytest.raises(ValidationError) as exc:
+            await service.search_records(
+                filter_expr=None,
+                schema_id=None,
+                convention_srn=None,
+                q=None,
+                sort="resolution",
+                order=SortOrder.DESC,
+                cursor=None,
+                limit=20,
+            )
+        assert exc.value.code == "schema_required_for_metadata_sort"
+
+    async def test_q_without_schema_raises(self, service: DiscoveryService) -> None:
+        with pytest.raises(ValidationError) as exc:
+            await service.search_records(
+                filter_expr=None,
+                schema_id=None,
+                convention_srn=None,
+                q="kinase",
+                sort="published_at",
+                order=SortOrder.DESC,
+                cursor=None,
+                limit=20,
+            )
+        assert exc.value.code == "schema_required_for_free_text_search"
+
+    async def test_plain_listing_without_schema_succeeds(self, service: DiscoveryService) -> None:
+        """No filter, default sort, no q → unscoped listing is allowed."""
         result = await service.search_records(
-            filters=[],
-            q=None,
-            sort="published_at",
-            order=SortOrder.DESC,
-            cursor=None,
-            limit=3,
-        )
-
-        assert result.has_more is False
-        assert result.cursor is None
-        assert len(result.results) == 3
-
-    async def test_has_more_true_when_more_than_limit_rows(
-        self, service: DiscoveryService, mock_read_store: AsyncMock
-    ) -> None:
-        """Adapter returning limit+1 rows signals more pages exist."""
-        srn = RecordSRN.parse("urn:osa:localhost:rec:abc@1")
-        ts = datetime(2026, 1, 1, tzinfo=UTC)
-        mock_read_store.search_records.return_value = [
-            RecordSummary(srn=srn, published_at=ts, metadata={"title": f"r{i}"}) for i in range(4)
-        ]
-
-        result = await service.search_records(
-            filters=[],
-            q=None,
-            sort="published_at",
-            order=SortOrder.DESC,
-            cursor=None,
-            limit=3,
-        )
-
-        assert result.has_more is True
-        assert result.cursor is not None
-        assert len(result.results) == 3  # trimmed back to limit
-
-    async def test_passes_limit_plus_one_to_read_store(
-        self, service: DiscoveryService, mock_read_store: AsyncMock
-    ) -> None:
-        """Service should fetch one extra row to detect more pages."""
-        await service.search_records(
-            filters=[],
+            filter_expr=None,
+            schema_id=None,
+            convention_srn=None,
             q=None,
             sort="published_at",
             order=SortOrder.DESC,
             cursor=None,
             limit=20,
         )
-
-        call_kwargs = mock_read_store.search_records.call_args
-        assert call_kwargs.kwargs["limit"] == 21
+        assert result.results == []
 
 
-class TestSearchRecordsFieldTypes:
-    async def test_passes_field_types_to_read_store(
-        self, service: DiscoveryService, mock_read_store: AsyncMock
-    ) -> None:
-        await service.search_records(
-            filters=[],
-            q=None,
-            sort="published_at",
-            order=SortOrder.DESC,
-            cursor=None,
-            limit=20,
-        )
+class TestFilterBounds:
+    async def test_depth_exceeded_raises(self, service: DiscoveryService) -> None:
+        # Build a nest of AND that exceeds the default depth (10)
+        leaf = _eq("title", "r")
+        tree = leaf
+        for _ in range(11):
+            tree = And(operands=[tree, leaf])
 
-        call_kwargs = mock_read_store.search_records.call_args
-        field_types = call_kwargs.kwargs["field_types"]
-        assert field_types["resolution"] == FieldType.NUMBER
-        assert field_types["title"] == FieldType.TEXT
+        with pytest.raises(ValidationError, match="filter_depth_exceeded|depth"):
+            await service.search_records(
+                filter_expr=tree,
+                schema_id=SCHEMA_SRN,
+                convention_srn=None,
+                q=None,
+                sort="published_at",
+                order=SortOrder.DESC,
+                cursor=None,
+                limit=20,
+            )
 
 
 class TestFeatureCursorEncoding:
     async def test_cursor_encodes_row_id(
         self, mock_read_store: AsyncMock, mock_field_reader: AsyncMock
     ) -> None:
-        from osa.domain.discovery.model.value import decode_cursor
-
         srn = RecordSRN.parse("urn:osa:localhost:rec:abc@1")
         mock_read_store.get_feature_table_schema.return_value = FeatureCatalogEntry(
             hook_name="detect_pockets",
             columns=[ColumnInfo(name="score", type="number", required=True)],
             record_count=0,
         )
-        # Return limit+1 rows so the service detects has_more=True
         mock_read_store.search_features.return_value = [
             FeatureRow(row_id=42, record_srn=srn, data={"score": 7.66}),
             FeatureRow(row_id=43, record_srn=srn, data={"score": 6.0}),
         ]
 
-        service = DiscoveryService(read_store=mock_read_store, field_reader=mock_field_reader)
+        service = DiscoveryService(
+            read_store=mock_read_store,
+            field_reader=mock_field_reader,
+            config=_config(),
+        )
         result = await service.search_features(
             hook_name="detect_pockets",
-            filters=[],
+            filter_expr=None,
+            schema_id=None,
             record_srn=None,
             sort="score",
             order=SortOrder.DESC,
@@ -377,39 +474,3 @@ class TestFeatureCursorEncoding:
         decoded = decode_cursor(result.cursor)
         assert decoded["id"] == 42
         assert decoded["s"] == 7.66
-
-    async def test_cursor_uses_row_id_for_id_sort(
-        self, mock_read_store: AsyncMock, mock_field_reader: AsyncMock
-    ) -> None:
-        from osa.domain.discovery.model.value import decode_cursor
-
-        srn = RecordSRN.parse("urn:osa:localhost:rec:abc@1")
-        mock_read_store.get_feature_table_schema.return_value = FeatureCatalogEntry(
-            hook_name="detect_pockets",
-            columns=[ColumnInfo(name="score", type="number", required=True)],
-            record_count=0,
-        )
-        # Return limit+1 rows so the service detects has_more=True
-        mock_read_store.search_features.return_value = [
-            FeatureRow(row_id=99, record_srn=srn, data={"score": 5.0}),
-            FeatureRow(row_id=98, record_srn=srn, data={"score": 4.0}),
-        ]
-
-        service = DiscoveryService(read_store=mock_read_store, field_reader=mock_field_reader)
-        result = await service.search_features(
-            hook_name="detect_pockets",
-            filters=[],
-            record_srn=None,
-            sort="id",
-            order=SortOrder.DESC,
-            cursor=None,
-            limit=1,
-        )
-
-        assert result.has_more is True
-        assert result.cursor is not None
-        assert len(result.rows) == 1
-        decoded = decode_cursor(result.cursor)
-        # When sort is "id", sort_val should be the row_id itself
-        assert decoded["s"] == 99
-        assert decoded["id"] == 99

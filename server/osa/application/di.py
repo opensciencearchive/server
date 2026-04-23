@@ -8,6 +8,7 @@ from osa.domain.auth.util.di import AuthProvider
 from osa.domain.deposition.util.di import DepositionProvider
 from osa.domain.discovery.util.di import DiscoveryProvider
 from osa.domain.feature.util.di import FeatureProvider
+from osa.domain.metadata.util.di import MetadataProvider
 from osa.domain.semantics.util.di.provider import SemanticsProvider
 from osa.domain.shared.event import EventHandler
 from osa.domain.validation.util.di import ValidationProvider
@@ -49,6 +50,7 @@ def create_container(
         HttpProvider(),
         DepositionProvider(),
         FeatureProvider(),
+        MetadataProvider(),
         SemanticsProvider(),
         ValidationProvider(),
         AuthProvider(),

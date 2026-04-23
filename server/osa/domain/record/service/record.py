@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from osa.domain.deposition.port.convention_repository import ConventionRepository
+from osa.domain.metadata.service.metadata import MetadataService
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.record.model.aggregate import Record
 from osa.domain.record.model.draft import RecordDraft
@@ -14,10 +16,12 @@ from osa.domain.record.port.repository import RecordRepository
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.srn import (
+    ConventionSRN,
     Domain,
     LocalId,
     RecordSRN,
     RecordVersion,
+    SchemaId,
 )
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
@@ -32,6 +36,8 @@ class RecordService(Service):
     """Creates and persists Record aggregates from any source."""
 
     record_repo: RecordRepository
+    convention_repo: ConventionRepository
+    metadata_service: MetadataService
     outbox: Outbox
     node_domain: Domain
     feature_reader: FeatureReader
@@ -49,6 +55,13 @@ class RecordService(Service):
             raise NotFoundError(f"Record not found: {srn}")
         return record
 
+    async def _resolve_schema_id(self, convention_srn: ConventionSRN) -> SchemaId:
+        """Resolve a convention to its schema id at publication time."""
+        convention = await self.convention_repo.get(convention_srn)
+        if convention is None:
+            raise NotFoundError(f"Convention not found: {convention_srn}")
+        return convention.schema_id
+
     async def bulk_publish(self, drafts: list[RecordDraft]) -> list[Record]:
         """Bulk-publish records from an ingest batch.
 
@@ -59,8 +72,15 @@ class RecordService(Service):
         if not drafts:
             return []
 
+        # All drafts in a batch target the same convention (caller contract);
+        # resolve schema_id once.
+        schema_id_by_conv: dict[str, SchemaId] = {}
+
         records: list[Record] = []
         for draft in drafts:
+            key = str(draft.convention_srn)
+            if key not in schema_id_by_conv:
+                schema_id_by_conv[key] = await self._resolve_schema_id(draft.convention_srn)
             record_srn = RecordSRN(
                 domain=self.node_domain,
                 id=LocalId(str(uuid4())),
@@ -71,17 +91,33 @@ class RecordService(Service):
                     srn=record_srn,
                     source=draft.source,
                     convention_srn=draft.convention_srn,
+                    schema_id=schema_id_by_conv[key],
                     metadata=draft.metadata,
                     published_at=datetime.now(UTC),
                 )
             )
 
         published = await self.record_repo.save_many(records)
+
+        # Dual-write typed metadata projection in the same transaction.
+        # Group by schema_id — each schema has its own typed table. Use the
+        # rendered string as the dict key because SchemaId holds unhashable
+        # RootModel fields (LocalId, Semver).
+        by_schema: dict[str, tuple[SchemaId, list[tuple[RecordSRN, dict[str, Any]]]]] = {}
+        for r in published:
+            key = r.schema_id.render()
+            entry = by_schema.setdefault(key, (r.schema_id, []))
+            entry[1].append((r.srn, r.metadata))
+        for schema_id, typed_rows in by_schema.values():
+            await self.metadata_service.insert_many(schema_id, typed_rows)
+
         return published
 
     async def publish_record(self, draft: RecordDraft) -> Record:
         """Create and persist a Record from a draft."""
         logger.info(f"Creating record from {draft.source.type} source: {draft.source.id}")
+
+        schema_id = await self._resolve_schema_id(draft.convention_srn)
 
         record_srn = RecordSRN(
             domain=self.node_domain,
@@ -93,6 +129,7 @@ class RecordService(Service):
             srn=record_srn,
             source=draft.source,
             convention_srn=draft.convention_srn,
+            schema_id=schema_id,
             metadata=draft.metadata,
             published_at=datetime.now(UTC),
         )
@@ -100,11 +137,19 @@ class RecordService(Service):
         await self.record_repo.save(record)
         logger.info(f"Record persisted: {record_srn}")
 
+        # Dual-write typed metadata projection in the same transaction.
+        await self.metadata_service.insert(
+            schema_id=schema_id,
+            record_srn=record_srn,
+            values=draft.metadata,
+        )
+
         published = RecordPublished(
             id=EventId(uuid4()),
             record_srn=record_srn,
             source=draft.source,
             convention_srn=draft.convention_srn,
+            schema_id=schema_id,
             metadata=draft.metadata,
             expected_features=draft.expected_features,
         )

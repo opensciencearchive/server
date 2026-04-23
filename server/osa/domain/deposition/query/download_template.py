@@ -33,9 +33,9 @@ class DownloadTemplateHandler(QueryHandler[DownloadTemplate, TemplateResult]):
         if convention is None:
             raise NotFoundError(f"Convention not found: {cmd.convention_srn}")
 
-        schema = await self.schema_reader.get_schema(convention.schema_srn)
+        schema = await self.schema_reader.get_schema(convention.schema_id)
         if schema is None:
-            raise NotFoundError(f"Schema not found: {convention.schema_srn}")
+            raise NotFoundError(f"Schema not found: {convention.schema_id}")
 
         # Collect ontology terms for fields that reference ontologies
         ontology_terms_by_srn: dict[str, list[str]] = {}

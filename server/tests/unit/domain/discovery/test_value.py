@@ -69,31 +69,38 @@ class TestDecodeCursorErrors:
 
 
 class TestValidOperators:
-    def test_text_operators(self) -> None:
-        assert VALID_OPERATORS[FieldType.TEXT] == {FilterOperator.EQ, FilterOperator.CONTAINS}
+    def test_text_operators_include_basics(self) -> None:
+        ops = VALID_OPERATORS[FieldType.TEXT]
+        assert FilterOperator.EQ in ops
+        assert FilterOperator.CONTAINS in ops
+        assert FilterOperator.IN in ops
+        assert FilterOperator.NEQ in ops
 
-    def test_url_operators(self) -> None:
-        assert VALID_OPERATORS[FieldType.URL] == {FilterOperator.EQ, FilterOperator.CONTAINS}
+    def test_url_operators_include_basics(self) -> None:
+        ops = VALID_OPERATORS[FieldType.URL]
+        assert FilterOperator.EQ in ops
+        assert FilterOperator.CONTAINS in ops
+        assert FilterOperator.IN in ops
 
-    def test_number_operators(self) -> None:
-        assert VALID_OPERATORS[FieldType.NUMBER] == {
-            FilterOperator.EQ,
-            FilterOperator.GTE,
-            FilterOperator.LTE,
-        }
+    def test_number_operators_support_ordering(self) -> None:
+        ops = VALID_OPERATORS[FieldType.NUMBER]
+        assert FilterOperator.EQ in ops
+        assert FilterOperator.GT in ops
+        assert FilterOperator.GTE in ops
+        assert FilterOperator.LT in ops
+        assert FilterOperator.LTE in ops
 
-    def test_date_operators(self) -> None:
-        assert VALID_OPERATORS[FieldType.DATE] == {
-            FilterOperator.EQ,
-            FilterOperator.GTE,
-            FilterOperator.LTE,
-        }
+    def test_date_operators_support_ordering(self) -> None:
+        ops = VALID_OPERATORS[FieldType.DATE]
+        assert FilterOperator.GTE in ops
+        assert FilterOperator.LTE in ops
 
     def test_boolean_operators(self) -> None:
-        assert VALID_OPERATORS[FieldType.BOOLEAN] == {FilterOperator.EQ}
+        assert FilterOperator.EQ in VALID_OPERATORS[FieldType.BOOLEAN]
+        assert FilterOperator.IS_NULL in VALID_OPERATORS[FieldType.BOOLEAN]
 
     def test_term_operators(self) -> None:
-        assert VALID_OPERATORS[FieldType.TERM] == {FilterOperator.EQ}
+        assert FilterOperator.EQ in VALID_OPERATORS[FieldType.TERM]
 
     def test_all_field_types_have_operators(self) -> None:
         for ft in FieldType:

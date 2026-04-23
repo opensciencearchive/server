@@ -4,15 +4,15 @@ from datetime import UTC, datetime
 
 from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.value import FileRequirements
-from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
+from osa.domain.shared.model.srn import ConventionSRN, SchemaId
 
 
 def _make_conv_srn(id: str = "test-conv", version: str = "1.0.0") -> ConventionSRN:
     return ConventionSRN.parse(f"urn:osa:localhost:conv:{id}@{version}")
 
 
-def _make_schema_srn(id: str = "test-schema", version: str = "1.0.0") -> SchemaSRN:
-    return SchemaSRN.parse(f"urn:osa:localhost:schema:{id}@{version}")
+def _make_schema_id(id: str = "test-schema", version: str = "1.0.0") -> SchemaId:
+    return SchemaId.parse(f"{id}@{version}")
 
 
 def _make_file_reqs() -> FileRequirements:
@@ -29,12 +29,12 @@ class TestConventionCreation:
         conv = Convention(
             srn=_make_conv_srn(),
             title="scRNA-seq Submission",
-            schema_srn=_make_schema_srn(),
+            schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
             created_at=datetime.now(UTC),
         )
         assert conv.title == "scRNA-seq Submission"
-        assert conv.schema_srn == _make_schema_srn()
+        assert conv.schema_id == _make_schema_id()
         assert conv.file_requirements.max_count == 5
 
     def test_create_with_description(self):
@@ -42,7 +42,7 @@ class TestConventionCreation:
             srn=_make_conv_srn(),
             title="Test",
             description="A test convention",
-            schema_srn=_make_schema_srn(),
+            schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
             created_at=datetime.now(UTC),
         )
@@ -52,7 +52,7 @@ class TestConventionCreation:
         conv = Convention(
             srn=_make_conv_srn(),
             title="Test",
-            schema_srn=_make_schema_srn(),
+            schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
             hooks=[],
             created_at=datetime.now(UTC),
@@ -65,7 +65,7 @@ class TestConventionImmutability:
         conv = Convention(
             srn=_make_conv_srn("my-conv", "2.0.0"),
             title="Test",
-            schema_srn=_make_schema_srn(),
+            schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
             created_at=datetime.now(UTC),
         )

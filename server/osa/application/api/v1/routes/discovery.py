@@ -6,10 +6,7 @@ from dishka.integrations.fastapi import DishkaRoute, FromDishka
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from osa.domain.discovery.model.value import (
-    Filter,
-    SortOrder,
-)
+from osa.domain.discovery.model.value import FilterExpr, SortOrder
 from osa.domain.discovery.query.get_feature_catalog import (
     GetFeatureCatalog,
     GetFeatureCatalogHandler,
@@ -25,6 +22,8 @@ from osa.domain.discovery.query.search_records import (
     SearchRecordsHandler,
     SearchRecordsResult,
 )
+from osa.domain.shared.error import ValidationError
+from osa.domain.shared.model.srn import ConventionSRN, SchemaId
 
 router = APIRouter(
     prefix="/discovery",
@@ -37,7 +36,11 @@ router = APIRouter(
 
 
 class RecordSearchRequest(BaseModel):
-    filters: list[Filter] = []
+    schema: str | None = None
+    """Short-form schema identity: ``"<id>@<semver>"`` (e.g. ``"pdb-structure@1.0.0"``)."""
+
+    convention_srn: ConventionSRN | None = None
+    filter: FilterExpr | None = None
     q: str | None = None
     sort: str = "published_at"
     order: SortOrder = SortOrder.DESC
@@ -56,7 +59,10 @@ class FeatureCatalogResponse(BaseModel):
 
 
 class FeatureSearchRequest(BaseModel):
-    filters: list[Filter] = []
+    schema: str | None = None
+    """Short-form schema identity, optional. See RecordSearchRequest.schema."""
+
+    filter: FilterExpr | None = None
     record_srn: str | None = None
     sort: str = "id"
     order: SortOrder = SortOrder.DESC
@@ -70,6 +76,24 @@ class FeatureSearchResponse(BaseModel):
     has_more: bool
 
 
+def _parse_schema(value: str | None) -> SchemaId | None:
+    if value is None:
+        return None
+    if "@" not in value:
+        raise ValidationError(
+            f"Schema {value!r} must be fully qualified as '<id>@<semver>' "
+            "(e.g. 'pdb-structure@1.0.0'). Family-level scoping "
+            "(id alone, resolving to the latest version across a schema family) "
+            "is planned but not yet supported.",
+            field="schema",
+            code="cross_scope_not_yet_supported",
+        )
+    try:
+        return SchemaId.parse(value)
+    except ValueError as exc:
+        raise ValidationError(str(exc), field="schema") from exc
+
+
 # ── Routes ──
 
 
@@ -81,7 +105,9 @@ async def search_records(
     """Search and filter published records."""
     result: SearchRecordsResult = await handler.run(
         SearchRecords(
-            filters=body.filters,
+            filter_expr=body.filter,
+            schema_id=_parse_schema(body.schema),
+            convention_srn=body.convention_srn,
             q=body.q,
             sort=body.sort,
             order=body.order,
@@ -115,7 +141,8 @@ async def search_features(
     result: SearchFeaturesResult = await handler.run(
         SearchFeatures(
             hook_name=hook_name,
-            filters=body.filters,
+            filter_expr=body.filter,
+            schema_id=_parse_schema(body.schema),
             record_srn=body.record_srn,
             sort=body.sort,
             order=body.order,

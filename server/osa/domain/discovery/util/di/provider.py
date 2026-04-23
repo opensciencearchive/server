@@ -2,6 +2,7 @@
 
 from dishka import provide
 
+from osa.config import Config
 from osa.domain.discovery.port.field_definition_reader import FieldDefinitionReader
 from osa.domain.discovery.port.read_store import DiscoveryReadStore
 from osa.domain.discovery.query.get_feature_catalog import GetFeatureCatalogHandler
@@ -18,8 +19,13 @@ class DiscoveryProvider(Provider):
         self,
         read_store: DiscoveryReadStore,
         field_reader: FieldDefinitionReader,
+        config: Config,
     ) -> DiscoveryService:
-        return DiscoveryService(read_store=read_store, field_reader=field_reader)
+        return DiscoveryService(
+            read_store=read_store,
+            field_reader=field_reader,
+            config=config,
+        )
 
     # Query Handlers
     search_records_handler = provide(SearchRecordsHandler, scope=Scope.UOW)

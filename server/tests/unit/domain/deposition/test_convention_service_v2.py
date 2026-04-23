@@ -15,7 +15,7 @@ from osa.domain.shared.model.hook import (
     TableFeatureSpec,
 )
 from osa.domain.shared.model.source import IngesterDefinition
-from osa.domain.shared.model.srn import Domain, SchemaSRN
+from osa.domain.shared.model.srn import Domain, SchemaId, SchemaIdentifier
 
 
 def _make_field_defs() -> list[FieldDefinition]:
@@ -78,12 +78,13 @@ def _make_service(
     # Default: create_schema returns a Schema-like obj with .srn
     if not schema_service:
         mock_schema = AsyncMock()
-        mock_schema.srn = SchemaSRN.parse("urn:osa:localhost:schema:testschema12345678@1.0.0")
+        mock_schema.id = SchemaId.parse("testschema12345678@1.0.0")
         mock_schema_service.create_schema.return_value = mock_schema
 
     return ConventionService(
         convention_repo=conv_repo or AsyncMock(),
         schema_service=mock_schema_service,
+        metadata_service=AsyncMock(),
         outbox=outbox or AsyncMock(),
         node_domain=Domain("localhost"),
     )
@@ -94,11 +95,12 @@ class TestCreateConventionWithInlineSchema:
     async def test_creates_schema_from_field_definitions(self):
         schema_service = AsyncMock()
         mock_schema = AsyncMock()
-        mock_schema.srn = SchemaSRN.parse("urn:osa:localhost:schema:testschema12345678@1.0.0")
+        mock_schema.id = SchemaId.parse("testschema12345678@1.0.0")
         schema_service.create_schema.return_value = mock_schema
 
         service = _make_service(schema_service=schema_service)
         await service.create_convention(
+            id=SchemaIdentifier("test-schema"),
             title="PDB Structures",
             version="1.0.0",
             schema=_make_field_defs(),
@@ -112,27 +114,29 @@ class TestCreateConventionWithInlineSchema:
         assert len(call_kwargs[1]["fields"]) == 2
 
     @pytest.mark.asyncio
-    async def test_convention_references_created_schema_srn(self):
+    async def test_convention_references_created_schema_id(self):
         schema_service = AsyncMock()
-        schema_srn = SchemaSRN.parse("urn:osa:localhost:schema:created123456789@1.0.0")
+        schema_id = SchemaId.parse("created123456789@1.0.0")
         mock_schema = AsyncMock()
-        mock_schema.srn = schema_srn
+        mock_schema.id = schema_id
         schema_service.create_schema.return_value = mock_schema
 
         service = _make_service(schema_service=schema_service)
         result = await service.create_convention(
+            id=SchemaIdentifier("test-schema"),
             title="Test",
             version="1.0.0",
             schema=_make_field_defs(),
             file_requirements=_make_file_reqs(),
         )
-        assert result.schema_srn == schema_srn
+        assert result.schema_id == schema_id
 
     @pytest.mark.asyncio
     async def test_convention_saves_ingester_definition(self):
         service = _make_service()
         ingester = _make_ingester_def()
         result = await service.create_convention(
+            id=SchemaIdentifier("test-schema"),
             title="With Ingester",
             version="1.0.0",
             schema=_make_field_defs(),
@@ -148,6 +152,7 @@ class TestCreateConventionWithInlineSchema:
     async def test_convention_ingester_defaults_to_none(self):
         service = _make_service()
         result = await service.create_convention(
+            id=SchemaIdentifier("test-schema"),
             title="No Ingester",
             version="1.0.0",
             schema=_make_field_defs(),
@@ -161,6 +166,7 @@ class TestCreateConventionWithInlineSchema:
         service = _make_service(outbox=outbox)
         hooks = [_make_hook_def()]
         await service.create_convention(
+            id=SchemaIdentifier("test-schema"),
             title="With Hooks",
             version="1.0.0",
             schema=_make_field_defs(),
@@ -178,6 +184,7 @@ class TestConventionRegisteredEvent:
         outbox = AsyncMock()
         service = _make_service(outbox=outbox)
         result = await service.create_convention(
+            id=SchemaIdentifier("test-schema"),
             title="With Source",
             version="1.0.0",
             schema=_make_field_defs(),
@@ -194,6 +201,7 @@ class TestConventionRegisteredEvent:
         outbox = AsyncMock()
         service = _make_service(outbox=outbox)
         result = await service.create_convention(
+            id=SchemaIdentifier("test-schema"),
             title="No Source",
             version="1.0.0",
             schema=_make_field_defs(),

@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from osa.domain.feature.port.feature_store import FeatureStore
 from osa.domain.shared.error import ConflictError, ValidationError
 from osa.domain.shared.model.hook import ColumnDef
+from osa.infrastructure.persistence.api_naming import feature_pg_schema, feature_pg_table
 from osa.infrastructure.persistence.feature_table import (
-    FEATURES_SCHEMA,
     FeatureSchema,
     build_feature_table,
 )
@@ -48,7 +48,7 @@ class PostgresFeatureStore(FeatureStore):
 
         async with self._engine.begin() as conn:
             # Ensure the features schema exists
-            await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{FEATURES_SCHEMA}"'))
+            await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{feature_pg_schema()}"'))
 
             # Check for existing table in catalog — duplicate is a hard error
             existing = await conn.execute(
@@ -63,12 +63,12 @@ class PostgresFeatureStore(FeatureStore):
             schema = FeatureSchema(columns=columns)
             table = build_feature_table(hook_name, schema)
 
-            # Create table
+            # Create table (FK to records.srn is declared inline on the column)
             await conn.run_sync(table.metadata.create_all, checkfirst=False)
             await conn.execute(
                 feature_tables_table.insert().values(
                     hook_name=hook_name,
-                    pg_table=hook_name,
+                    pg_table=feature_pg_table(hook_name),
                     feature_schema=schema.model_dump(),
                     schema_version=1,
                     created_at=datetime.now(UTC),
@@ -99,11 +99,13 @@ class PostgresFeatureStore(FeatureStore):
         # Bulk insert in chunks of 1000
         chunk_size = 1000
         total = 0
+        pg_schema = feature_pg_schema()
+        pg_table = feature_pg_table(hook_name)
         async with self._engine.begin() as conn:
             # Reflect the actual table to get correct column types for casts
-            metadata = sa.MetaData(schema=FEATURES_SCHEMA)
-            await conn.run_sync(metadata.reflect, only=[hook_name])
-            table = metadata.tables[f"{FEATURES_SCHEMA}.{hook_name}"]
+            metadata = sa.MetaData(schema=pg_schema)
+            await conn.run_sync(metadata.reflect, only=[pg_table])
+            table = metadata.tables[f"{pg_schema}.{pg_table}"]
 
             for i in range(0, len(enriched_rows), chunk_size):
                 chunk = enriched_rows[i : i + chunk_size]

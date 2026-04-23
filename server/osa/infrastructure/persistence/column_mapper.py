@@ -27,7 +27,6 @@ def map_column(col_def: ColumnDef) -> sa.Column:
     type_factory = _TYPE_MAP.get(key)
 
     if type_factory is None:
-        # Fall back to base type without format
         type_factory = _TYPE_MAP.get((col_def.json_type, None), sa.Text)
 
     sa_type = type_factory()

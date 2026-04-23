@@ -1,4 +1,4 @@
-"""DiscoveryReadStore port — read-only access to records and feature data."""
+"""DiscoveryReadStore port — read-only access to records, features, metadata."""
 
 from __future__ import annotations
 
@@ -8,49 +8,43 @@ if TYPE_CHECKING:
     from osa.domain.discovery.model.value import (
         FeatureCatalogEntry,
         FeatureRow,
-        Filter,
+        FilterExpr,
         RecordSummary,
         SortOrder,
     )
     from osa.domain.semantics.model.value import FieldType
-    from osa.domain.shared.model.srn import RecordSRN
+    from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaId
 
 
 class DiscoveryReadStore(Protocol):
     async def search_records(
         self,
-        filters: list[Filter],
+        filter_expr: "FilterExpr | None",
+        schema_id: "SchemaId | None",
+        convention_srn: "ConventionSRN | None",
         text_fields: list[str],
         q: str | None,
         sort: str,
-        order: SortOrder,
+        order: "SortOrder",
         cursor: dict | None,
         limit: int,
-        field_types: dict[str, FieldType] | None = None,
-    ) -> list[RecordSummary]:
-        """Search and filter published records."""
+        field_types: "dict[str, FieldType] | None" = None,
+    ) -> "list[RecordSummary]":
+        """Search published records with a compound filter."""
         ...
 
-    async def get_feature_catalog(self) -> list[FeatureCatalogEntry]:
-        """List all feature tables with column schemas and record counts."""
-        ...
+    async def get_feature_catalog(self) -> "list[FeatureCatalogEntry]": ...
 
-    async def get_feature_table_schema(self, hook_name: str) -> FeatureCatalogEntry | None:
-        """Look up a single feature table's schema by hook name.
-
-        Returns None if the hook_name is not found.
-        """
-        ...
+    async def get_feature_table_schema(self, hook_name: str) -> "FeatureCatalogEntry | None": ...
 
     async def search_features(
         self,
         hook_name: str,
-        filters: list[Filter],
-        record_srn: RecordSRN | None,
+        filter_expr: "FilterExpr | None",
+        schema_id: "SchemaId | None",
+        record_srn: "RecordSRN | None",
         sort: str,
-        order: SortOrder,
+        order: "SortOrder",
         cursor: dict | None,
         limit: int,
-    ) -> list[FeatureRow]:
-        """Search and filter feature rows."""
-        ...
+    ) -> "list[FeatureRow]": ...

@@ -12,12 +12,12 @@ from osa.domain.semantics.model.value import (
     FieldType,
     TermConstraints,
 )
-from osa.domain.shared.model.srn import OntologySRN, SchemaSRN
+from osa.domain.shared.model.srn import OntologySRN, SchemaId
 from osa.infrastructure.persistence.adapter.spreadsheet import OpenpyxlSpreadsheetAdapter
 
 
-def _make_schema_srn() -> SchemaSRN:
-    return SchemaSRN.parse("urn:osa:localhost:schema:test@1.0.0")
+def _make_schema_id() -> SchemaId:
+    return SchemaId.parse("test@1.0.0")
 
 
 def _make_ontology_srn() -> OntologySRN:
@@ -49,7 +49,7 @@ def _make_term_field(
 
 def _make_schema(fields: list[FieldDefinition] | None = None) -> Schema:
     return Schema(
-        srn=_make_schema_srn(),
+        id=_make_schema_id(),
         title="Test Schema",
         fields=fields or [_make_text_field()],
         created_at=datetime.now(UTC),

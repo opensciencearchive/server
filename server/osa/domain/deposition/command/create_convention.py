@@ -9,11 +9,19 @@ from osa.domain.shared.authorization.gate import public
 from osa.domain.shared.command import Command, CommandHandler, Result
 from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.source import IngesterDefinition
-from osa.domain.shared.model.srn import ConventionSRN, SchemaSRN
+from osa.domain.shared.model.srn import ConventionSRN, SchemaId, SchemaIdentifier
 
 
 class CreateConvention(Command):
     model_config = ConfigDict(populate_by_name=True)
+
+    id: SchemaIdentifier
+    """Schema slug — becomes the ``<id>`` in ``schema_id = <id>@<version>``.
+
+    A convention is a bundle of (schema + validators + file requirements), and
+    the caller supplies the slug of the embedded schema here. The convention
+    itself gets an opaque server-generated SRN.
+    """
 
     title: str
     version: str
@@ -28,7 +36,7 @@ class ConventionCreated(Result):
     srn: ConventionSRN
     title: str
     description: str | None
-    schema_srn: SchemaSRN
+    schema_id: SchemaId
     created_at: datetime
 
 
@@ -38,6 +46,7 @@ class CreateConventionHandler(CommandHandler[CreateConvention, ConventionCreated
 
     async def run(self, cmd: CreateConvention) -> ConventionCreated:
         convention = await self.convention_service.create_convention(
+            id=cmd.id,
             title=cmd.title,
             version=cmd.version,
             schema=cmd.schema_fields,
@@ -50,6 +59,6 @@ class CreateConventionHandler(CommandHandler[CreateConvention, ConventionCreated
             srn=convention.srn,
             title=convention.title,
             description=convention.description,
-            schema_srn=convention.schema_srn,
+            schema_id=convention.schema_id,
             created_at=convention.created_at,
         )
