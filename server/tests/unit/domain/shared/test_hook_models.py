@@ -359,3 +359,38 @@ class TestNameValidation:
 
             col = ColumnDef(name=name, json_type="number", required=True)
             assert col.name == name
+
+    def test_hook_name_accepts_40_chars(self):
+        """Hook names must fit in derived identifiers like
+        ``fk_features_{name}_record_srn`` — 23 chars overhead + up to 40-char
+        hook = 63-char max, which is PG's identifier limit."""
+        from osa.domain.shared.model.hook import HookDefinition, OciConfig, TableFeatureSpec
+
+        forty = "a" + "b" * 39
+        hook = HookDefinition(
+            name=forty,
+            runtime=OciConfig(image="img:v1", digest="sha256:abc"),
+            feature=TableFeatureSpec(cardinality="one", columns=[]),
+        )
+        assert hook.name == forty
+
+    def test_hook_name_rejects_over_40_chars(self):
+        """41+ char names would produce an FK name exceeding PG's 63-char
+        identifier limit."""
+        from osa.domain.shared.model.hook import HookDefinition, OciConfig, TableFeatureSpec
+
+        with pytest.raises(ValidationError):
+            HookDefinition(
+                name="a" + "b" * 40,  # 41 chars
+                runtime=OciConfig(image="img:v1", digest="sha256:abc"),
+                feature=TableFeatureSpec(cardinality="one", columns=[]),
+            )
+
+    def test_column_name_still_accepts_63_chars(self):
+        """ColumnDef uses plain PgIdentifier — columns don't compose into
+        longer derived identifiers, so the full 63-char PG limit is fine."""
+        from osa.domain.shared.model.hook import ColumnDef
+
+        sixty_three = "a" + "b" * 62
+        col = ColumnDef(name=sixty_three, json_type="number", required=True)
+        assert col.name == sixty_three
