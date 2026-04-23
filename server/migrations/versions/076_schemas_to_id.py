@@ -8,6 +8,10 @@ Changes:
 - ``schemas.srn`` → ``schemas.id`` + ``schemas.version``. Composite PK.
 - ``conventions.schema_srn`` → ``conventions.schema_id`` + ``conventions.schema_version``.
 
+Greenfield only: no backfill from the old URN columns. If this runs against
+a populated DB it fails at ``SET NOT NULL`` with a clear constraint error,
+which is the correct signal that the data predates this schema.
+
 Revision ID: 076_schemas_to_id
 Revises: 076_metadata_catalog
 Create Date: 2026-04-20
@@ -30,14 +34,6 @@ def upgrade() -> None:
     # schemas: drop old SRN PK, add id + version, recompose PK.
     op.add_column("schemas", sa.Column("id", sa.String(), nullable=True))
     op.add_column("schemas", sa.Column("version", sa.String(), nullable=True))
-    op.execute(
-        """
-        UPDATE schemas
-        SET
-            id = split_part(split_part(srn, ':', 5), '@', 1),
-            version = split_part(srn, '@', 2)
-        """
-    )
     op.alter_column("schemas", "id", nullable=False)
     op.alter_column("schemas", "version", nullable=False)
     op.drop_constraint("schemas_pkey", "schemas", type_="primary")
@@ -48,14 +44,6 @@ def upgrade() -> None:
     # conventions: split schema_srn into schema_id + schema_version.
     op.add_column("conventions", sa.Column("schema_id", sa.String(), nullable=True))
     op.add_column("conventions", sa.Column("schema_version", sa.String(), nullable=True))
-    op.execute(
-        """
-        UPDATE conventions
-        SET
-            schema_id = split_part(split_part(schema_srn, ':', 5), '@', 1),
-            schema_version = split_part(schema_srn, '@', 2)
-        """
-    )
     op.alter_column("conventions", "schema_id", nullable=False)
     op.alter_column("conventions", "schema_version", nullable=False)
     op.drop_column("conventions", "schema_srn")
@@ -64,12 +52,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     # conventions back to schema_srn
     op.add_column("conventions", sa.Column("schema_srn", sa.String(), nullable=True))
-    op.execute(
-        """
-        UPDATE conventions
-        SET schema_srn = 'urn:osa:localhost:schema:' || schema_id || '@' || schema_version
-        """
-    )
     op.alter_column("conventions", "schema_srn", nullable=False)
     op.drop_column("conventions", "schema_version")
     op.drop_column("conventions", "schema_id")
@@ -78,12 +60,6 @@ def downgrade() -> None:
     op.drop_index("idx_schemas_id", table_name="schemas")
     op.drop_constraint("schemas_pkey", "schemas", type_="primary")
     op.add_column("schemas", sa.Column("srn", sa.String(), nullable=True))
-    op.execute(
-        """
-        UPDATE schemas
-        SET srn = 'urn:osa:localhost:schema:' || id || '@' || version
-        """
-    )
     op.alter_column("schemas", "srn", nullable=False)
     op.create_primary_key("schemas_pkey", "schemas", ["srn"])
     op.drop_column("schemas", "version")

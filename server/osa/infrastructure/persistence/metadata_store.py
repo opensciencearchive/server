@@ -8,6 +8,7 @@ shape without reflection.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, date, datetime
 from typing import Any, Literal, Sequence
 
@@ -32,6 +33,20 @@ from osa.infrastructure.persistence.tables import metadata_tables_table
 
 
 _JsonType = Literal["string", "number", "integer", "boolean", "array", "object"]
+
+# Defense-in-depth: validate any string interpolated into a raw DDL statement.
+# ``ColumnDef.name`` is declared as ``PgIdentifier`` at the Pydantic layer but
+# we re-check here because a) catalog rows round-trip through JSON and a bad
+# actor with write access to metadata_tables could smuggle a malicious name
+# through, and b) this function's contract should not rely on upstream
+# validators that might be refactored away.
+_PG_IDENT_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+
+
+def _safe_ident(name: str) -> str:
+    if not _PG_IDENT_RE.match(name):
+        raise ValidationError(f"Refusing to interpolate unsafe PG identifier {name!r} into DDL")
+    return name
 
 
 _JSON_TYPE_MAP: dict[FieldType, tuple[_JsonType | None, str | None]] = {
@@ -82,7 +97,22 @@ class PostgresMetadataStore(MetadataStore):
         metadata_schema = MetadataSchema(columns=columns)
 
         async with self._engine.begin() as conn:
-            await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{metadata_pg_schema()}"'))
+            # Note: the ``metadata`` PG schema is created by migration
+            # ``076_add_metadata_schema_and_catalog`` and is a precondition
+            # for this store. We don't run ``CREATE SCHEMA IF NOT EXISTS``
+            # here because it races on ``pg_namespace`` under concurrency,
+            # and the migration makes it unnecessary.
+
+            # Serialise concurrent ensure_table() calls for the same
+            # (schema_id, major) pair. Without this lock, two conventions
+            # registering simultaneously both pass the "does it exist?"
+            # check and race on CREATE TABLE, causing the loser to fail
+            # with DuplicateTable. The advisory lock is released at
+            # transaction commit.
+            await conn.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                {"key": f"{id_str}@v{major}"},
+            )
 
             existing = (
                 (
@@ -268,12 +298,20 @@ def _validate_additive(existing: Sequence[ColumnDef], incoming: Sequence[ColumnD
 
 
 def _alter_add_column_stmt(pg_table: str, col_def: ColumnDef) -> str:
-    """SQL string to ALTER TABLE ADD COLUMN for a single column definition."""
+    """SQL string to ALTER TABLE ADD COLUMN for a single column definition.
+
+    Both ``pg_table`` and ``col_def.name`` are interpolated into raw SQL, so
+    they are strictly validated against the PG identifier regex first — any
+    attempt to smuggle a ``"`` through would otherwise break the quoting and
+    inject arbitrary DDL.
+    """
     sql_type = _column_type_sql(map_column(col_def).type)
     null_sql = "" if not col_def.required else " NOT NULL"
+    safe_table = _safe_ident(pg_table)
+    safe_col = _safe_ident(col_def.name)
     return (
-        f'ALTER TABLE "{metadata_pg_schema()}"."{pg_table}" '
-        f'ADD COLUMN IF NOT EXISTS "{col_def.name}" {sql_type}{null_sql}'
+        f'ALTER TABLE "{metadata_pg_schema()}"."{safe_table}" '
+        f'ADD COLUMN IF NOT EXISTS "{safe_col}" {sql_type}{null_sql}'
     )
 
 

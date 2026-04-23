@@ -1,11 +1,12 @@
 """076_add_records_schema_id
 
 Add ``records.schema_id`` + ``records.schema_version`` so a Record's typed
-linkage is first-class (FR-008). Backfill from the linked convention's
-``schema_id`` / ``schema_version`` columns, then tighten to NOT NULL.
+linkage is first-class (FR-008).
 
-Greenfield deployments with no records will skip the backfill and go straight
-to NOT NULL.
+Greenfield only: no backfill from the linked convention. If this runs
+against a populated ``records`` table it fails at ``SET NOT NULL`` with a
+clear constraint error, which is the correct signal that the data predates
+this schema.
 
 Revision ID: 076_records_schema_srn
 Revises: 076_schemas_to_id
@@ -28,21 +29,6 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.add_column("records", sa.Column("schema_id", sa.Text(), nullable=True))
     op.add_column("records", sa.Column("schema_version", sa.Text(), nullable=True))
-
-    # Backfill from the owning convention's schema_id/schema_version
-    # (populated by ``076_schemas_to_id`` which ran just before this).
-    op.execute(
-        """
-        UPDATE records r
-        SET
-            schema_id = c.schema_id,
-            schema_version = c.schema_version
-        FROM conventions c
-        WHERE c.srn = r.convention_srn
-          AND r.schema_id IS NULL
-        """
-    )
-
     op.alter_column("records", "schema_id", nullable=False)
     op.alter_column("records", "schema_version", nullable=False)
     op.create_index("idx_records_schema_id", "records", ["schema_id"])

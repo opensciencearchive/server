@@ -159,6 +159,60 @@ class TestEnsureTable:
 
 
 @pytest.mark.asyncio
+class TestDdlInjectionGuard:
+    """Defense-in-depth: raw DDL interpolation must refuse bad identifiers."""
+
+    async def test_ddl_injection_in_field_name_rejected(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession
+    ):
+        """A field name with a quote or injection payload must never reach
+        the ALTER TABLE SQL. ``_safe_ident`` rejects at the DDL boundary."""
+        from osa.infrastructure.persistence.metadata_store import _safe_ident
+
+        with pytest.raises(ValidationError, match="unsafe PG identifier"):
+            _safe_ident('species"; DROP TABLE records; --')
+        with pytest.raises(ValidationError, match="unsafe PG identifier"):
+            _safe_ident("has-hyphen")
+        with pytest.raises(ValidationError, match="unsafe PG identifier"):
+            _safe_ident("1starts_with_digit")
+        with pytest.raises(ValidationError, match="unsafe PG identifier"):
+            _safe_ident("")
+        # Valid identifiers pass through.
+        assert _safe_ident("species") == "species"
+        assert _safe_ident("bio_sample_v1") == "bio_sample_v1"
+
+
+@pytest.mark.asyncio
+class TestConcurrentEnsureTable:
+    """TOCTOU defense: two ensure_table calls for the same schema must not
+    both try to CREATE TABLE. The advisory lock serialises them; one wins,
+    the other sees the catalog row and no-ops."""
+
+    async def test_concurrent_ensure_table_does_not_raise(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession
+    ):
+        import asyncio
+
+        store_a = PostgresMetadataStore(pg_engine, pg_session)
+        store_b = PostgresMetadataStore(pg_engine, pg_session)
+        # Run both concurrently. Without the advisory lock, the second
+        # would either race on SELECT and raise DuplicateTable on CREATE,
+        # or raise on the catalog INSERT unique violation.
+        await asyncio.gather(
+            store_a.ensure_table(SCHEMA_V1, _fields_v1()),
+            store_b.ensure_table(SCHEMA_V1, _fields_v1()),
+        )
+        async with pg_engine.begin() as conn:
+            count = (
+                await conn.execute(
+                    text("SELECT COUNT(*) FROM metadata_tables WHERE schema_id = :id"),
+                    {"id": SCHEMA_ID},
+                )
+            ).scalar()
+        assert count == 1
+
+
+@pytest.mark.asyncio
 class TestInsert:
     async def test_insert_typed_row(self, pg_engine: AsyncEngine, pg_session: AsyncSession):
         store = PostgresMetadataStore(pg_engine, pg_session)

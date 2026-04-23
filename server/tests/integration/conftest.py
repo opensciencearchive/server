@@ -96,6 +96,11 @@ async def pg_session(pg_engine: AsyncEngine):
         )
         await conn.execute(text('DROP SCHEMA IF EXISTS "features" CASCADE'))
         await conn.execute(text('DROP SCHEMA IF EXISTS "metadata" CASCADE'))
+        # Re-create empty ``metadata`` schema. Production relies on the
+        # migration having created it; tests need to restore that
+        # invariant after the DROP above.
+        await conn.execute(text('CREATE SCHEMA "metadata"'))
+        await conn.execute(text('CREATE SCHEMA "features"'))
 
     # Re-seed system user after truncate
     await ensure_system_user(pg_engine)
