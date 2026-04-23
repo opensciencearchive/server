@@ -563,7 +563,8 @@ class PostgresDiscoveryReadStore:
                     )
                 col = metadata_t.c[expr.field.field]
                 return _apply_scalar_op(col, expr.op, expr.value)
-            assert isinstance(expr.field, FeatureFieldRef)
+            if not isinstance(expr.field, FeatureFieldRef):
+                raise TypeError(f"Unexpected field ref type: {type(expr.field).__name__}")
             if expr.field.hook == this_hook:
                 col = this_ft.c[expr.field.column]
             else:
@@ -640,7 +641,8 @@ class PostgresDiscoveryReadStore:
             col = metadata_t.c[predicate.field.field]
             return _apply_scalar_op(col, predicate.op, predicate.value)
 
-        assert isinstance(predicate.field, FeatureFieldRef)
+        if not isinstance(predicate.field, FeatureFieldRef):
+            raise TypeError(f"Unexpected field ref type: {type(predicate.field).__name__}")
         tbl = feature_joins.get(predicate.field.hook)
         if tbl is None:
             raise ValidationError(

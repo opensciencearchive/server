@@ -3,7 +3,8 @@
 Feature 076 adds ``schema_id`` + ``schema_version`` columns so a Record's
 typed linkage is first-class. ``metadata`` remains the canonical JSONB store;
 the typed ``metadata.<schema_slug>_v<major>`` table is a discovery-optimized
-projection maintained asynchronously by ``InsertRecordMetadata``.
+projection written synchronously alongside ``records`` in the same UoW
+transaction by ``RecordService.publish_record`` / ``bulk_publish``.
 """
 
 from datetime import datetime
