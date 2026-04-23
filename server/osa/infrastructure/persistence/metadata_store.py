@@ -248,7 +248,7 @@ class PostgresMetadataStore(MetadataStore):
                 col = col_by_name.get(k)
                 if col is None:
                     continue
-                payload[k] = _coerce_value(col, v)
+                payload[k] = _coerce_value(col, v, record_srn=str(record_srn))
             payload["record_srn"] = str(record_srn)
             payloads.append(payload)
 
@@ -323,19 +323,40 @@ def _alter_add_column_stmt(pg_table: str, col_def: ColumnDef) -> str:
     )
 
 
-def _coerce_value(col: ColumnDef, value: Any) -> Any:
+def _coerce_value(col: ColumnDef, value: Any, *, record_srn: str | None = None) -> Any:
     """Coerce a JSONB-read value to match its typed PG column.
 
     ``records.metadata`` is JSONB, so date/datetime fields come back as ISO
     strings. asyncpg won't auto-parse those for DATE / TIMESTAMP columns —
     we parse here based on the declared column format.
+
+    Malformed ISO strings are re-raised as ``ValidationError`` so the API
+    surfaces them as 400 with field context, not a bare 500.
     """
     if value is None:
         return None
     if col.json_type == "string" and col.format == "date":
-        return value if isinstance(value, date) else date.fromisoformat(value)
+        if isinstance(value, date):
+            return value
+        try:
+            return date.fromisoformat(value)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(
+                f"Field {col.name!r} expects an ISO-8601 date, got {value!r}"
+                + (f" (record {record_srn})" if record_srn else ""),
+                field=col.name,
+            ) from exc
     if col.json_type == "string" and col.format == "date-time":
-        return value if isinstance(value, datetime) else datetime.fromisoformat(value)
+        if isinstance(value, datetime):
+            return value
+        try:
+            return datetime.fromisoformat(value)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(
+                f"Field {col.name!r} expects an ISO-8601 date-time, got {value!r}"
+                + (f" (record {record_srn})" if record_srn else ""),
+                field=col.name,
+            ) from exc
     return value
 
 
