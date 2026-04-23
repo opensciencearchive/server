@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     and_,
     cast,
+    false,
     func,
     literal,
     not_,
@@ -527,15 +528,19 @@ class PostgresDiscoveryReadStore:
                 ]
             )
         if isinstance(expr, Not):
-            return not_(
-                self._compile_filter_for_records(
-                    expr.operand,
-                    records_t=records_t,
-                    metadata_t=metadata_t,
-                    metadata_schema=metadata_schema,
-                    feature_joins=feature_joins,
-                )
+            inner = self._compile_filter_for_records(
+                expr.operand,
+                records_t=records_t,
+                metadata_t=metadata_t,
+                metadata_schema=metadata_schema,
+                feature_joins=feature_joins,
             )
+            # Coalesce NULL → FALSE before negating so records with NULL
+            # feature/metadata values (including rows missing from outer-
+            # joined feature tables) survive a NOT predicate. Without this,
+            # ``NOT (score = 5)`` reads NULL for records with no score and
+            # three-valued logic silently drops them.
+            return not_(func.coalesce(inner, false()))
         raise ValidationError(f"Unsupported filter node: {type(expr).__name__}")
 
     def _compile_filter_for_features(
@@ -600,16 +605,18 @@ class PostgresDiscoveryReadStore:
                 ]
             )
         if isinstance(expr, Not):
-            return not_(
-                self._compile_filter_for_features(
-                    expr.operand,
-                    this_hook=this_hook,
-                    this_ft=this_ft,
-                    metadata_t=metadata_t,
-                    metadata_schema=metadata_schema,
-                    feature_joins=feature_joins,
-                )
+            inner = self._compile_filter_for_features(
+                expr.operand,
+                this_hook=this_hook,
+                this_ft=this_ft,
+                metadata_t=metadata_t,
+                metadata_schema=metadata_schema,
+                feature_joins=feature_joins,
             )
+            # See ``_compile_filter_for_records`` — NULL → FALSE coalesce so
+            # NOT over outer-joined feature / optional metadata columns
+            # includes records with missing values.
+            return not_(func.coalesce(inner, false()))
         raise ValidationError(f"Unsupported filter node: {type(expr).__name__}")
 
     def _compile_predicate(
@@ -649,7 +656,12 @@ def _apply_scalar_op(col: Any, op: FilterOperator, value: Any) -> Any:
     if op == FilterOperator.EQ:
         return col == value
     if op == FilterOperator.NEQ:
-        return col != value
+        # Feature tables are outer-joined, so a missing feature row makes
+        # ``col`` NULL. Plain ``col != value`` yields NULL (falsy) and
+        # silently excludes those records from the result. Users reading
+        # ``!= X`` expect "anything except X, including missing", so treat
+        # NULL as non-equal explicitly.
+        return or_(col != value, col.is_(None))
     if op == FilterOperator.GT:
         return col > value
     if op == FilterOperator.GTE:

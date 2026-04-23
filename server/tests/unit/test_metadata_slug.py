@@ -2,7 +2,11 @@
 
 import pytest
 
-from osa.infrastructure.persistence.metadata_table import schema_slug
+from osa.infrastructure.persistence.metadata_table import (
+    PG_IDENT_MAX_LEN,
+    check_pg_table_name,
+    schema_slug,
+)
 
 
 class TestSchemaSlug:
@@ -38,3 +42,22 @@ class TestSchemaSlug:
     def test_rejects_title_starting_with_digit(self):
         with pytest.raises(ValueError):
             schema_slug("1bio_sample")
+
+    def test_accepts_max_length_schema_identifier(self):
+        """SchemaIdentifier allows 64-char ids; slug must not reject them."""
+        long_id = "a" + "b" * 63  # 64 chars, matches SchemaIdentifier upper bound
+        assert schema_slug(long_id) == long_id
+
+    def test_rejects_over_max_length(self):
+        with pytest.raises(ValueError):
+            schema_slug("a" + "b" * 64)  # 65 chars
+
+
+class TestCheckPgTableName:
+    def test_accepts_table_name_at_pg_limit(self):
+        name = "a" * PG_IDENT_MAX_LEN
+        check_pg_table_name(name)  # no raise
+
+    def test_rejects_table_name_over_pg_limit(self):
+        with pytest.raises(ValueError, match="exceeds PG's"):
+            check_pg_table_name("a" * (PG_IDENT_MAX_LEN + 1))

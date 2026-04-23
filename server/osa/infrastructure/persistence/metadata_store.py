@@ -27,6 +27,7 @@ from osa.infrastructure.persistence.column_mapper import map_column
 from osa.infrastructure.persistence.metadata_table import (
     MetadataSchema,
     build_metadata_table,
+    check_pg_table_name,
     schema_slug,
 )
 from osa.infrastructure.persistence.tables import metadata_tables_table
@@ -90,8 +91,15 @@ class PostgresMetadataStore(MetadataStore):
     ) -> None:
         id_str = schema_id.id.root
         major = schema_id.major
-        slug = schema_slug(id_str)
+        try:
+            slug = schema_slug(id_str)
+        except ValueError as exc:
+            raise ValidationError(str(exc), field="schema_id") from exc
         pg_table = f"{slug}_v{major}"
+        try:
+            check_pg_table_name(pg_table)
+        except ValueError as exc:
+            raise ValidationError(str(exc), field="schema_id") from exc
 
         columns = [_field_to_column(f) for f in fields]
         metadata_schema = MetadataSchema(columns=columns)
