@@ -20,6 +20,9 @@ class FieldDefinitionReader(Protocol):
     async def get_fields_for_schema(self, schema_id: "SchemaId") -> dict[str, FieldType]:
         """Return field_name -> FieldType for a specific schema's current major version.
 
-        Falls back to an empty dict when the schema is unknown to the node.
+        Returns an empty dict when the schema is unknown to the node. Callers
+        that treat "unknown schema" as an error condition must check for an
+        empty map and raise ``NotFoundError`` themselves — the port stays
+        neutral so that non-user-facing callers can handle absence explicitly.
         """
         ...

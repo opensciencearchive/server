@@ -21,7 +21,7 @@ from osa.domain.discovery.model.value import (
 )
 from osa.domain.discovery.service.discovery import DiscoveryService
 from osa.domain.semantics.model.value import FieldType
-from osa.domain.shared.error import ValidationError
+from osa.domain.shared.error import NotFoundError, ValidationError
 from osa.domain.shared.model.srn import RecordSRN, SchemaId
 
 
@@ -174,6 +174,60 @@ class TestSearchRecordsValidation:
                 cursor=None,
                 limit=101,
             )
+
+    async def test_raises_not_found_for_unknown_schema(self, mock_read_store: AsyncMock) -> None:
+        """Pinning an unregistered schema must raise NotFoundError, not silently
+        fall through to an unscoped query that returns cross-schema records."""
+        empty_reader = AsyncMock()
+        empty_reader.get_fields_for_schema.return_value = {}
+        svc = DiscoveryService(
+            read_store=mock_read_store,
+            field_reader=empty_reader,
+            config=_config(),
+        )
+
+        with pytest.raises(NotFoundError, match="Schema not found"):
+            await svc.search_records(
+                filter_expr=None,
+                schema_id=SCHEMA_SRN,
+                convention_srn=None,
+                q=None,
+                sort="published_at",
+                order=SortOrder.DESC,
+                cursor=None,
+                limit=20,
+            )
+        mock_read_store.search_records.assert_not_called()
+
+    async def test_search_features_raises_not_found_for_unknown_schema(
+        self, mock_read_store: AsyncMock
+    ) -> None:
+        """search_features must also guard against unknown schema pins."""
+        mock_read_store.get_feature_table_schema.return_value = FeatureCatalogEntry(
+            hook_name="detect_pockets",
+            columns=[ColumnInfo(name="score", type="number", required=False)],
+            record_count=0,
+        )
+        empty_reader = AsyncMock()
+        empty_reader.get_fields_for_schema.return_value = {}
+        svc = DiscoveryService(
+            read_store=mock_read_store,
+            field_reader=empty_reader,
+            config=_config(),
+        )
+
+        with pytest.raises(NotFoundError, match="Schema not found"):
+            await svc.search_features(
+                hook_name="detect_pockets",
+                filter_expr=None,
+                schema_id=SCHEMA_SRN,
+                record_srn=None,
+                sort="id",
+                order=SortOrder.DESC,
+                cursor=None,
+                limit=20,
+            )
+        mock_read_store.search_features.assert_not_called()
 
     async def test_rejects_q_when_no_text_fields(self, mock_read_store: AsyncMock) -> None:
         no_text_reader = AsyncMock()

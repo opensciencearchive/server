@@ -89,6 +89,11 @@ class DiscoveryService(Service):
         schema_field_map: dict[str, FieldType] = {}
         if schema_id is not None:
             schema_field_map = await self.field_reader.get_fields_for_schema(schema_id)
+            if not schema_field_map:
+                raise NotFoundError(
+                    f"Schema not found: {schema_id.render()}. "
+                    "Pin an '<id>@<semver>' that matches a registered schema."
+                )
 
         if filter_expr is not None:
             self._validate_tree(filter_expr, allow_compound=allow_compound)
@@ -179,6 +184,11 @@ class DiscoveryService(Service):
         schema_field_map: dict[str, FieldType] = {}
         if schema_id is not None:
             schema_field_map = await self.field_reader.get_fields_for_schema(schema_id)
+            if not schema_field_map:
+                raise NotFoundError(
+                    f"Schema not found: {schema_id.render()}. "
+                    "Pin an '<id>@<semver>' that matches a registered schema."
+                )
 
         if filter_expr is not None:
             self._validate_tree(filter_expr, allow_compound=allow_compound)
