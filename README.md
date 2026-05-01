@@ -73,6 +73,11 @@ osa/
 └── deploy/                  # Docker Compose orchestration
 ```
 
+## Demos
+
+[Protein Pocket Database](https://www.pockets.bio/)  
+[Semantic GEO Database](https://www.lingual.bio/)
+
 ## License
 
 Apache 2.0
