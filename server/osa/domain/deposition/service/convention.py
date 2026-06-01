@@ -25,8 +25,8 @@ from osa.domain.shared.service import Service
 
 class ConventionService(Service):
     convention_repo: ConventionRepository
-    schema_service: SchemaService
-    metadata_service: MetadataService
+    schema_service: SchemaService  # TODO: replace with a port?
+    metadata_service: MetadataService  # TODO: replace with a port?
     outbox: Outbox
     node_domain: Domain
 

@@ -205,7 +205,7 @@ class PostgresMetadataStore(MetadataStore):
     async def insert_many(
         self,
         schema_id: SchemaId,
-        rows: list[tuple[RecordSRN, dict[str, Any]]],
+        rows: list[tuple[RecordSRN, dict[str, Any]]],  # TODO: use a Pydantic object?
     ) -> None:
         if not rows:
             return
@@ -224,7 +224,7 @@ class PostgresMetadataStore(MetadataStore):
             )
             .mappings()
             .first()
-        )
+        )  # TODO: parse into Pydantic object?
 
         if catalog_row is None:
             raise ValidationError(
