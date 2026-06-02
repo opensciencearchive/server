@@ -193,8 +193,12 @@ class OciIngesterRunner(IngesterRunner):
             if container is not None:
                 try:
                     await container.delete(force=True)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning(
+                        "failed to delete ingester container {container_id}: {error}",
+                        container_id=container.id,
+                        error=str(e),
+                    )
 
     def _host_path(self, container_path: Path) -> str:
         """Translate a container-internal path to a host path for bind mounts.

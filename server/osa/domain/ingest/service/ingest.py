@@ -27,7 +27,7 @@ class IngestService(Service):
 
     async def start_ingest(
         self,
-        convention_srn: str,
+        convention_srn: str,  # TODO: use convention ID instead of SRN
         batch_size: int = 1000,
         limit: int | None = None,
     ) -> IngestRun:

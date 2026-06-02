@@ -27,6 +27,7 @@ class StartIngestHandler(CommandHandler[StartIngest, IngestRunCreated]):
 
     __auth__ = at_least(Role.ADMIN)
 
+    # TODO: do we ned these imports to be lazy?
     from osa.domain.auth.model.principal import Principal
     from osa.domain.ingest.service.ingest import IngestService
 
@@ -34,7 +35,7 @@ class StartIngestHandler(CommandHandler[StartIngest, IngestRunCreated]):
     service: IngestService
 
     async def run(self, cmd: StartIngest) -> IngestRunCreated:
-        from osa.domain.shared.model.srn import Domain
+        from osa.domain.shared.model.srn import Domain  # TODO: lazy needed?
 
         ingest_run = await self.service.start_ingest(
             convention_srn=cmd.convention_srn,
@@ -43,7 +44,7 @@ class StartIngestHandler(CommandHandler[StartIngest, IngestRunCreated]):
         )
 
         node_domain: Domain = self.service.node_domain
-        srn = f"urn:osa:{node_domain.root}:ing:{ingest_run.id}"
+        srn = f"urn:osa:{node_domain.root}:ing:{ingest_run.id}"  # TODO: use SRN class to build
 
         return IngestRunCreated(
             srn=srn,
