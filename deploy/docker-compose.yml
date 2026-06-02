@@ -24,20 +24,37 @@ services:
       OSA_BASE_URL: ${OSA_BASE_URL:-http://localhost:8000}
       OSA_LOGGING__LEVEL: ${LOG_LEVEL:-INFO}
       OSA_AUTH__JWT__SECRET: ${JWT_SECRET:-change-me-in-production-must-be-32-chars-long}
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
     depends_on:
       db:
         condition: service_healthy
+      docker-socket-proxy:
+        condition: service_started
     ports:
       - "${SERVER_PORT:-8000}:8000"
     volumes:
       - server_data:/data
-      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - default
+      - docker-proxy
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8000/api/v1/health"]
       interval: 30s
       timeout: 10s
       start_period: 10s
       retries: 3
+    restart: unless-stopped
+
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:v0.4.2
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      POST: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker-proxy
     restart: unless-stopped
 
   web:
@@ -58,3 +75,8 @@ services:
 volumes:
   postgres_data:
   server_data:
+
+networks:
+  default:
+  docker-proxy:
+    internal: true
