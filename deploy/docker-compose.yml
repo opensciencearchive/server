@@ -29,7 +29,7 @@ services:
       db:
         condition: service_healthy
       docker-socket-proxy:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "${SERVER_PORT:-8000}:8000"
     volumes:
@@ -55,6 +55,12 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - docker-proxy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:2375/_ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     restart: unless-stopped
 
   web:
