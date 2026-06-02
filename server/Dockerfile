@@ -33,6 +33,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Stage 2: Runtime
 FROM python:3.13-slim-bookworm AS runtime
 
+ARG OSA_VERSION=dev
+ARG OSA_REVISION=unknown
+LABEL org.opencontainers.image.title="OSA Server"
+LABEL org.opencontainers.image.description="Open Science Archive reference implementation"
+LABEL org.opencontainers.image.source="https://github.com/opensciencearchive/server"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.version="${OSA_VERSION}"
+LABEL org.opencontainers.image.revision="${OSA_REVISION}"
+
 # Install curl for health checks
 RUN apt-get update && apt-get install -y --no-install-recommends curl && \
     rm -rf /var/lib/apt/lists/*
