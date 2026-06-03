@@ -36,14 +36,29 @@ async def resolve_identity(
     Uses a short-lived read-only session for the role lookup.
     """
     auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
+    if not auth_header:
+        # Anonymous traffic is normal (health checks, public endpoints) — debug only.
+        logger.debug("auth: no Authorization header")
+        return Anonymous()
+    if not auth_header.startswith("Bearer "):
+        logger.warning(
+            "auth: Authorization header is not Bearer (scheme=%r)",
+            auth_header.split(" ", 1)[0],
+        )
         return Anonymous()
 
     token = auth_header[7:]  # Remove "Bearer " prefix
 
     try:
         payload: dict[str, Any] = token_service.validate_access_token(token)
-    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+    except jwt.ExpiredSignatureError:
+        logger.warning("auth: rejected expired token")
+        return Anonymous()
+    except jwt.InvalidTokenError as e:
+        # Surface the JWT-lib reason class (e.g. InvalidSignatureError,
+        # InvalidAudienceError) so a misaligned secret / aud is diagnosable.
+        # We log only the exception class, never its message or the token.
+        logger.warning("auth: rejected invalid token (%s)", type(e).__name__)
         return Anonymous()
 
     user_id = UserId(UUID(payload["sub"]))
@@ -56,10 +71,13 @@ async def resolve_identity(
         result = await session.execute(stmt)
         roles = frozenset(Role[row.upper()] for (row,) in result)
 
+    # user_id is an internal UUID, roles is a small enum set — safe to log at debug.
+    # Provider / external_id are PII for federated identities (e.g. ORCID) and are
+    # intentionally omitted from log output.
     logger.debug(
-        "Identity resolved: user_id=%s, roles=%s",
+        "auth: authenticated (user_id=%s, roles=%s)",
         user_id,
-        roles,
+        sorted(r.name for r in roles),
     )
 
     return Principal(

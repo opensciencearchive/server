@@ -2,6 +2,7 @@ from datetime import datetime
 
 from pydantic import ConfigDict, Field
 
+from osa.domain.auth.model.principal import Principal
 from osa.domain.auth.model.role import Role
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.service.convention import ConventionService
@@ -46,6 +47,7 @@ class CreateConventionHandler(CommandHandler[CreateConvention, ConventionCreated
     # they define submission formats and bundle validators. Creation is an
     # admin operation, matching CreateOntology / CreateSchema.
     __auth__ = at_least(Role.ADMIN)
+    principal: Principal
     convention_service: ConventionService
 
     async def run(self, cmd: CreateConvention) -> ConventionCreated:

@@ -92,6 +92,32 @@ class TestStartupValidation:
         with pytest.raises(ConfigurationError, match="UnprotectedQueryHandler"):
             _check_handler_class(UnprotectedQueryHandler)
 
+    def test_validation_catches_at_least_gate_missing_principal_field(self) -> None:
+        """A handler with at_least(...) gate must declare `principal: Principal`.
+
+        The auth gate reads ``self.principal`` at request time; if the field is
+        missing it rejects every request with a misleading ``missing_token``
+        even when the JWT is valid. Catch this at startup instead.
+        """
+
+        class GatedCommand(Command):
+            pass
+
+        class GatedResult(Result):
+            pass
+
+        class GatedHandlerMissingPrincipal(CommandHandler[GatedCommand, GatedResult]):
+            __auth__ = at_least(Role.ADMIN)
+            # missing: principal: Principal
+
+            async def run(self, cmd: GatedCommand) -> GatedResult:
+                return GatedResult()
+
+        from osa.domain.shared.authorization.startup import _check_handler_class
+
+        with pytest.raises(ConfigurationError, match="principal"):
+            _check_handler_class(GatedHandlerMissingPrincipal)
+
     def test_validation_catches_invalid_auth_type(self) -> None:
         """A handler with a non-Gate __auth__ should fail validation."""
 
