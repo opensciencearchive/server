@@ -2,10 +2,11 @@ from datetime import datetime
 
 from pydantic import ConfigDict, Field
 
+from osa.domain.auth.model.role import Role
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.semantics.model.value import FieldDefinition
-from osa.domain.shared.authorization.gate import public
+from osa.domain.shared.authorization.gate import at_least
 from osa.domain.shared.command import Command, CommandHandler, Result
 from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.source import IngesterDefinition
@@ -41,7 +42,10 @@ class ConventionCreated(Result):
 
 
 class CreateConventionHandler(CommandHandler[CreateConvention, ConventionCreated]):
-    __auth__ = public()
+    # Conventions are curated registry artifacts (like ontologies and schemas) —
+    # they define submission formats and bundle validators. Creation is an
+    # admin operation, matching CreateOntology / CreateSchema.
+    __auth__ = at_least(Role.ADMIN)
     convention_service: ConventionService
 
     async def run(self, cmd: CreateConvention) -> ConventionCreated:
