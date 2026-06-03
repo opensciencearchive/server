@@ -29,8 +29,9 @@ from sqlalchemy.ext.asyncio import create_async_engine
 # Constants
 # ---------------------------------------------------------------------------
 
-# Deterministic UUIDv7 — fixed so re-seeding is a no-op and tests can rely on
-# the admin user ID. UUIDv7 layout: timestamp || ver=7 || rand || var=10 || rand.
+# Fixed sentinel ID — hand-crafted to carry valid UUIDv7 version (7) and RFC
+# 4122 variant (10..) bits with a zeroed timestamp. Not output of a UUIDv7
+# generator. Kept fixed so re-seeding is a no-op and tests can rely on it.
 DEV_ADMIN_USER_ID = "00000000-0000-7000-8000-0000000000a1"
 
 DEFAULT_LOCAL_PROVIDER = "local"

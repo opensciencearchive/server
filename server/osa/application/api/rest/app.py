@@ -72,9 +72,14 @@ def _check_dev_secret_safety(config: Config) -> None:
             "OSA_AUTH__JWT__SECRET to a real secret, or bind to 127.0.0.1."
         )
 
-    logfire.warning(
-        "Running on the well-known local-dev JWT secret. "
+    # logfire isn't configured yet at this point (configure() runs after this
+    # check in create_app), and logfire silently drops pre-configure calls.
+    # Write to stderr directly so the warning is always visible.
+    print(
+        "WARNING: Running on the well-known local-dev JWT secret. "
         "This is safe for local development only — never use in production.",
+        file=sys.stderr,
+        flush=True,
     )
 
 

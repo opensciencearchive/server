@@ -1,5 +1,5 @@
 #!/bin/bash
-# Dev/local entrypoint: wait for Postgres, migrate, seed, optionally seed
+# Dev/local entrypoint: wait for Postgres, run migrations, optionally seed
 # the dev admin (when OSA_DEV_MODE=true), then hand off to uvicorn.
 #
 # Replaces the inline `sh -c "... && ... && ..."` chain previously embedded
