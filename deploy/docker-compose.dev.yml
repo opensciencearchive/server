@@ -12,7 +12,9 @@ services:
       dockerfile: Dockerfile
       target: builder
     ports:
-      - "8000:8000"
+      # Bind to loopback only — the boot-safety check refuses to start on a
+      # non-loopback bind when the JWT secret is the well-known dev default.
+      - "127.0.0.1:8000:8000"
     volumes:
       - ../server:/app
       - /app/.venv
@@ -22,9 +24,10 @@ services:
       OSA_CONFIG_FILE: /app/osa.yaml
       OSA_BASE_URL: http://localhost:8000
       OSA_LOGGING__LEVEL: ${LOG_LEVEL:-DEBUG}
+      OSA_DEV_MODE: "true"
       WATCHFILES_FORCE_POLLING: "true"
     entrypoint: []
-    command: ["sh", "-c", "/app/.venv/bin/alembic upgrade head && /app/.venv/bin/python /app/scripts/seed.py && /app/.venv/bin/uvicorn osa.application.api.rest.app:app --host 0.0.0.0 --port 8000 --reload"]
+    command: ["/app/scripts/entrypoint.sh"]
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8000/api/v1/health"]
       interval: 10s

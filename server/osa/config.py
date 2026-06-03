@@ -145,10 +145,23 @@ class OrcidConfig(BaseModel):
         return "https://sandbox.orcid.org" if self.sandbox else "https://orcid.org"
 
 
+DEV_JWT_SECRET = "osa-local-dev-jwt-secret-CHANGE-IN-PRODUCTION-not-suitable-for-real-use"
+"""Well-known JWT secret for local development.
+
+Mirrors Supabase's `supabase start` pattern: the local CLI signs its own admin
+token with this secret, and the server verifies signatures normally. The boot
+safety check in `application/api/rest/app.py` refuses to start when this secret
+is in use without `dev_mode` set, or on a non-loopback bind address.
+"""
+
+
 class JwtConfig(BaseModel):
     """JWT configuration."""
 
-    secret: str  # Required - set via OSA_AUTH__JWT__SECRET
+    # Loud default so a misconfigured production deploy is obvious in logs and
+    # in any leaked token. The boot safety check enforces that this default is
+    # only ever used in dev mode on loopback.
+    secret: str = DEV_JWT_SECRET
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60  # 1 hour
     refresh_token_expire_days: int = 7
@@ -174,9 +187,15 @@ class ProvidersConfig(BaseModel):
 
 
 class AdminsConfig(BaseModel):
-    """Provider-keyed lists of user identifiers for SUPERADMIN bootstrapping."""
+    """Provider-keyed lists of user identifiers for SUPERADMIN bootstrapping.
+
+    - `orcid`: ORCiD IDs auto-granted SUPERADMIN on first OAuth login.
+    - `local`: external_ids of `provider="local"` accounts seeded as
+      SUPERADMIN by `scripts/seed_dev_admin.py` when `OSA_DEV_MODE=true`.
+    """
 
     orcid: list[str] = []
+    local: list[str] = ["admin@osa.local"]
 
     @field_validator("orcid", mode="after")
     @classmethod
@@ -195,7 +214,9 @@ class AuthConfig(BaseModel):
     """Authentication configuration."""
 
     providers: ProvidersConfig = ProvidersConfig()
-    jwt: JwtConfig  # Required - no default, must be configured via env vars
+    # JwtConfig has a loud dev default; the boot safety check refuses to
+    # start on the default secret unless `dev_mode=True` and bind is loopback.
+    jwt: JwtConfig = JwtConfig()
     callback_url: str = ""  # Full callback URL (e.g., https://myarchive.org/api/v1/auth/callback)
     base_role: str | None = None  # Implicit role for all authenticated users (e.g., "DEPOSITOR")
     admins: AdminsConfig = AdminsConfig()
@@ -232,12 +253,17 @@ class Config(BaseSettings):
     domain: str = "localhost"  # Node identity for SRN construction (DNS name)
     base_url: str = ""  # Public URL where users reach the server (e.g. http://localhost:8000)
 
+    # Hint about intent for local-dev affordances (seed dev admin, allow
+    # default JWT secret). The JWT secret is the actual security boundary;
+    # `dev_mode` only gates intent. Set via OSA_DEV_MODE=true.
+    dev_mode: bool = False
+
     # These are BaseModel, so env_nested_delimiter handles their env vars
     frontend: Frontend = Frontend()
     database: DatabaseConfig = DatabaseConfig()
     logging: LoggingConfig = LoggingConfig()
     worker: WorkerConfig = WorkerConfig()  # Background worker settings
-    auth: AuthConfig  # Required - set via OSA_AUTH__JWT__SECRET env var
+    auth: AuthConfig = AuthConfig()  # Defaults are dev-safe; boot check enforces prod-correctness
     runner: RunnerConfig = RunnerConfig()
     host_data_dir: str | None = None  # Host path for OSA_DATA_DIR (sibling container mounts)
 

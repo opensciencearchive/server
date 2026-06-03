@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 from typing import Any
@@ -27,7 +28,7 @@ from osa.application.api.v1.routes import (
     validation,
 )
 from osa.application.di import create_container
-from osa.config import Config
+from osa.config import DEV_JWT_SECRET, Config
 from osa.domain.shared.authorization.startup import validate_all_handlers
 from osa.domain.shared.error import OSAError
 from osa.domain.shared.event import EventHandler
@@ -36,6 +37,45 @@ from osa.infrastructure.persistence.seed import ensure_system_user
 from osa.util.di.fastapi import setup_dishka
 
 logger = logging.getLogger(__name__)
+
+
+def _check_dev_secret_safety(config: Config) -> None:
+    """Refuse to start when the well-known dev JWT secret is misconfigured.
+
+    The dev JWT secret is public knowledge — anyone with it can mint admin
+    tokens. It's safe to ship only when both:
+      1. The operator explicitly opted into dev mode (OSA_DEV_MODE=true).
+      2. The server is bound to loopback so the secret isn't network-reachable.
+
+    The second check is best-effort: we read the bind address from common
+    uvicorn / OSA env vars and fall back to allowing the boot if no signal is
+    present (dev mode alone is the operator's stated intent).
+    """
+    if config.auth.jwt.secret != DEV_JWT_SECRET:
+        return
+
+    if not config.dev_mode:
+        raise RuntimeError(
+            "Refusing to start: JWT secret is the well-known local-dev default "
+            "but OSA_DEV_MODE is not set. Configure OSA_AUTH__JWT__SECRET with a "
+            "real secret (openssl rand -hex 32), or set OSA_DEV_MODE=true for "
+            "local development."
+        )
+
+    # Best-effort: refuse to bind the dev secret to a public interface.
+    bind_host = os.environ.get("UVICORN_HOST") or os.environ.get("OSA_HOST") or ""
+    loopback_hosts = {"", "127.0.0.1", "localhost", "::1"}
+    if bind_host and bind_host not in loopback_hosts:
+        raise RuntimeError(
+            f"Refusing to start: JWT secret is the well-known local-dev default "
+            f"and bind host is {bind_host!r} (not loopback). Either set "
+            "OSA_AUTH__JWT__SECRET to a real secret, or bind to 127.0.0.1."
+        )
+
+    logfire.warning(
+        "Running on the well-known local-dev JWT secret. "
+        "This is safe for local development only — never use in production.",
+    )
 
 
 @asynccontextmanager
@@ -81,6 +121,9 @@ def create_app(
     """
     # Pydantic Settings populates from env vars at runtime
     config = Config()  # type: ignore[call-arg]
+
+    # Refuse to boot if the dev JWT secret is misconfigured for the deploy.
+    _check_dev_secret_safety(config)
 
     # Configure logfire as the single logging system
     import logging as _logging
