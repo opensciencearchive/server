@@ -115,8 +115,27 @@ class AuthProvider(Provider):
         Raises:
             HTTPException: If token is missing, expired, or invalid
         """
+        path = request.url.path
         auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
+
+        if not auth_header:
+            logger.info(
+                "auth: 401 missing_token — no Authorization header (path=%s, host=%s)",
+                path,
+                request.headers.get("host"),
+            )
+            raise HTTPException(
+                status_code=401,
+                detail={"code": "missing_token", "message": "Authorization header required"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if not auth_header.startswith("Bearer "):
+            logger.warning(
+                "auth: 401 missing_token — Authorization header present but not Bearer "
+                "(path=%s, scheme=%r)",
+                path,
+                auth_header.split(" ", 1)[0],
+            )
             raise HTTPException(
                 status_code=401,
                 detail={"code": "missing_token", "message": "Authorization header required"},
@@ -127,6 +146,13 @@ class AuthProvider(Provider):
 
         try:
             payload = token_service.validate_access_token(token)
+            logger.debug(
+                "auth: token accepted (path=%s, sub=%s, provider=%s, external_id=%s)",
+                path,
+                payload.get("sub"),
+                payload.get("provider"),
+                payload.get("external_id"),
+            )
             return CurrentUser(
                 user_id=UserId(UUID(payload["sub"])),
                 identity=ProviderIdentity(
@@ -135,12 +161,22 @@ class AuthProvider(Provider):
                 ),
             )
         except jwt.ExpiredSignatureError as e:
+            logger.warning("auth: 401 token_expired (path=%s)", path)
             raise HTTPException(
                 status_code=401,
                 detail={"code": "token_expired", "message": "Token has expired"},
                 headers={"WWW-Authenticate": "Bearer"},
             ) from e
         except jwt.InvalidTokenError as e:
+            # Show the JWT-level reason (e.g. "Signature verification failed",
+            # "Invalid audience") — invaluable for diagnosing a misaligned secret
+            # or audience mismatch without leaking the token itself.
+            logger.warning(
+                "auth: 401 invalid_token (path=%s, reason=%s: %s)",
+                path,
+                type(e).__name__,
+                e,
+            )
             raise HTTPException(
                 status_code=401,
                 detail={"code": "invalid_token", "message": "Invalid token"},
