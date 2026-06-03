@@ -3,15 +3,30 @@ import logging
 import os
 import re
 import sys
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Any, Literal, Annotated
 
 import yaml
-from pydantic import BaseModel, BeforeValidator, field_validator, model_validator
+from pydantic import BaseModel, BeforeValidator, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 from typing_extensions import Self
 
 from osa.util.paths import OSAPaths
+
+
+def _read_package_version() -> str:
+    """Read the installed package version from pyproject.toml metadata.
+
+    The version is set in ``server/pyproject.toml`` and propagated into
+    distribution metadata by ``uv sync`` / ``pip install``. Falls back to
+    "0.0.0" when the package isn't installed (e.g. tooling that imports
+    the source tree directly without an editable install).
+    """
+    try:
+        return _pkg_version("osa")
+    except PackageNotFoundError:
+        return "0.0.0"
 
 
 # =============================================================================
@@ -248,7 +263,10 @@ def _normalize_pg_url(url: str) -> str:
 class Config(BaseSettings):
     # Archive identity (promoted from Server model)
     name: str = "Open Science Archive"
-    version: str = "0.0.1"
+    # Default-loaded from installed package metadata so it stays in lock-step
+    # with `server/pyproject.toml` after a release bump. Operators can still
+    # override via OSA_VERSION if they want to brand a fork.
+    version: str = Field(default_factory=_read_package_version)
     description: str = "An open platform for depositing scientific data"
     domain: str = "localhost"  # Node identity for SRN construction (DNS name)
     base_url: str = ""  # Public URL where users reach the server (e.g. http://localhost:8000)
