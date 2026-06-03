@@ -113,6 +113,78 @@ image-tag:
 image-latest:
     @GH_PAGER= gh api /orgs/opensciencearchive/packages/container/osa/versions --jq '.[0].metadata.container.tags[0]'
 
+# === Release ===
+
+# Cut a new release (kind: patch | minor | major). Bumps server/pyproject.toml, pushes to main, creates a GitHub release.
+release kind:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    case "{{kind}}" in
+        patch|minor|major) ;;
+        *) echo "release: kind must be patch, minor, or major (got '{{kind}}')" >&2; exit 1 ;;
+    esac
+
+    # Require clean main, in sync with origin — release builds don't gate on CI,
+    # so a bad commit will publish a bad image.
+    branch="$(git rev-parse --abbrev-ref HEAD)"
+    if [ "$branch" != "main" ]; then
+        echo "release: must be on 'main' (currently on '$branch')" >&2
+        exit 1
+    fi
+    if ! git diff --quiet HEAD -- ; then
+        echo "release: working tree is dirty — commit or stash first" >&2
+        exit 1
+    fi
+    git fetch --quiet origin main
+    if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+        echo "release: local main is not in sync with origin/main — pull/push first" >&2
+        exit 1
+    fi
+
+    # Latest CI on main must be green. Warn-and-confirm rather than hard-block
+    # so an unrelated flake doesn't strand the release.
+    ci_status="$(gh run list --workflow=ci.yml --branch=main --limit=1 --json conclusion --jq '.[0].conclusion' 2>/dev/null || echo unknown)"
+    if [ "$ci_status" != "success" ]; then
+        echo "release: latest ci.yml run on main is '${ci_status}' (not success)" >&2
+        read -p "release: continue anyway? [y/N] " yn
+        case "$yn" in [yY]*) ;; *) echo "release: aborted"; exit 1 ;; esac
+    fi
+
+    current="$(awk -F'"' '/^version = / {print $2; exit}' server/pyproject.toml)"
+    if [ -z "$current" ]; then
+        echo "release: could not read version from server/pyproject.toml" >&2
+        exit 1
+    fi
+
+    IFS=. read -r maj min pat <<< "$current"
+    case "{{kind}}" in
+        patch) pat=$((pat + 1)) ;;
+        minor) min=$((min + 1)); pat=0 ;;
+        major) maj=$((maj + 1)); min=0; pat=0 ;;
+    esac
+    next="${maj}.${min}.${pat}"
+    tag="v${next}"
+
+    echo "release: ${current} -> ${next} (tag ${tag})"
+    read -p "release: cut ${tag} from main? [y/N] " yn
+    case "$yn" in [yY]*) ;; *) echo "release: aborted"; exit 1 ;; esac
+
+    # -i.bak portable across BSD (macOS) and GNU sed.
+    sed -i.bak -e "s/^version = \".*\"/version = \"${next}\"/" server/pyproject.toml
+    rm -f server/pyproject.toml.bak
+
+    git add server/pyproject.toml
+    git commit -m "chore: bump version to ${next}"
+    git push origin main
+
+    gh release create "${tag}" \
+        --target main \
+        --title "${tag}" \
+        --generate-notes
+
+    echo "release: ${tag} cut. Watch the image build with: gh run watch"
+
 # === Maintenance ===
 
 # Clean up Docker resources (volumes, images, etc.)
