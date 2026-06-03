@@ -23,6 +23,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY osa/ ./osa/
 COPY sources/ ./sources/
 COPY migrations/ ./migrations/
+COPY scripts/ ./scripts/
 COPY alembic.ini ./
 COPY entrypoint.sh ./
 COPY README.md ./
@@ -57,6 +58,7 @@ COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
 COPY --from=builder --chown=appuser:appuser /app/osa /app/osa
 COPY --from=builder --chown=appuser:appuser /app/sources /app/sources
 COPY --from=builder --chown=appuser:appuser /app/migrations /app/migrations
+COPY --from=builder --chown=appuser:appuser /app/scripts /app/scripts
 COPY --from=builder --chown=appuser:appuser /app/alembic.ini /app/alembic.ini
 
 # Ensure the virtualenv is used
