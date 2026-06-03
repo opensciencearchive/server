@@ -18,7 +18,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 # Seed data
 # ---------------------------------------------------------------------------
 
-SCHEMA_SRN = "urn:osa:localhost:schema:seed-sample-survey@1.0.0"
+SCHEMA_ID = "seed-sample-survey"
+SCHEMA_VERSION = "1.0.0"
 CONVENTION_SRN = "urn:osa:localhost:conv:seed-sample-survey@1.0.0"
 
 SCHEMA_FIELDS = [
@@ -90,29 +91,31 @@ async def seed() -> None:
     now = datetime.now(timezone.utc)
 
     async with engine.begin() as conn:
-        # Schema
+        # Schema — keyed on (id, version)
         row = await conn.execute(
-            text("SELECT srn FROM schemas WHERE srn = :srn"),
-            {"srn": SCHEMA_SRN},
+            text("SELECT id FROM schemas WHERE id = :id AND version = :version"),
+            {"id": SCHEMA_ID, "version": SCHEMA_VERSION},
         )
         if row.scalar_one_or_none() is None:
             await conn.execute(
                 text(
-                    "INSERT INTO schemas (srn, title, fields, created_at) "
-                    "VALUES (:srn, :title, :fields, :created_at)"
+                    "INSERT INTO schemas (id, version, title, fields, created_at) "
+                    "VALUES (:id, :version, :title, :fields, :created_at)"
                 ),
                 {
-                    "srn": SCHEMA_SRN,
+                    "id": SCHEMA_ID,
+                    "version": SCHEMA_VERSION,
                     "title": "Sample Survey",
                     "fields": json.dumps(SCHEMA_FIELDS),
                     "created_at": now,
                 },
             )
-            print(f"seed: created schema {SCHEMA_SRN}")
+            print(f"seed: created schema {SCHEMA_ID}@{SCHEMA_VERSION}")
         else:
-            print(f"seed: schema already exists {SCHEMA_SRN}")
+            print(f"seed: schema already exists {SCHEMA_ID}@{SCHEMA_VERSION}")
 
-        # Convention
+        # Convention — references schemas by (schema_id, schema_version);
+        # `hooks` replaces the old `validator_refs` column; `source` is nullable.
         row = await conn.execute(
             text("SELECT srn FROM conventions WHERE srn = :srn"),
             {"srn": CONVENTION_SRN},
@@ -120,8 +123,11 @@ async def seed() -> None:
         if row.scalar_one_or_none() is None:
             await conn.execute(
                 text(
-                    "INSERT INTO conventions (srn, title, description, schema_srn, file_requirements, validator_refs, created_at) "
-                    "VALUES (:srn, :title, :description, :schema_srn, :file_requirements, :validator_refs, :created_at)"
+                    "INSERT INTO conventions "
+                    "(srn, title, description, schema_id, schema_version, "
+                    "file_requirements, hooks, source, created_at) "
+                    "VALUES (:srn, :title, :description, :schema_id, :schema_version, "
+                    ":file_requirements, :hooks, NULL, :created_at)"
                 ),
                 {
                     "srn": CONVENTION_SRN,
@@ -130,9 +136,10 @@ async def seed() -> None:
                         "A simple convention for testing the deposition workflow. "
                         "Upload any CSV/TSV/JSON file with basic metadata."
                     ),
-                    "schema_srn": SCHEMA_SRN,
+                    "schema_id": SCHEMA_ID,
+                    "schema_version": SCHEMA_VERSION,
                     "file_requirements": json.dumps(FILE_REQUIREMENTS),
-                    "validator_refs": json.dumps([]),
+                    "hooks": json.dumps([]),
                     "created_at": now,
                 },
             )
