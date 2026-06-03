@@ -58,9 +58,6 @@ echo "entrypoint: Postgres is reachable"
 echo "entrypoint: running alembic upgrade head"
 "${VENV_BIN}/alembic" upgrade head
 
-echo "entrypoint: running scripts/seed.py"
-"${VENV_BIN}/python" /app/scripts/seed.py
-
 if [[ "${OSA_DEV_MODE:-false}" == "true" ]]; then
     echo "entrypoint: OSA_DEV_MODE=true — seeding dev admin"
     "${VENV_BIN}/python" /app/scripts/seed_dev_admin.py

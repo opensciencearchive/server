@@ -9,8 +9,9 @@ The admin's `LinkedAccount` has `provider="local"`, `external_id="admin@osa.loca
 (or whatever `auth.admins.local` lists), exactly matching what the CLI puts
 into its self-minted JWT (`provider`, `external_id`).
 
-Standalone script — no `osa` package imports required. Mirrors the shape of
-`seed.py` (also runs via the entrypoint). Idempotent: safe on every startup.
+Standalone script — no `osa` package imports required, so it runs the same way
+in any deployment that mounts the migrations and the venv. Idempotent: safe on
+every startup.
 """
 
 import asyncio
@@ -47,9 +48,9 @@ def _load_local_external_ids() -> list[str]:
     """Resolve admins.local from OSA_CONFIG_FILE (YAML) if present, else default.
 
     We read the YAML directly instead of constructing `Config` to keep this
-    script standalone (matching `seed.py`). The env-var override path
-    (OSA_AUTH__ADMINS__LOCAL) is not supported here — uncommon for a list, and
-    YAML config covers the realistic case.
+    script standalone. The env-var override path (OSA_AUTH__ADMINS__LOCAL) is
+    not supported here — uncommon for a list, and YAML config covers the
+    realistic case.
     """
     config_file = os.environ.get("OSA_CONFIG_FILE")
     if not config_file:
