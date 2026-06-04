@@ -5,6 +5,9 @@
 # thing — verify the right per-platform native binary is present and, if not,
 # fetch it from the npm registry. See the discussion in the PR for details.
 allowBuilds:
-  - esbuild
-  - sharp
-  - unrs-resolver
+  '0': esbuild
+  '1': sharp
+  '2': unrs-resolver
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
