@@ -4,7 +4,7 @@
 # Allow these packages to run install/postinstall scripts. They all do the same
 # thing — verify the right per-platform native binary is present and, if not,
 # fetch it from the npm registry. See the discussion in the PR for details.
-onlyBuiltDependencies:
+allowBuilds:
   - esbuild
   - sharp
   - unrs-resolver
