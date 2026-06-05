@@ -25,7 +25,6 @@ COPY sources/ ./sources/
 COPY migrations/ ./migrations/
 COPY scripts/ ./scripts/
 COPY alembic.ini ./
-COPY entrypoint.sh ./
 COPY README.md ./
 # Install the project
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -68,9 +67,6 @@ ENV PATH="/app/.venv/bin:$PATH"
 RUN mkdir -p /data && chown appuser:appuser /data
 ENV OSA_DATA_DIR=/data
 
-COPY --from=builder --chown=appuser:appuser /app/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
-
 USER appuser
 
 EXPOSE 8000
@@ -79,5 +75,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=5s --timeout=10s --start-period=5s --retries=3 \
     CMD curl --fail http://localhost:8000/api/v1/health || exit 1
 
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/app/scripts/entrypoint.sh"]
 CMD ["uvicorn", "--factory", "osa.application.api.rest.app:create_app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,10 +1,11 @@
 #!/bin/bash
-# Dev/local entrypoint: wait for Postgres, run migrations, optionally seed
-# the dev admin (when OSA_DEV_MODE=true), then hand off to uvicorn.
+# Server entrypoint: wait for Postgres, run migrations, optionally seed the
+# dev admin (OSA_DEV_MODE=true), then hand off to the container CMD.
 #
-# Replaces the inline `sh -c "... && ... && ..."` chain previously embedded
-# in deploy/docker-compose.dev.yml so that failures are loud and uvicorn
-# becomes PID 1 (so SIGTERM propagates cleanly on `docker compose down`).
+# Used by both the published image (Dockerfile ENTRYPOINT) and `osa start
+# --source` (dev override). The actual uvicorn invocation lives in CMD so
+# that production runs without `--reload` and the dev override can opt into
+# reload by overriding CMD.
 
 set -euo pipefail
 
@@ -53,7 +54,7 @@ done
 echo "entrypoint: Postgres is reachable"
 
 # ---------------------------------------------------------------------------
-# Migrations + seed data
+# Migrations + (optional) dev admin seed
 # ---------------------------------------------------------------------------
 echo "entrypoint: running alembic upgrade head"
 "${VENV_BIN}/alembic" upgrade head
@@ -64,11 +65,7 @@ if [[ "${OSA_DEV_MODE:-false}" == "true" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Hand off to uvicorn as PID 1
+# Hand off to the container CMD (uvicorn) as PID 1
 # ---------------------------------------------------------------------------
-echo "entrypoint: starting uvicorn"
-exec "${VENV_BIN}/uvicorn" \
-    --factory osa.application.api.rest.app:create_app \
-    --host 0.0.0.0 \
-    --port 8000 \
-    --reload
+echo "entrypoint: exec $*"
+exec "$@"
