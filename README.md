@@ -7,6 +7,7 @@
 <p align="center">
   <strong>A domain-agnostic archive for AI-ready scientific data</strong>
   <br /><br />
+  <a href="https://github.com/opensciencearchive/osa-py"><img src="https://img.shields.io/badge/Python%20SDK-osa--py-blue?style=flat-square" alt="Python SDK" /></a>
   <a href="https://github.com/opensciencearchive/server/issues"><img src="https://img.shields.io/github/issues/opensciencearchive/server?style=flat-square" alt="Issues" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square" alt="License" /></a>
 </p>
@@ -43,20 +44,39 @@ Nodes identified by DNS domain. Records flow between nodes via import, fork, and
 </tr>
 </table>
 
-### Canonical Write Path
+## Quickstart
 
+You don't need to clone this repo to run an OSA archive. The [Python SDK (`osa-py`)](https://github.com/opensciencearchive/osa-py) ships the whole stack — Postgres, server, and a docker-socket-proxy, brought up with one command.
+
+```bash
+pip install osa-py
+osa init my-archive
+cd my-archive
+osa start
 ```
-Deposition  ─→  Validation  ─→  Curation  ─→  Record  ─→  Search & Export
-   draft          OCI hooks      approve/       immutable     indexed,
-   metadata       structured     reject         versioned     exportable
-   + files        checks                        published
+
+`osa start` spins up the stack via Docker Compose and mints a SUPERADMIN dev token so the CLI is authenticated immediately. The web UI is at <http://localhost:8080>.
+
+Define a convention in Python (schema + validation hooks + ingester), then:
+
+```bash
+osa deploy             # build hook images, register the convention
+osa ingestion start    # pull records via the ingester
 ```
 
-## Status
+The full SDK reference — schemas, hooks, ingesters, the `osa test` end-to-end harness, and the convention manifest — lives in the [`osa-py` README](https://github.com/opensciencearchive/osa-py).
 
-OSA is in **early development**. The core write path (deposition through record publication) is functional. Search, export, and federation are in progress. The web UI is minimal.
+## Hack on OSA
 
-## Project Structure
+Working on the server itself:
+
+```bash
+git clone https://github.com/opensciencearchive/server.git
+cd server
+just dev    # Postgres + server + web with hot-reload
+```
+
+Run tests: `cd server && just test`. Lint + type check: `just lint`.
 
 ```
 osa/
@@ -73,9 +93,22 @@ osa/
 └── deploy/                  # Docker Compose orchestration
 ```
 
+## Canonical Write Path
+
+```
+Deposition  ─→  Validation  ─→  Curation  ─→  Record  ─→  Search & Export
+   draft          OCI hooks      approve/       immutable     indexed,
+   metadata       structured     reject         versioned     exportable
+   + files        checks                        published
+```
+
+## Status
+
+OSA is in **early development**. The local-dev story is in good shape — `osa start` brings up a fully-authenticated stack with no config. The core write path (deposition through record publication) and the query layer (filtered search over records and feature tables) are both functional. Export, federation, and the web UI are still in progress.
+
 ## Demos
 
-[Protein Pocket Database](https://www.pockets.bio/)  
+[Protein Pocket Database](https://www.pockets.bio/)
 [Semantic GEO Database](https://www.lingual.bio/)
 
 ## License
