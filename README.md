@@ -55,7 +55,7 @@ cd my-archive
 osa start
 ```
 
-`osa start` spins up the stack via Docker Compose and mints a SUPERADMIN dev token so the CLI is authenticated immediately. The web UI is at <http://localhost:8080>.
+`osa start` spins up the stack via Docker Compose and mints a SUPERADMIN dev token so the CLI is authenticated immediately.
 
 Define a convention in Python (schema + validation hooks + ingester), then:
 
