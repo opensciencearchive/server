@@ -4,7 +4,7 @@ Uses a fake DataReadStore (no DB), mirroring the discovery service tests.
 """
 
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
@@ -19,12 +19,19 @@ SCHEMA = SchemaId.parse("compound@1.0.0")
 
 
 @dataclass
-class FakeConfig:
-    """Only the filter-bound knobs DataQueryService reads (avoids full env setup)."""
+class FakeDataConfig:
+    """The /data/ filter-bound knobs DataQueryService reads (config.data.*)."""
 
-    discovery_max_filter_depth: int = 10
-    discovery_max_predicates: int = 200
-    discovery_max_cross_domain_joins: int = 10
+    max_filter_depth: int = 10
+    max_predicates: int = 200
+    max_feature_joins: int = 10
+
+
+@dataclass
+class FakeConfig:
+    """Minimal stand-in exposing only ``config.data`` (avoids full env setup)."""
+
+    data: FakeDataConfig = field(default_factory=FakeDataConfig)
 
 
 class FakeReadStore:
@@ -83,7 +90,7 @@ async def test_stream_records_rejects_feature_plan() -> None:
 @pytest.mark.asyncio
 async def test_filter_depth_bound_enforced() -> None:
     service, _ = _service()
-    service.config.discovery_max_filter_depth = 1
+    service.config.data.max_filter_depth = 1
     deep = And(operands=[_pred(), And(operands=[_pred(), _pred()])])
     plan = QueryPlan(schema_id=SCHEMA, table_kind=TableKind.RECORDS, filter=deep)
     with pytest.raises(ValidationError) as exc:
@@ -94,7 +101,7 @@ async def test_filter_depth_bound_enforced() -> None:
 @pytest.mark.asyncio
 async def test_filter_predicate_count_bound_enforced() -> None:
     service, _ = _service()
-    service.config.discovery_max_predicates = 1
+    service.config.data.max_predicates = 1
     plan = QueryPlan(
         schema_id=SCHEMA,
         table_kind=TableKind.RECORDS,

@@ -16,7 +16,7 @@ from osa.infrastructure.auth import AuthInfraProvider
 from osa.infrastructure.event.di import EventProvider
 from osa.infrastructure.http.di import HttpProvider
 from osa.infrastructure.k8s.di import RunnerProvider
-from osa.infrastructure.persistence import PersistenceProvider
+from osa.infrastructure.persistence.di import PersistenceProvider
 from osa.infrastructure.ingest.di import IngestProvider
 from osa.util.di.scope import Scope
 from osa.util.paths import OSAPaths

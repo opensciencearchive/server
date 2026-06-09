@@ -1,0 +1,95 @@
+"""A malformed pagination cursor must surface as a 400, not a 500.
+
+``decode_cursor`` raises bare ``ValueError`` on corrupt base64 / missing keys,
+and the feature sort coerces ``id`` with ``int(...)`` which also raises
+``ValueError`` on a non-integer. Both run inside ``stream_rows``' pre-flight
+pull; if they escape as raw ``ValueError`` (not an ``OSAError``) the global
+handler returns 500. These tests pin them to ``ValidationError(field="cursor")``
+so the route maps them to 400 — exercised DB-free via the sort helpers, which
+decode the cursor before any DB access.
+"""
+
+import base64
+import json
+
+import pytest
+
+from osa.domain.data.model.query_plan import (
+    PaginationCursor,
+    PaginationParams,
+    QueryPlan,
+    SortDirection,
+    SortSpec,
+    TableKind,
+    encode_cursor,
+)
+from osa.domain.shared.error import ValidationError
+from osa.domain.shared.model.hook import ColumnDef
+from osa.domain.shared.model.srn import Domain, SchemaId
+from osa.infrastructure.data.postgres_data_read_store import PostgresDataReadStore
+from osa.infrastructure.persistence.feature_table import (
+    FeatureSchema,
+    build_feature_table,
+)
+from osa.infrastructure.persistence.tables import records_table
+
+SCHEMA = SchemaId.parse("compound@1.0.0")
+
+
+def _store() -> PostgresDataReadStore:
+    # The sort helpers never touch self.session; decoding happens before any DB
+    # access, so a placeholder session is sufficient for these unit tests.
+    return PostgresDataReadStore(None, Domain("localhost"))  # type: ignore[arg-type]
+
+
+def _records_plan(cursor: str) -> QueryPlan:
+    return QueryPlan(
+        schema_id=SCHEMA,
+        table_kind=TableKind.RECORDS,
+        pagination=PaginationParams(cursor=PaginationCursor(value=cursor)),
+    )
+
+
+def _feature_plan(cursor: str) -> QueryPlan:
+    return QueryPlan(
+        schema_id=SCHEMA,
+        table_kind=TableKind.FEATURE,
+        feature_name="chem_features",
+        pagination=PaginationParams(cursor=PaginationCursor(value=cursor)),
+        sort=[SortSpec(column="id", direction=SortDirection.ASC)],
+    )
+
+
+def _feature_table():
+    fschema = FeatureSchema(columns=[ColumnDef(name="score", json_type="number", required=True)])
+    return build_feature_table("chem_features", fschema), fschema
+
+
+class TestRecordsCursorValidation:
+    def test_corrupt_base64_raises_validation_error(self) -> None:
+        with pytest.raises(ValidationError) as exc:
+            _store()._records_sort(_records_plan("!!not-base64!!"), records_table)
+        assert exc.value.field == "cursor"
+
+    def test_missing_keys_raises_validation_error(self) -> None:
+        # A well-formed base64 JSON object that lacks the required s/id keys.
+        bad = base64.urlsafe_b64encode(json.dumps({"x": 1}).encode()).decode()
+        with pytest.raises(ValidationError) as exc:
+            _store()._records_sort(_records_plan(bad), records_table)
+        assert exc.value.field == "cursor"
+
+
+class TestFeatureCursorValidation:
+    def test_corrupt_base64_raises_validation_error(self) -> None:
+        ft, fschema = _feature_table()
+        with pytest.raises(ValidationError) as exc:
+            _store()._features_sort(_feature_plan("!!not-base64!!"), ft, fschema)
+        assert exc.value.field == "cursor"
+
+    def test_non_integer_id_raises_validation_error(self) -> None:
+        ft, fschema = _feature_table()
+        # Well-formed cursor whose id component is not an int → int(...) ValueError.
+        cursor = encode_cursor(5, "not-an-int")
+        with pytest.raises(ValidationError) as exc:
+            _store()._features_sort(_feature_plan(cursor), ft, fschema)
+        assert exc.value.field == "cursor"

@@ -51,26 +51,25 @@ class DataQueryService(Service):
         if expr is None:
             return
         depth = _tree_depth(expr)
-        if depth > self.config.discovery_max_filter_depth:
+        if depth > self.config.data.max_filter_depth:
             raise ValidationError(
-                f"Filter tree depth {depth} exceeds maximum "
-                f"{self.config.discovery_max_filter_depth}.",
+                f"Filter tree depth {depth} exceeds maximum {self.config.data.max_filter_depth}.",
                 field="filter",
                 code="filter_depth_exceeded",
             )
         predicates = list(_iter_predicates(expr))
-        if len(predicates) > self.config.discovery_max_predicates:
+        if len(predicates) > self.config.data.max_predicates:
             raise ValidationError(
                 f"Filter tree has {len(predicates)} predicates, exceeds maximum "
-                f"{self.config.discovery_max_predicates}.",
+                f"{self.config.data.max_predicates}.",
                 field="filter",
                 code="filter_predicates_exceeded",
             )
         distinct_hooks = {p.field.hook for p in predicates if isinstance(p.field, FeatureFieldRef)}
-        if len(distinct_hooks) > self.config.discovery_max_cross_domain_joins:
+        if len(distinct_hooks) > self.config.data.max_feature_joins:
             raise ValidationError(
                 f"Filter joins {len(distinct_hooks)} feature hooks, exceeds maximum "
-                f"{self.config.discovery_max_cross_domain_joins}.",
+                f"{self.config.data.max_feature_joins}.",
                 field="filter",
                 code="filter_joins_exceeded",
             )

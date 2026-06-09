@@ -100,6 +100,19 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _invalid_cursor(exc: Exception) -> ValidationError:
+    """Map a cursor decode/coerce ``ValueError`` to a 400, not a 500.
+
+    Decoding a corrupt cursor (bad base64, missing ``s``/``id`` keys) or coercing
+    a non-conforming value (e.g. a non-integer feature id) raises ``ValueError``,
+    which is not an ``OSAError`` and would otherwise surface as a generic 500.
+    The cursor is opaque client-supplied input, so a malformed one is a 400.
+    """
+    return ValidationError(
+        f"Malformed pagination cursor: {exc}", field="cursor", code="invalid_cursor"
+    )
+
+
 class PostgresDataReadStore:
     def __init__(self, session: AsyncSession, node_domain: Domain) -> None:
         self.session = session
@@ -201,9 +214,12 @@ class PostgresDataReadStore:
         if plan.pagination.cursor is not None:
             from osa.domain.data.model.query_plan import decode_cursor
 
-            decoded = decode_cursor(str(plan.pagination.cursor))
-            sort_value = self._coerce_cursor_value(decoded["s"], primary.column)
-            cursor_after = page.after((sort_value, decoded["id"]))
+            try:
+                decoded = decode_cursor(str(plan.pagination.cursor))
+                sort_value = self._coerce_cursor_value(decoded["s"], primary.column)
+                cursor_after = page.after((sort_value, decoded["id"]))
+            except ValueError as exc:
+                raise _invalid_cursor(exc) from exc
         return page.order_by(), cursor_after
 
     @staticmethod
@@ -319,9 +335,14 @@ class PostgresDataReadStore:
         if plan.pagination.cursor is not None:
             from osa.domain.data.model.query_plan import decode_cursor
 
-            decoded = decode_cursor(str(plan.pagination.cursor))
-            sort_value = self._coerce_feature_cursor_value(decoded["s"], primary.column, fschema)
-            cursor_after = page.after((sort_value, int(decoded["id"])))
+            try:
+                decoded = decode_cursor(str(plan.pagination.cursor))
+                sort_value = self._coerce_feature_cursor_value(
+                    decoded["s"], primary.column, fschema
+                )
+                cursor_after = page.after((sort_value, int(decoded["id"])))
+            except ValueError as exc:
+                raise _invalid_cursor(exc) from exc
         return page.order_by(), cursor_after
 
     @staticmethod
