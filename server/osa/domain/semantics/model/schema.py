@@ -1,8 +1,9 @@
 from datetime import datetime
 
 from osa.domain.semantics.model.value import FieldDefinition
-from osa.domain.shared.error import ValidationError
+from osa.domain.shared.error import ReservedNameError, ValidationError
 from osa.domain.shared.model.aggregate import Aggregate
+from osa.domain.shared.model.reserved import RESERVED_NAMES
 from osa.domain.shared.model.srn import SchemaId
 
 
@@ -15,6 +16,9 @@ class Schema(Aggregate):
     created_at: datetime
 
     def model_post_init(self, __context: object) -> None:
+        if self.id.id.root in RESERVED_NAMES:
+            raise ReservedNameError(self.id.id.root, "schema")
+
         if len(self.fields) < 1:
             raise ValidationError("Schema must have at least one field")
 

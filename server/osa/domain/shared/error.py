@@ -52,6 +52,26 @@ class ConflictError(DomainError):
     """Resource already exists or version conflict."""
 
 
+class ReservedNameError(DomainError):
+    """A schema ID or hook/feature name collides with a reserved URL slot.
+
+    Raised at aggregate construction (``Schema``, ``HookDefinition``) when a
+    name equals one of :data:`osa.domain.shared.model.reserved.RESERVED_NAMES`.
+    Surfaced as HTTP 400 with the structured ``code`` field.
+    """
+
+    def __init__(self, name: str, kind: str) -> None:
+        from osa.domain.shared.model.reserved import RESERVED_NAMES
+
+        self.name = name
+        self.kind = kind
+        super().__init__(
+            f"The {kind} name '{name}' is reserved for a URL slot under /data/. "
+            f"Reserved names: {sorted(RESERVED_NAMES)}.",
+            code="reserved_name",
+        )
+
+
 class AuthorizationError(DomainError):
     """User not authorized for this operation."""
 

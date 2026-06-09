@@ -5,8 +5,8 @@ from dishka import Provider as DishkaProvider
 
 from osa.config import Config
 from osa.domain.auth.util.di import AuthProvider
+from osa.domain.data.util.di import DataProvider
 from osa.domain.deposition.util.di import DepositionProvider
-from osa.domain.discovery.util.di import DiscoveryProvider
 from osa.domain.feature.util.di import FeatureProvider
 from osa.domain.metadata.util.di import MetadataProvider
 from osa.domain.semantics.util.di.provider import SemanticsProvider
@@ -15,7 +15,6 @@ from osa.domain.validation.util.di import ValidationProvider
 from osa.infrastructure.auth import AuthInfraProvider
 from osa.infrastructure.event.di import EventProvider
 from osa.infrastructure.http.di import HttpProvider
-from osa.infrastructure.index.di import IndexProvider
 from osa.infrastructure.k8s.di import RunnerProvider
 from osa.infrastructure.persistence import PersistenceProvider
 from osa.infrastructure.ingest.di import IngestProvider
@@ -44,7 +43,6 @@ def create_container(
     return make_async_container(
         PersistenceProvider(),
         RunnerProvider(),
-        IndexProvider(),
         IngestProvider(),
         EventProvider(extra_handlers=extra_handlers),
         HttpProvider(),
@@ -55,7 +53,7 @@ def create_container(
         ValidationProvider(),
         AuthProvider(),
         AuthInfraProvider(),
-        DiscoveryProvider(),
+        DataProvider(),
         *extra_providers,
         context={Config: config, OSAPaths: paths},
         scopes=Scope,  # type: ignore[arg-type]  # Custom scope class
