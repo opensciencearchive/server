@@ -104,11 +104,6 @@ class FilterOperator(StrEnum):
     IS_NULL = "is_null"
 
 
-class SortOrder(StrEnum):
-    ASC = "asc"
-    DESC = "desc"
-
-
 FieldRef = Annotated[
     Union[MetadataFieldRef, FeatureFieldRef],
     Field(discriminator="path"),
