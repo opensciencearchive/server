@@ -88,9 +88,14 @@ class QueryPlan(BaseModel):
 
 
 def encode_cursor(sort_value: Any, id_value: Any) -> str:
-    """Encode a cursor as urlsafe base64 of ``{"s": sort_value, "id": id_value}``."""
+    """Encode a cursor as urlsafe base64 of ``{"s": sort_value, "id": id_value}``.
+
+    ``default=str`` because feature rows are raw DB mappings — a datetime sort
+    value (``created_at``, or a date-time hook column) arrives unrendered. The
+    sort decoders coerce the ISO string back to a datetime before binding.
+    """
     payload = {"s": sort_value, "id": id_value}
-    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    return base64.urlsafe_b64encode(json.dumps(payload, default=str).encode()).decode()
 
 
 def decode_cursor(cursor: str) -> dict[str, Any]:

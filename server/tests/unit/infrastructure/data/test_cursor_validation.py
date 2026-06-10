@@ -11,6 +11,7 @@ decode the cursor before any DB access.
 
 import base64
 import json
+from datetime import datetime
 
 import pytest
 
@@ -93,3 +94,13 @@ class TestFeatureCursorValidation:
         with pytest.raises(ValidationError) as exc:
             _store()._features_sort(_feature_plan(cursor), ft, fschema)
         assert exc.value.field == "cursor"
+
+    def test_created_at_cursor_value_coerced_to_datetime(self) -> None:
+        # created_at is an implicit feature column (no ColumnDef in the hook's
+        # FeatureSchema), so the decoder must coerce its ISO string itself —
+        # asyncpg rejects a str bound against DateTime(timezone=True).
+        _, fschema = _feature_table()
+        value = PostgresDataReadStore._coerce_feature_cursor_value(
+            "2026-01-02T03:04:05+00:00", "created_at", fschema
+        )
+        assert isinstance(value, datetime)

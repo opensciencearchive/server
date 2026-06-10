@@ -15,9 +15,13 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from osa.domain.data.model.filter import FilterOperator, FeatureFieldRef, Predicate
 from osa.domain.data.model.query_plan import (
+    PaginationCursor,
     PaginationParams,
     QueryPlan,
+    SortDirection,
+    SortSpec,
     TableKind,
+    encode_cursor,
 )
 from osa.domain.data.model.query_plan import TableKind as TK
 from osa.domain.semantics.model.schema import Schema
@@ -194,6 +198,50 @@ class TestStreamFeatures:
         )
         with pytest.raises(NotFoundError):
             await _drain(rs, plan)
+
+
+@pytest.mark.asyncio
+class TestFeatureCreatedAtCursor:
+    """``?sort=created_at`` pagination on a feature table must round-trip.
+
+    Feature rows are raw DB mappings, so the route layer encodes the next-page
+    cursor from a Python ``datetime`` (encoder must serialize it), and the
+    second page binds the decoded value against ``DateTime(timezone=True)``
+    (decoder must coerce the ISO string back — created_at is an implicit
+    column with no ColumnDef in the hook's FeatureSchema)."""
+
+    async def test_created_at_sort_cursor_round_trips(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession
+    ):
+        store = await _setup_schema(pg_engine, pg_session)
+        srn = await _publish(pg_engine, store, "rec1")
+        await pg_session.commit()
+        await _register_hook(pg_engine, pg_session)
+        feature_store = PostgresFeatureStore(pg_engine, pg_session)
+        await feature_store.insert_features(HOOK, str(srn), [{"score": s} for s in (0.1, 0.2, 0.3)])
+
+        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        sort = [SortSpec(column="created_at", direction=SortDirection.ASC)]
+        all_rows = await _drain(
+            rs,
+            QueryPlan(schema_id=SCHEMA, table_kind=TableKind.FEATURE, feature_name=HOOK, sort=sort),
+        )
+        assert len(all_rows) == 3
+
+        # Encode the cursor exactly as routes/data/_streaming.py does: straight
+        # from the row mapping, where created_at is a datetime.
+        cursor = encode_cursor(all_rows[1]["created_at"], all_rows[1]["id"])
+        page2 = await _drain(
+            rs,
+            QueryPlan(
+                schema_id=SCHEMA,
+                table_kind=TableKind.FEATURE,
+                feature_name=HOOK,
+                sort=sort,
+                pagination=PaginationParams(cursor=PaginationCursor(value=cursor)),
+            ),
+        )
+        assert [r["id"] for r in page2] == [all_rows[2]["id"]]
 
 
 @pytest.mark.asyncio

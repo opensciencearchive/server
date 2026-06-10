@@ -1,5 +1,7 @@
 """T029 — QueryPlan validation rules and per-kind default sorts."""
 
+from datetime import UTC, datetime
+
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
@@ -59,3 +61,12 @@ def test_cursor_roundtrip() -> None:
 def test_decode_malformed_cursor_raises() -> None:
     with pytest.raises(ValueError):
         decode_cursor("not-valid-base64-json!!!")
+
+
+def test_encode_cursor_accepts_datetime_sort_value() -> None:
+    # Feature rows reach the cursor encoder as raw DB mappings, so a
+    # created_at sort value is a datetime, not a pre-rendered string.
+    ts = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+    decoded = decode_cursor(encode_cursor(ts, 7))
+    assert datetime.fromisoformat(decoded["s"]) == ts
+    assert decoded["id"] == 7

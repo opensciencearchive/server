@@ -368,6 +368,10 @@ class PostgresDataReadStore:
     def _coerce_feature_cursor_value(value: Any, column: str, fschema: FeatureSchema) -> Any:
         if column == "id":
             return None if value is None else int(value)
+        # created_at is an implicit column (no ColumnDef in the hook's schema);
+        # the cursor carries it as an ISO string but the bind needs a datetime.
+        if column == "created_at" and isinstance(value, str):
+            return datetime.fromisoformat(value)
         col_def = next((c for c in fschema.columns if c.name == column), None)
         if col_def is not None and col_def.json_type == "string" and isinstance(value, str):
             if col_def.format == "date-time":
