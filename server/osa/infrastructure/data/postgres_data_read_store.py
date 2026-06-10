@@ -247,13 +247,20 @@ class PostgresDataReadStore:
         if cursor_after is not None:
             conditions.append(cursor_after)
 
+        # A features.<hook> table is shared by every convention that registers
+        # the hook name, across schemas — scope to the requested schema's
+        # records via the records join.
+        conditions.extend(self._feature_schema_scope(plan.schema_id))
+
         # Implicit columns (id, record_srn, created_at) precede the hook's
         # declared data columns — this is the CSV header order.
         select_cols = [ft.c.id, ft.c.record_srn, ft.c.created_at, *data_columns(ft)]
-        stmt = select(*select_cols).select_from(ft)
-        if conditions:
-            stmt = stmt.where(and_(*conditions))
-        stmt = stmt.order_by(*order_keys)
+        stmt = (
+            select(*select_cols)
+            .select_from(ft.join(records_table, records_table.c.srn == ft.c.record_srn))
+            .where(and_(*conditions))
+            .order_by(*order_keys)
+        )
 
         result = await self.session.stream(stmt)
         try:
@@ -307,8 +314,20 @@ class PostgresDataReadStore:
             for row in result.mappings()
         ]
 
-    async def _feature_count(self, ft: sa.Table) -> int:
-        return int((await self.session.execute(select(func.count()).select_from(ft))).scalar_one())
+    @staticmethod
+    def _feature_schema_scope(schema_id: SchemaId) -> list[Any]:
+        return [
+            records_table.c.schema_id == schema_id.id.root,
+            records_table.c.schema_version == schema_id.version.root,
+        ]
+
+    async def _feature_count(self, ft: sa.Table, schema_id: SchemaId) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(ft.join(records_table, records_table.c.srn == ft.c.record_srn))
+            .where(and_(*self._feature_schema_scope(schema_id)))
+        )
+        return int((await self.session.execute(stmt)).scalar_one())
 
     def _features_sort(
         self, plan: QueryPlan, ft: sa.Table, fschema: FeatureSchema
@@ -526,7 +545,7 @@ class PostgresDataReadStore:
                     # Implicit columns (id, record_srn, created_at) precede the
                     # hook's declared data columns — this is the CSV header order.
                     columns=[*IMPLICIT_FEATURE_COLUMN_SPECS, *_feature_column_specs(fschema)],
-                    row_count=await self._feature_count(ft),
+                    row_count=await self._feature_count(ft, schema_id),
                     formats=list(_ALL_FORMATS),
                 )
             )

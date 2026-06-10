@@ -22,7 +22,7 @@ from osa.domain.data.model.query_plan import (
 from osa.domain.data.model.query_plan import TableKind as TK
 from osa.domain.semantics.model.schema import Schema
 from osa.domain.semantics.model.value import Cardinality, FieldDefinition, FieldType
-from osa.domain.shared.error import NotFoundError
+from osa.domain.shared.error import ConflictError, NotFoundError
 from osa.domain.shared.model.hook import ColumnDef
 from osa.domain.shared.model.srn import Domain, RecordSRN, SchemaId
 from osa.infrastructure.data.postgres_data_read_store import PostgresDataReadStore
@@ -36,6 +36,7 @@ from osa.infrastructure.persistence.tables import conventions_table
 from tests.integration.conftest import seed_record
 
 SCHEMA = SchemaId.parse("compound@1.0.0")
+SCHEMA_B = SchemaId.parse("protein@1.0.0")
 HOOK = "chem_features"
 
 
@@ -57,28 +58,37 @@ def _feature_columns() -> list[ColumnDef]:
     ]
 
 
-async def _setup_schema(engine: AsyncEngine, session: AsyncSession) -> PostgresMetadataStore:
+async def _setup_schema(
+    engine: AsyncEngine, session: AsyncSession, schema: SchemaId = SCHEMA
+) -> PostgresMetadataStore:
     store = PostgresMetadataStore(engine, session)
-    await store.ensure_table(SCHEMA, _fields())
+    await store.ensure_table(schema, _fields())
     await PostgresSemanticsSchemaRepository(session).save(
-        Schema(id=SCHEMA, title="compound", fields=_fields(), created_at=datetime.now(UTC))
+        Schema(id=schema, title=schema.id.root, fields=_fields(), created_at=datetime.now(UTC))
     )
     return store
 
 
-async def _register_hook(engine: AsyncEngine, session: AsyncSession, hook_name: str = HOOK) -> None:
+async def _register_hook(
+    engine: AsyncEngine,
+    session: AsyncSession,
+    hook_name: str = HOOK,
+    schema: SchemaId = SCHEMA,
+) -> None:
     """Link the schema → hook via a convention row, then create its feature table.
 
     The read store only reads ``hooks[*].name`` from the convention, so a
     name-only hooks payload is sufficient to scope the feature to the schema.
+    A pre-existing feature table is reused, mirroring ``CreateFeatureTables``
+    (which swallows the ConflictError when two conventions share a hook name).
     """
     await session.execute(
         conventions_table.insert().values(
-            srn=f"urn:osa:localhost:conv:{hook_name}@1.0.0",
-            title="compound conv",
+            srn=f"urn:osa:localhost:conv:{schema.id.root}-{hook_name}@1.0.0",
+            title=f"{schema.id.root} conv",
             description=None,
-            schema_id=SCHEMA.id.root,
-            schema_version=SCHEMA.version.root,
+            schema_id=schema.id.root,
+            schema_version=schema.version.root,
             file_requirements={},
             hooks=[{"name": hook_name}],
             source=None,
@@ -87,20 +97,25 @@ async def _register_hook(engine: AsyncEngine, session: AsyncSession, hook_name: 
     )
     await session.commit()
     feature_store = PostgresFeatureStore(engine, session)
-    await feature_store.create_table(hook_name, _feature_columns())
+    try:
+        await feature_store.create_table(hook_name, _feature_columns())
+    except ConflictError:
+        pass
 
 
-async def _publish(engine: AsyncEngine, store: PostgresMetadataStore, rid: str) -> RecordSRN:
+async def _publish(
+    engine: AsyncEngine, store: PostgresMetadataStore, rid: str, schema: SchemaId = SCHEMA
+) -> RecordSRN:
     srn = RecordSRN.parse(f"urn:osa:localhost:rec:{rid}@1")
     await seed_record(
         engine,
         srn=str(srn),
-        schema_id=SCHEMA.id.root,
-        schema_version=SCHEMA.version.root,
+        schema_id=schema.id.root,
+        schema_version=schema.version.root,
         metadata={"species": "Homo sapiens"},
         published_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
-    await store.insert(SCHEMA, srn, {"species": "Homo sapiens"})
+    await store.insert(schema, srn, {"species": "Homo sapiens"})
     return srn
 
 
@@ -179,6 +194,50 @@ class TestStreamFeatures:
         )
         with pytest.raises(NotFoundError):
             await _drain(rs, plan)
+
+
+@pytest.mark.asyncio
+class TestFeatureSchemaScoping:
+    """Two schemas whose conventions register the same hook name share one
+    physical ``features.<hook>`` table (``CreateFeatureTables`` swallows the
+    ConflictError). Reads at ``/data/{schema}/{feature}`` must still be scoped
+    to records of the requested schema."""
+
+    async def _seed_shared_hook(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession
+    ) -> tuple[RecordSRN, RecordSRN]:
+        store_a = await _setup_schema(pg_engine, pg_session)
+        store_b = await _setup_schema(pg_engine, pg_session, schema=SCHEMA_B)
+        srn_a = await _publish(pg_engine, store_a, "reca")
+        srn_b = await _publish(pg_engine, store_b, "recb", schema=SCHEMA_B)
+        await pg_session.commit()
+        await _register_hook(pg_engine, pg_session)
+        await _register_hook(pg_engine, pg_session, schema=SCHEMA_B)
+        feature_store = PostgresFeatureStore(pg_engine, pg_session)
+        await feature_store.insert_features(HOOK, str(srn_a), [{"score": 0.9, "label": "a"}])
+        await feature_store.insert_features(HOOK, str(srn_b), [{"score": 0.2, "label": "b"}])
+        return srn_a, srn_b
+
+    async def test_stream_excludes_rows_of_other_schemas(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession
+    ):
+        srn_a, _ = await self._seed_shared_hook(pg_engine, pg_session)
+
+        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rows = await _drain(rs, _feature_plan())
+
+        assert [r["record_srn"] for r in rows] == [str(srn_a)]
+
+    async def test_manifest_row_count_scoped_to_schema(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession
+    ):
+        await self._seed_shared_hook(pg_engine, pg_session)
+
+        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        manifest = await rs.get_schema_manifest(SCHEMA)
+        assert manifest is not None
+        feature_res = next(t for t in manifest.table_resources if t.name == HOOK)
+        assert feature_res.row_count == 1
 
 
 @pytest.mark.asyncio
