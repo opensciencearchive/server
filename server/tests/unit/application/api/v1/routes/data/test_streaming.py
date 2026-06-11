@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from osa.application.api.v1.routes.data._streaming import build_table_response
-from osa.domain.data.model.format import FORMATS
+from osa.application.api.v1.routes.data.formats import FORMATS
 from osa.domain.data.model.manifest import ColumnSpec
 from osa.domain.data.model.query_plan import (
     QueryPlan,

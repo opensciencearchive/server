@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from osa.domain.data.model.manifest import ColumnSpec
-from osa.domain.data.serializer.csv import CsvSerializer
+from osa.application.api.v1.routes.data.serializers.csv import CsvSerializer
 from osa.domain.semantics.model.value import FieldType
 
 COLUMNS = [

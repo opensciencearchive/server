@@ -5,6 +5,7 @@ Uses a fake DataReadStore (no DB), mirroring the discovery service tests.
 
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -38,9 +39,13 @@ class FakeReadStore:
     def __init__(self, rows: list[Mapping[str, Any]]) -> None:
         self._rows = rows
         self.received_plan: QueryPlan | None = None
+        self.received_timeout: timedelta | None = None
 
-    async def stream_rows(self, plan: QueryPlan) -> AsyncIterator[Mapping[str, Any]]:
+    async def stream_rows(
+        self, plan: QueryPlan, timeout: timedelta | None = None
+    ) -> AsyncIterator[Mapping[str, Any]]:
         self.received_plan = plan
+        self.received_timeout = timeout
         for row in self._rows:
             yield row
 
@@ -117,3 +122,22 @@ async def test_no_filter_streams_cleanly() -> None:
     service, _ = _service([{"id": "x"}])
     plan = QueryPlan(schema_id=SCHEMA, table_kind=TableKind.RECORDS)
     assert await _drain(service.stream_records(plan)) == [{"id": "x"}]
+
+
+@pytest.mark.asyncio
+async def test_stream_records_passes_timeout_to_store() -> None:
+    # The statement timeout is an execution budget owned by the caller (the
+    # route's format registry); the service forwards it to the port so the
+    # adapter — the only layer holding a SQL session — can apply it.
+    service, store = _service([{"id": "a"}])
+    plan = QueryPlan(schema_id=SCHEMA, table_kind=TableKind.RECORDS)
+    await _drain(service.stream_records(plan, timeout=timedelta(seconds=30)))
+    assert store.received_timeout == timedelta(seconds=30)
+
+
+@pytest.mark.asyncio
+async def test_stream_features_passes_timeout_to_store() -> None:
+    service, store = _service([{"id": 1}])
+    plan = QueryPlan(schema_id=SCHEMA, table_kind=TableKind.FEATURE, feature_name="f")
+    await _drain(service.stream_features(plan, timeout=timedelta(minutes=30)))
+    assert store.received_timeout == timedelta(minutes=30)

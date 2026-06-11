@@ -8,7 +8,7 @@ from osa.application.api.v1.routes.data.tables import (
     path_for,
     register_table_routes,
 )
-from osa.domain.data.model.format import FORMATS
+from osa.application.api.v1.routes.data.formats import FORMATS
 
 
 def _noop_builder(_fmt):

@@ -12,6 +12,7 @@ carry the hook's declared columns.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
@@ -24,8 +25,14 @@ if TYPE_CHECKING:
 
 
 class DataReadStore(Protocol):
-    def stream_rows(self, plan: "QueryPlan") -> AsyncIterator[Mapping[str, Any]]:
-        """Stream projected rows for the plan via a server-side cursor."""
+    def stream_rows(
+        self, plan: "QueryPlan", timeout: timedelta | None = None
+    ) -> AsyncIterator[Mapping[str, Any]]:
+        """Stream projected rows for the plan via a server-side cursor.
+
+        ``timeout`` is the caller's execution budget for the read; the adapter
+        enforces it on its own connection (the routes hold no SQL session).
+        """
         ...
 
     async def get_record_by_id(self, id: "RecordId", version: int | None) -> "RecordSummary | None":

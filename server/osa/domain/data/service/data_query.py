@@ -15,6 +15,7 @@ types are known); that path raises ``ValidationError`` before the first row.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator, Mapping
+from datetime import timedelta
 from typing import Any
 
 from osa.config import Config
@@ -29,18 +30,22 @@ class DataQueryService(Service):
     read_store: DataReadStore
     config: Config
 
-    async def stream_records(self, plan: QueryPlan) -> AsyncIterator[Mapping[str, Any]]:
+    async def stream_records(
+        self, plan: QueryPlan, timeout: timedelta | None = None
+    ) -> AsyncIterator[Mapping[str, Any]]:
         if plan.table_kind != TableKind.RECORDS:
             raise ValidationError("stream_records requires a RECORDS plan", field="table_kind")
         self._validate_filter_bounds(plan.filter)
-        async for row in self.read_store.stream_rows(plan):
+        async for row in self.read_store.stream_rows(plan, timeout):
             yield row
 
-    async def stream_features(self, plan: QueryPlan) -> AsyncIterator[Mapping[str, Any]]:
+    async def stream_features(
+        self, plan: QueryPlan, timeout: timedelta | None = None
+    ) -> AsyncIterator[Mapping[str, Any]]:
         if plan.table_kind != TableKind.FEATURE:
             raise ValidationError("stream_features requires a FEATURE plan", field="table_kind")
         self._validate_filter_bounds(plan.filter)
-        async for row in self.read_store.stream_rows(plan):
+        async for row in self.read_store.stream_rows(plan, timeout):
             yield row
 
     # ------------------------------------------------------------------ #

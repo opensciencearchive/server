@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from osa.domain.data.model.manifest import ColumnSpec
-from osa.domain.data.serializer.csv_gzip import CsvGzipSerializer
+from osa.application.api.v1.routes.data.serializers.csv_gzip import CsvGzipSerializer
 from osa.domain.semantics.model.value import FieldType
 
 COLUMNS = [

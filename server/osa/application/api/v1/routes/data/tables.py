@@ -20,7 +20,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from osa.domain.data.model.format import FORMATS, DataResponseFormat
+from osa.application.api.v1.routes.data.formats import FORMATS, DataResponseFormat
 
 EndpointBuilder = Callable[[DataResponseFormat], Callable[..., Any]]
 

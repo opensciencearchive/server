@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator, Mapping
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import sqlalchemy as sa
@@ -97,12 +97,22 @@ _JSON_TYPE_TO_FIELD_TYPE: dict[str, FieldType] = {
     "object": FieldType.TEXT,
 }
 
-# All URL-exposed format suffixes (mirrors model.format.FORMATS suffixes).
+# All URL-exposed format suffixes (mirrors the route-layer FORMATS registry).
 _ALL_FORMATS = ["", "csv", "csv.gz"]
 
 
 def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def statement_timeout_sql(timeout: timedelta) -> str:
+    """Render the caller's execution budget as a ``SET LOCAL`` statement.
+
+    Integer milliseconds, so no operator- or caller-supplied string ever
+    reaches raw SQL. ``SET LOCAL`` reverts on commit/rollback, so the value
+    never leaks to a later request reusing the pooled connection.
+    """
+    return f"SET LOCAL statement_timeout = '{int(timeout.total_seconds() * 1000)}ms'"
 
 
 def _invalid_cursor(exc: Exception) -> ValidationError:
@@ -129,7 +139,13 @@ class PostgresDataReadStore:
     # Streaming primitive
     # ------------------------------------------------------------------ #
 
-    async def stream_rows(self, plan: QueryPlan) -> AsyncIterator[Mapping[str, Any]]:
+    async def stream_rows(
+        self, plan: QueryPlan, timeout: timedelta | None = None
+    ) -> AsyncIterator[Mapping[str, Any]]:
+        # The generator body runs on the route's pre-flight ``__anext__`` pull,
+        # so the timeout is in place before the SELECT opens its cursor.
+        if timeout is not None:
+            await self.session.execute(sa.text(statement_timeout_sql(timeout)))
         if plan.table_kind == TableKind.RECORDS:
             async for row in self._stream_records(plan):
                 yield row

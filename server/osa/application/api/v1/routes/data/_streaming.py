@@ -20,7 +20,7 @@ from typing import Any
 
 from fastapi.responses import StreamingResponse
 
-from osa.domain.data.model.format import DataResponseFormat
+from osa.application.api.v1.routes.data.formats import DataResponseFormat
 from osa.domain.data.model.manifest import ColumnSpec
 from osa.domain.data.model.query_plan import QueryPlan, TableKind, encode_cursor
 

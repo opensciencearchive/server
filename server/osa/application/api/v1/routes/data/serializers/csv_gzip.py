@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any, ClassVar
 
 from osa.domain.data.model.manifest import ColumnSpec
-from osa.domain.data.serializer.csv import CsvSerializer
+from osa.application.api.v1.routes.data.serializers.csv import CsvSerializer
 
 
 class CsvGzipSerializer:
