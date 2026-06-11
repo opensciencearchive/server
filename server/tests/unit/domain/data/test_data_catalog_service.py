@@ -22,7 +22,7 @@ from osa.domain.data.model.record_summary import RecordSummary
 from osa.domain.data.service.data_catalog import DataCatalogService
 from osa.domain.semantics.model.value import FieldType
 from osa.domain.shared.error import NotFoundError
-from osa.domain.shared.model.ids import HookName, RecordId
+from osa.domain.shared.model.ids import RecordId
 from osa.domain.shared.model.srn import SchemaId
 
 RECORDS_COLUMNS = [
@@ -95,7 +95,7 @@ async def test_resolve_table_records() -> None:
 @pytest.mark.asyncio
 async def test_resolve_table_feature() -> None:
     resolved = await _service().resolve_table(
-        "compound@1.0.0", TableKind.FEATURE, feature_name=HookName("chem_features")
+        "compound@1.0.0", TableKind.FEATURE, feature_name="chem_features"
     )
     assert resolved.columns == FEATURE_COLUMNS
 
@@ -103,9 +103,7 @@ async def test_resolve_table_feature() -> None:
 @pytest.mark.asyncio
 async def test_resolve_table_unknown_feature_404s() -> None:
     with pytest.raises(NotFoundError) as exc:
-        await _service().resolve_table(
-            "compound@1.0.0", TableKind.FEATURE, feature_name=HookName("nope")
-        )
+        await _service().resolve_table("compound@1.0.0", TableKind.FEATURE, feature_name="nope")
     assert exc.value.code == "table_not_found"
 
 
@@ -114,6 +112,4 @@ async def test_resolve_table_kind_must_match() -> None:
     # A resource named "records" exists, but with kind RECORDS — asking for a
     # FEATURE of that name must not match it.
     with pytest.raises(NotFoundError):
-        await _service().resolve_table(
-            "compound@1.0.0", TableKind.FEATURE, feature_name=HookName("records")
-        )
+        await _service().resolve_table("compound@1.0.0", TableKind.FEATURE, feature_name="records")
