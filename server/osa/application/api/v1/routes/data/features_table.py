@@ -8,8 +8,6 @@ schema's manifest; an unknown feature 404s before any bytes (T090).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 from dishka.integrations.fastapi import FromDishka
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
@@ -22,35 +20,9 @@ from osa.application.api.v1.routes.data._streaming import build_table_response
 from osa.application.api.v1.routes.data.tables import format_key, register_table_routes
 from osa.config import Config
 from osa.domain.data.model.format import DataResponseFormat
-from osa.domain.data.model.manifest import ColumnSpec
 from osa.domain.data.model.query_plan import TableKind
 from osa.domain.data.service.data_catalog import DataCatalogService
 from osa.domain.data.service.data_query import DataQueryService
-from osa.domain.shared.error import NotFoundError
-from osa.domain.shared.model.srn import SchemaId
-
-
-async def _feature_columns(
-    catalog: DataCatalogService, schema: str, feature: str
-) -> tuple[Sequence[ColumnSpec], SchemaId]:
-    """Resolve schema + feature (404 if unknown/reserved) → feature columns + SchemaId."""
-    schema_id = await catalog.resolve_schema(schema)
-    manifest = await catalog.get_schema_manifest(schema_id)
-    resource = next(
-        (
-            tr
-            for tr in manifest.table_resources
-            if tr.name == feature and tr.kind == TableKind.FEATURE
-        ),
-        None,
-    )
-    if resource is None:
-        raise NotFoundError(
-            f"No feature table '{feature}' on schema '{schema}'. "
-            f"See /api/v1/data/{schema_id.render()} for its table resources.",
-            code="feature_not_found",
-        )
-    return resource.columns, schema_id
 
 
 def _make_get_endpoint(fmt: DataResponseFormat):
@@ -65,10 +37,10 @@ def _make_get_endpoint(fmt: DataResponseFormat):
         limit: int = 50,
         sort: str | None = None,
     ) -> StreamingResponse:
-        columns, schema_id = await _feature_columns(catalog_service, schema, feature)
+        table = await catalog_service.resolve_table(schema, TableKind.FEATURE, feature_name=feature)
         await apply_statement_timeout(session, fmt)
         plan = build_plan(
-            schema_id=schema_id,
+            schema_id=table.schema_id,
             table_kind=TableKind.FEATURE,
             feature_name=feature,
             filter_expr=None,
@@ -78,7 +50,7 @@ def _make_get_endpoint(fmt: DataResponseFormat):
             sort=sort,
         )
         rows = query_service.stream_features(plan)
-        return await build_table_response(rows, fmt, columns, plan)
+        return await build_table_response(rows, fmt, table.columns, plan)
 
     return endpoint
 
@@ -94,10 +66,10 @@ def _make_post_endpoint(fmt: DataResponseFormat):
         session: FromDishka[AsyncSession],
         config: FromDishka[Config],
     ) -> StreamingResponse:
-        columns, schema_id = await _feature_columns(catalog_service, schema, feature)
+        table = await catalog_service.resolve_table(schema, TableKind.FEATURE, feature_name=feature)
         await apply_statement_timeout(session, fmt)
         plan = build_plan(
-            schema_id=schema_id,
+            schema_id=table.schema_id,
             table_kind=TableKind.FEATURE,
             feature_name=feature,
             filter_expr=body.filter,
@@ -107,7 +79,7 @@ def _make_post_endpoint(fmt: DataResponseFormat):
             sort=body.sort,
         )
         rows = query_service.stream_features(plan)
-        return await build_table_response(rows, fmt, columns, plan)
+        return await build_table_response(rows, fmt, table.columns, plan)
 
     # Unique name before the limiter — see records_table._make_post_endpoint.
     endpoint.__name__ = f"feature_post_{format_key(fmt)}"

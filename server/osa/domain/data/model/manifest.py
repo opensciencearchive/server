@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from osa.domain.data.model.query_plan import TableKind
 from osa.domain.semantics.model.value import FieldType
+from osa.domain.shared.model.srn import SchemaId
 
 
 class FieldSpec(BaseModel):
@@ -68,3 +69,16 @@ class SchemaManifest(BaseModel):
     srn: str  # full schema SRN
     fields: list[FieldSpec]
     table_resources: list[TableResource]
+
+
+class ResolvedTable(BaseModel):
+    """A table resolved for reading: the owning schema plus its column schema.
+
+    Produced by ``DataCatalogService.resolve_table`` — the single owner of
+    manifest-structure knowledge (the records resource is named ``records``;
+    feature resources carry kind ``FEATURE``). Route code consumes this
+    instead of picking through ``table_resources`` itself.
+    """
+
+    schema_id: SchemaId
+    columns: list[ColumnSpec]

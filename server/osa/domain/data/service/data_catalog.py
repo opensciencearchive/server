@@ -8,11 +8,12 @@ here in addition to the write-side aggregate invariants (research §6).
 from __future__ import annotations
 
 from osa.domain.data.model.catalog import NodeCatalog
-from osa.domain.data.model.manifest import SchemaManifest
+from osa.domain.data.model.manifest import ResolvedTable, SchemaManifest
+from osa.domain.data.model.query_plan import TableKind
 from osa.domain.data.model.record_summary import RecordSummary
 from osa.domain.data.port.data_read_store import DataReadStore
 from osa.domain.shared.error import NotFoundError
-from osa.domain.shared.model.ids import RecordId
+from osa.domain.shared.model.ids import HookName, RecordId
 from osa.domain.shared.model.reserved import RESERVED_NAMES
 from osa.domain.shared.model.srn import SchemaId
 from osa.domain.shared.service import Service
@@ -66,6 +67,34 @@ class DataCatalogService(Service):
                 code="schema_not_found",
             )
         return manifest
+
+    async def resolve_table(
+        self,
+        schema: str,
+        table_kind: TableKind,
+        feature_name: HookName | None = None,
+    ) -> ResolvedTable:
+        """Resolve a URL schema segment + table selector to its column schema.
+
+        Owns the manifest-structure facts the routes must not re-derive: the
+        records resource is always named ``records``; a feature resource is
+        matched by name AND kind (a hook cannot shadow the records slot).
+        Unknown schema or table raises ``NotFoundError`` (404 before bytes).
+        """
+        schema_id = await self.resolve_schema(schema)
+        manifest = await self.get_schema_manifest(schema_id)
+        name = "records" if table_kind == TableKind.RECORDS else feature_name
+        resource = next(
+            (tr for tr in manifest.table_resources if tr.name == name and tr.kind == table_kind),
+            None,
+        )
+        if resource is None:
+            raise NotFoundError(
+                f"No table '{name}' on schema '{schema}'. "
+                f"See /api/v1/data/{schema_id.render()} for its table resources.",
+                code="table_not_found",
+            )
+        return ResolvedTable(schema_id=schema_id, columns=resource.columns)
 
     async def get_record_by_id(self, id: RecordId, version: int | None) -> RecordSummary:
         record = await self.read_store.get_record_by_id(id, version)
