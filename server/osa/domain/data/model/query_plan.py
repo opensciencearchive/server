@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Mapping
 from enum import StrEnum
 from typing import Any
 
@@ -73,6 +74,37 @@ class PaginationParams(BaseModel):
         return cls(cursor=cursor, limit=max(1, min(limit, max_limit)))
 
 
+class Keyset(BaseModel):
+    """The keyset-pagination contract for a plan — the single source of truth
+    for which column is the effective primary sort and which breaks ties.
+
+    Consumed by BOTH sides of the pagination round-trip: the Postgres adapter
+    (ORDER BY + the cursor's ``after`` condition) and the response assembly
+    (encoding ``next_cursor`` from the last page row). Keeping the two sides
+    on one object is what makes encode/decode asymmetries unrepresentable.
+    """
+
+    sort_column: str  # effective primary sort, post-aliasing (``id`` → tiebreak)
+    tiebreak_column: str  # records: ``srn`` (the PK); features: ``id`` (BIGSERIAL)
+
+    def cursor_from_row(self, row: Mapping[str, Any]) -> str:
+        """Encode the opaque ``next_cursor`` from the last row of a page."""
+        tiebreak = row.get(self.tiebreak_column)
+        sort_value = (
+            tiebreak if self.sort_column == self.tiebreak_column else row.get(self.sort_column)
+        )
+        return encode_cursor(sort_value, tiebreak)
+
+
+# Keyset tiebreak column per table kind. Records tiebreak on ``srn`` — the PK;
+# a bare record id is NOT unique across versions. Features tiebreak on the
+# BIGSERIAL ``id``. A hook may legally declare a data column named ``srn``,
+# which must never hijack the feature tiebreaker — hence by-kind, not by-key.
+_TIEBREAK_COLUMNS: dict[TableKind, str] = {
+    TableKind.RECORDS: "srn",
+    TableKind.FEATURE: "id",
+}
+
 # Default sort keys per table kind (data-model.md §PaginationParams).
 _DEFAULT_SORTS: dict[TableKind, list[SortSpec]] = {
     TableKind.RECORDS: [
@@ -102,6 +134,21 @@ class QueryPlan(BaseModel):
         if not self.sort:
             self.sort = list(_DEFAULT_SORTS[self.table_kind])
         return self
+
+    @property
+    def keyset(self) -> Keyset:
+        """The pagination contract for this plan.
+
+        ``sort=id`` aliases to the tiebreak column: for records the addressable
+        ``id`` is a projection of the srn PK (sorting by it would be ambiguous
+        across versions), and for features ``id`` already is the tiebreaker.
+        """
+        tiebreak = _TIEBREAK_COLUMNS[self.table_kind]
+        primary = self.sort[0].column
+        return Keyset(
+            sort_column=tiebreak if primary == "id" else primary,
+            tiebreak_column=tiebreak,
+        )
 
 
 def encode_cursor(sort_value: Any, id_value: Any) -> str:

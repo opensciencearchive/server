@@ -212,26 +212,30 @@ class PostgresDataReadStore:
 
     def _records_sort(self, plan: QueryPlan, metadata_table: Any) -> tuple[list[Any], Any | None]:
         t = records_table
-        # First sort key drives the cursor value; ``id`` (srn) is the tiebreaker.
-        primary = plan.sort[0]
-        is_desc = primary.direction == SortDirection.DESC
-        if primary.column in ("created_at", "published_at"):
+        # plan.keyset owns tiebreak choice and sort=id aliasing; this method
+        # only maps its column names onto SQL expressions.
+        keyset = plan.keyset
+        is_desc = plan.sort[0].direction == SortDirection.DESC
+        tiebreak_expr = t.c[keyset.tiebreak_column]
+        if keyset.sort_column == keyset.tiebreak_column:
+            sort_expr: sa.ColumnElement[Any] = tiebreak_expr
+        elif keyset.sort_column in ("created_at", "published_at"):
             sort_expr = t.c.published_at
-        elif primary.column == "id":
-            sort_expr = t.c.srn
-        elif primary.column in metadata_table.c:
-            sort_expr = metadata_table.c[primary.column]
+        elif keyset.sort_column in metadata_table.c:
+            sort_expr = metadata_table.c[keyset.sort_column]
         else:
             raise ValidationError(
-                f"Unknown sort column '{primary.column}'.", field="sort", code="unknown_sort_field"
+                f"Unknown sort column '{keyset.sort_column}'.",
+                field="sort",
+                code="unknown_sort_field",
             )
         page = KeysetPage(
             [
                 SortKey(sort_expr, descending=is_desc, nulls_last=True),
-                SortKey(t.c.srn, descending=is_desc),
+                SortKey(tiebreak_expr, descending=is_desc),
             ]
         )
-        return page.order_by(), self._cursor_after(plan, page, sort_expr, t.c.srn)
+        return page.order_by(), self._cursor_after(plan, page, sort_expr, tiebreak_expr)
 
     def _cursor_after(
         self,
@@ -382,25 +386,28 @@ class PostgresDataReadStore:
         return int((await self.session.execute(stmt)).scalar_one())
 
     def _features_sort(self, plan: QueryPlan, ft: sa.Table) -> tuple[list[Any], Any | None]:
-        primary = plan.sort[0]
-        is_desc = primary.direction == SortDirection.DESC
-        if primary.column == "id":
-            sort_expr = ft.c.id
-        elif primary.column in ft.c:
-            sort_expr = ft.c[primary.column]
+        # plan.keyset owns tiebreak choice and sort=id aliasing; this method
+        # only maps its column names onto SQL expressions.
+        keyset = plan.keyset
+        is_desc = plan.sort[0].direction == SortDirection.DESC
+        tiebreak_expr = ft.c[keyset.tiebreak_column]
+        if keyset.sort_column == keyset.tiebreak_column:
+            sort_expr: sa.ColumnElement[Any] = tiebreak_expr
+        elif keyset.sort_column in ft.c:
+            sort_expr = ft.c[keyset.sort_column]
         else:
             raise ValidationError(
-                f"Unknown sort column '{primary.column}'.",
+                f"Unknown sort column '{keyset.sort_column}'.",
                 field="sort",
                 code="unknown_sort_field",
             )
         page = KeysetPage(
             [
                 SortKey(sort_expr, descending=is_desc, nulls_last=True),
-                SortKey(ft.c.id, descending=is_desc),
+                SortKey(tiebreak_expr, descending=is_desc),
             ]
         )
-        return page.order_by(), self._cursor_after(plan, page, sort_expr, ft.c.id)
+        return page.order_by(), self._cursor_after(plan, page, sort_expr, tiebreak_expr)
 
     def _compile_feature_filter(self, expr: FilterExpr, *, ft: sa.Table, feature_name: str) -> Any:
         if isinstance(expr, Predicate):

@@ -10,6 +10,7 @@ from osa.domain.data.model.query_plan import (
     PaginationParams,
     QueryPlan,
     SortDirection,
+    SortSpec,
     TableKind,
     decode_cursor,
     encode_cursor,
@@ -85,3 +86,59 @@ def test_encode_cursor_accepts_datetime_sort_value() -> None:
     decoded = decode_cursor(encode_cursor(ts, 7))
     assert datetime.fromisoformat(decoded["s"]) == ts
     assert decoded["id"] == 7
+
+
+# --------------------------------------------------------------------------- #
+# Keyset — single owner of the pagination contract (tiebreak + sort aliasing)
+# --------------------------------------------------------------------------- #
+
+
+def test_records_keyset_defaults() -> None:
+    plan = QueryPlan(schema_id=SCHEMA, table_kind=TableKind.RECORDS)
+    assert plan.keyset.tiebreak_column == "srn"
+    assert plan.keyset.sort_column == "created_at"
+
+
+def test_records_keyset_id_sort_aliases_to_tiebreak() -> None:
+    # ``sort=id`` on records sorts by the srn column (the PK; a bare id is not
+    # unique across versions), so the keyset's sort column IS the tiebreaker.
+    plan = QueryPlan(
+        schema_id=SCHEMA,
+        table_kind=TableKind.RECORDS,
+        sort=[SortSpec(column="id", direction=SortDirection.ASC)],
+    )
+    assert plan.keyset.sort_column == "srn"
+    assert plan.keyset.tiebreak_column == "srn"
+
+
+def test_feature_keyset_defaults() -> None:
+    plan = QueryPlan(schema_id=SCHEMA, table_kind=TableKind.FEATURE, feature_name="f")
+    assert plan.keyset.tiebreak_column == "id"
+    assert plan.keyset.sort_column == "id"
+
+
+def test_keyset_cursor_from_row_records_default_sort() -> None:
+    plan = QueryPlan(schema_id=SCHEMA, table_kind=TableKind.RECORDS)
+    cursor = plan.keyset.cursor_from_row({"id": "a", "srn": "s1", "created_at": "2026-01-02"})
+    assert decode_cursor(cursor) == {"s": "2026-01-02", "id": "s1"}
+
+
+def test_keyset_cursor_from_row_records_id_sort_encodes_srn() -> None:
+    plan = QueryPlan(
+        schema_id=SCHEMA,
+        table_kind=TableKind.RECORDS,
+        sort=[SortSpec(column="id", direction=SortDirection.ASC)],
+    )
+    cursor = plan.keyset.cursor_from_row({"id": "a", "srn": "urn:osa:localhost:rec:a@1"})
+    assert decode_cursor(cursor) == {
+        "s": "urn:osa:localhost:rec:a@1",
+        "id": "urn:osa:localhost:rec:a@1",
+    }
+
+
+def test_keyset_cursor_from_row_feature_hook_column_named_srn_is_inert() -> None:
+    # A hook may declare a data column named "srn"; the feature tiebreaker is
+    # still the integer row id.
+    plan = QueryPlan(schema_id=SCHEMA, table_kind=TableKind.FEATURE, feature_name="f")
+    cursor = plan.keyset.cursor_from_row({"id": 2, "srn": "hook-value-2"})
+    assert decode_cursor(cursor) == {"s": 2, "id": 2}
