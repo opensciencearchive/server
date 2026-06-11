@@ -64,7 +64,7 @@ def _feature_plan(cursor: str) -> QueryPlan:
 
 def _feature_table():
     fschema = FeatureSchema(columns=[ColumnDef(name="score", json_type="number", required=True)])
-    return build_feature_table("chem_features", fschema), fschema
+    return build_feature_table("chem_features", fschema)
 
 
 class TestRecordsCursorValidation:
@@ -98,25 +98,30 @@ class TestRecordsCursorValidation:
 
 class TestFeatureCursorValidation:
     def test_corrupt_base64_raises_validation_error(self) -> None:
-        ft, fschema = _feature_table()
+        ft = _feature_table()
         with pytest.raises(ValidationError) as exc:
-            _store()._features_sort(_feature_plan("!!not-base64!!"), ft, fschema)
+            _store()._features_sort(_feature_plan("!!not-base64!!"), ft)
         assert exc.value.field == "cursor"
 
     def test_non_integer_id_raises_validation_error(self) -> None:
-        ft, fschema = _feature_table()
+        ft = _feature_table()
         # Well-formed cursor whose id component is not an int → int(...) ValueError.
         cursor = encode_cursor(5, "not-an-int")
         with pytest.raises(ValidationError) as exc:
-            _store()._features_sort(_feature_plan(cursor), ft, fschema)
+            _store()._features_sort(_feature_plan(cursor), ft)
         assert exc.value.field == "cursor"
 
     def test_created_at_cursor_value_coerced_to_datetime(self) -> None:
-        # created_at is an implicit feature column (no ColumnDef in the hook's
-        # FeatureSchema), so the decoder must coerce its ISO string itself —
-        # asyncpg rejects a str bound against DateTime(timezone=True).
-        _, fschema = _feature_table()
-        value = PostgresDataReadStore._coerce_feature_cursor_value(
-            "2026-01-02T03:04:05+00:00", "created_at", fschema
+        # created_at is an implicit feature column; the type-driven coercion
+        # must turn its ISO string back into a datetime before binding.
+        ft = _feature_table()
+        value = PostgresDataReadStore._coerce_cursor_value(
+            "2026-01-02T03:04:05+00:00", ft.c.created_at
         )
         assert isinstance(value, datetime)
+
+    def test_integer_id_sort_value_coerced_to_int(self) -> None:
+        # Sorting by id, the cursor sort value binds against BIGINT — a str
+        # is coerced (and garbage raises ValueError → 400 via the sort path).
+        ft = _feature_table()
+        assert PostgresDataReadStore._coerce_cursor_value("7", ft.c.id) == 7

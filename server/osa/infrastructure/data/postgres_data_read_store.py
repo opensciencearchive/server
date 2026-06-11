@@ -56,7 +56,12 @@ from osa.domain.data.model.manifest import (
     SchemaManifest,
     TableResource,
 )
-from osa.domain.data.model.query_plan import QueryPlan, SortDirection, TableKind
+from osa.domain.data.model.query_plan import (
+    QueryPlan,
+    SortDirection,
+    TableKind,
+    decode_cursor,
+)
 from osa.domain.data.model.record_summary import RecordSummary
 from osa.domain.semantics.model.value import FieldType
 from osa.domain.shared.error import NotFoundError, ValidationError
@@ -210,32 +215,53 @@ class PostgresDataReadStore:
                 SortKey(t.c.srn, descending=is_desc),
             ]
         )
-        cursor_after = None
-        if plan.pagination.cursor is not None:
-            from osa.domain.data.model.query_plan import decode_cursor
+        return page.order_by(), self._cursor_after(plan, page, sort_expr, t.c.srn)
 
-            try:
-                decoded = decode_cursor(str(plan.pagination.cursor))
-                sort_value = self._coerce_cursor_value(decoded["s"], sort_expr)
-                cursor_after = page.after((sort_value, decoded["id"]))
-            except ValueError as exc:
-                raise _invalid_cursor(exc) from exc
-        return page.order_by(), cursor_after
+    def _cursor_after(
+        self,
+        plan: QueryPlan,
+        page: KeysetPage,
+        sort_expr: sa.ColumnElement[Any],
+        id_expr: sa.ColumnElement[Any],
+    ) -> Any | None:
+        """Build the keyset ``after`` condition from the plan's opaque cursor.
+
+        Shared by the records and feature sorts: both cursor components are
+        coerced to their column's Python type; a non-conforming value raises
+        ``ValueError`` → 400 (the cursor is client-supplied input).
+        """
+        if plan.pagination.cursor is None:
+            return None
+        try:
+            decoded = decode_cursor(str(plan.pagination.cursor))
+            return page.after(
+                (
+                    self._coerce_cursor_value(decoded["s"], sort_expr),
+                    self._coerce_cursor_value(decoded["id"], id_expr),
+                )
+            )
+        except ValueError as exc:
+            raise _invalid_cursor(exc) from exc
 
     @staticmethod
     def _coerce_cursor_value(value: Any, sort_expr: sa.ColumnElement[Any]) -> Any:
-        """Coerce a decoded cursor sort value to the sort column's Python type.
+        """Coerce a decoded cursor value to the bound column's Python type.
 
         Cursors carry date/datetime values as ISO strings (``encode_cursor``
-        renders with ``default=str``), but asyncpg rejects a str bound against
-        a DATE / TIMESTAMP column — including dynamic metadata columns of
-        FieldType.DATE, so dispatch on the column type, not the column name.
+        renders with ``default=str``), but asyncpg rejects mistyped binds —
+        str vs DATE / TIMESTAMP (including dynamic metadata columns of
+        FieldType.DATE), str vs BIGINT — so dispatch on the column type, not
+        the column name.
         """
-        if isinstance(value, str):
-            if isinstance(sort_expr.type, sa.DateTime):
-                return datetime.fromisoformat(value)
-            if isinstance(sort_expr.type, sa.Date):
-                return date.fromisoformat(value)
+        if value is None:
+            return None
+        col_type = sort_expr.type
+        if isinstance(col_type, sa.DateTime) and isinstance(value, str):
+            return datetime.fromisoformat(value)
+        if isinstance(col_type, sa.Date) and isinstance(value, str):
+            return date.fromisoformat(value)
+        if isinstance(col_type, sa.Integer):
+            return int(value)
         return value
 
     # ------------------------------------------------------------------ #
@@ -245,7 +271,7 @@ class PostgresDataReadStore:
     async def _stream_features(self, plan: QueryPlan) -> AsyncIterator[Mapping[str, Any]]:
         if plan.feature_name is None:  # guarded by QueryPlan, narrowed for the type checker
             raise ValidationError("feature_name is required for a FEATURE plan", field="feature")
-        ft, fschema = await self._resolve_feature_table(plan.schema_id, plan.feature_name)
+        ft, _ = await self._resolve_feature_table(plan.schema_id, plan.feature_name)
 
         conditions: list[Any] = []
         if plan.filter is not None:
@@ -253,7 +279,7 @@ class PostgresDataReadStore:
                 self._compile_feature_filter(plan.filter, ft=ft, feature_name=plan.feature_name)
             )
 
-        order_keys, cursor_after = self._features_sort(plan, ft, fschema)
+        order_keys, cursor_after = self._features_sort(plan, ft)
         if cursor_after is not None:
             conditions.append(cursor_after)
 
@@ -339,9 +365,7 @@ class PostgresDataReadStore:
         )
         return int((await self.session.execute(stmt)).scalar_one())
 
-    def _features_sort(
-        self, plan: QueryPlan, ft: sa.Table, fschema: FeatureSchema
-    ) -> tuple[list[Any], Any | None]:
+    def _features_sort(self, plan: QueryPlan, ft: sa.Table) -> tuple[list[Any], Any | None]:
         primary = plan.sort[0]
         is_desc = primary.direction == SortDirection.DESC
         if primary.column == "id":
@@ -360,35 +384,7 @@ class PostgresDataReadStore:
                 SortKey(ft.c.id, descending=is_desc),
             ]
         )
-        cursor_after = None
-        if plan.pagination.cursor is not None:
-            from osa.domain.data.model.query_plan import decode_cursor
-
-            try:
-                decoded = decode_cursor(str(plan.pagination.cursor))
-                sort_value = self._coerce_feature_cursor_value(
-                    decoded["s"], primary.column, fschema
-                )
-                cursor_after = page.after((sort_value, int(decoded["id"])))
-            except ValueError as exc:
-                raise _invalid_cursor(exc) from exc
-        return page.order_by(), cursor_after
-
-    @staticmethod
-    def _coerce_feature_cursor_value(value: Any, column: str, fschema: FeatureSchema) -> Any:
-        if column == "id":
-            return None if value is None else int(value)
-        # created_at is an implicit column (no ColumnDef in the hook's schema);
-        # the cursor carries it as an ISO string but the bind needs a datetime.
-        if column == "created_at" and isinstance(value, str):
-            return datetime.fromisoformat(value)
-        col_def = next((c for c in fschema.columns if c.name == column), None)
-        if col_def is not None and col_def.json_type == "string" and isinstance(value, str):
-            if col_def.format == "date-time":
-                return datetime.fromisoformat(value)
-            if col_def.format == "date":
-                return date.fromisoformat(value)
-        return value
+        return page.order_by(), self._cursor_after(plan, page, sort_expr, ft.c.id)
 
     def _compile_feature_filter(self, expr: FilterExpr, *, ft: sa.Table, feature_name: str) -> Any:
         if isinstance(expr, Predicate):
