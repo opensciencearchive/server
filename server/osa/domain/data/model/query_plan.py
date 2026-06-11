@@ -18,7 +18,7 @@ import json
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from osa.domain.data.model.filter import FilterExpr
 from osa.domain.shared.model.ids import HookName
@@ -51,9 +51,21 @@ class PaginationCursor(BaseModel):
         return self.value
 
 
+# Page-size ceiling for paginated reads. Single source of truth — route
+# helpers must not redeclare it.
+MAX_LIMIT = 1000
+
+
 class PaginationParams(BaseModel):
     cursor: PaginationCursor | None = None
-    limit: int = Field(default=50, ge=1, le=1000)
+    limit: int = Field(default=50, ge=1, le=MAX_LIMIT)
+
+    @field_validator("limit", mode="before")
+    @classmethod
+    def _clamp_limit(cls, value: int) -> int:
+        # Clamp, don't reject: a consumer asking for "everything" with a big
+        # number gets the max page, not a 422.
+        return max(1, min(int(value), MAX_LIMIT))
 
 
 # Default sort keys per table kind (data-model.md §PaginationParams).

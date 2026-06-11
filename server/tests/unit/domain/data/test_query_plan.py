@@ -43,9 +43,16 @@ def test_records_kind_rejects_feature_name() -> None:
         QueryPlan(schema_id=SCHEMA, table_kind=TableKind.RECORDS, feature_name="x")
 
 
-def test_limit_capped_at_1000() -> None:
-    with pytest.raises(PydanticValidationError):
-        PaginationParams(limit=5000)
+def test_limit_above_max_clamps_to_1000() -> None:
+    # Clamp, don't reject: a consumer asking for "everything" with a big
+    # number gets the max page, not a 422. The clamp policy lives HERE, on
+    # the canonical model — not in route helpers.
+    assert PaginationParams(limit=5000).limit == 1000
+
+
+def test_limit_below_one_clamps_to_one() -> None:
+    assert PaginationParams(limit=0).limit == 1
+    assert PaginationParams(limit=-5).limit == 1
 
 
 def test_limit_default_is_50() -> None:

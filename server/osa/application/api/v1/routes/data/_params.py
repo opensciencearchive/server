@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from osa.domain.data.model.filter import FilterExpr
 from osa.domain.data.model.query_plan import (
@@ -17,24 +17,15 @@ from osa.domain.shared.error import ValidationError
 from osa.domain.shared.model.ids import HookName
 from osa.domain.shared.model.srn import SchemaId
 
-# Page-size ceiling (mirrors PaginationParams.limit's bound). Requests above this
-# are clamped, not rejected (FR — a consumer asking for "everything" with a big
-# number gets the max page, not a 422).
-MAX_LIMIT = 1000
-
-
-def clamp_limit(limit: int) -> int:
-    return max(1, min(limit, MAX_LIMIT))
-
 
 class FilterRequestBody(BaseModel):
     """POST body shared by every table format (records + feature)."""
 
     filter: FilterExpr | None = None
     cursor: str | None = None
-    # Unbounded at the edge so an over-large request is clamped (build_plan),
-    # not rejected; the canonical bound lives on PaginationParams.
-    limit: int = Field(default=50, ge=1)
+    # Unbounded at the edge: PaginationParams clamps out-of-range values to
+    # [1, MAX_LIMIT] — over-large requests get the max page, not a 422.
+    limit: int = 50
     sort: str | None = None
 
 
@@ -74,7 +65,7 @@ def build_plan(
 ) -> QueryPlan:
     pagination = PaginationParams(
         cursor=PaginationCursor(value=cursor) if cursor else None,
-        limit=clamp_limit(limit),
+        limit=limit,
     )
     return QueryPlan(
         schema_id=schema_id,
