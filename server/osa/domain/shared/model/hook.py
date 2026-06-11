@@ -127,6 +127,15 @@ class HookDefinition(ValueObject):
     runtime: Annotated[OciConfig, Field(discriminator="type")]
     feature: Annotated[TableFeatureSpec, Field(discriminator="kind")]
 
+    def model_post_init(self, __context: object) -> None:
+        # A hook name becomes a feature-table URL slot under /data/{schema}/.
+        # Reject names that would shadow a fixed slot (research §6).
+        from osa.domain.shared.error import ReservedNameError
+        from osa.domain.shared.model.reserved import RESERVED_NAMES
+
+        if self.name in RESERVED_NAMES:
+            raise ReservedNameError(self.name, "hook")
+
     def with_memory(self, memory: str) -> "HookDefinition":
         """Return a copy with a different memory limit."""
         new_limits = self.runtime.limits.model_copy(update={"memory": memory})

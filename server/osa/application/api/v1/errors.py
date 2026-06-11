@@ -15,6 +15,7 @@ from osa.domain.shared.error import (
     InvalidStateError,
     NotFoundError,
     OSAError,
+    ReservedNameError,
     ValidationError,
 )
 
@@ -24,6 +25,7 @@ DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     InvalidStateError: 409,
     ConflictError: 409,
     AuthorizationError: 403,
+    ReservedNameError: 400,
 }
 
 

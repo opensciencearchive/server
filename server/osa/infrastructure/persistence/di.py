@@ -16,6 +16,7 @@ from osa.domain.metadata.service.metadata import MetadataService
 from osa.domain.record.port.feature_reader import FeatureReader
 from osa.domain.record.port.repository import RecordRepository
 from osa.domain.record.query.get_record import GetRecordHandler
+from osa.domain.record.query.get_stats import GetStatsHandler
 from osa.domain.record.service import RecordService
 from osa.infrastructure.persistence.adapter.feature_reader import PostgresFeatureReader
 from osa.domain.feature.port.storage import FeatureStoragePort
@@ -27,12 +28,12 @@ from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.event_repository import EventRepository
 from osa.domain.feature.port.feature_store import FeatureStore
 from osa.domain.validation.port.repository import ValidationRunRepository
-from osa.domain.discovery.port.field_definition_reader import FieldDefinitionReader
-from osa.domain.discovery.port.read_store import DiscoveryReadStore
-from osa.infrastructure.persistence.adapter.discovery import (
-    PostgresDiscoveryReadStore,
-    PostgresFieldDefinitionReader,
+from osa.domain.data.port.data_read_store import (
+    DataCatalogReadStore,
+    DataTableReadStore,
 )
+from osa.infrastructure.data.postgres_catalog_read_store import PostgresCatalogReadStore
+from osa.infrastructure.data.postgres_table_read_store import PostgresTableReadStore
 from osa.infrastructure.persistence.adapter.readers import (
     OntologyReaderAdapter,
     SchemaReaderAdapter,
@@ -173,13 +174,17 @@ class PersistenceProvider(Provider):
             feature_reader=feature_reader,
         )
 
-    # Discovery adapters
-    discovery_read_store = provide(
-        PostgresDiscoveryReadStore, scope=Scope.UOW, provides=DiscoveryReadStore
-    )
-    field_definition_reader = provide(
-        PostgresFieldDefinitionReader, scope=Scope.UOW, provides=FieldDefinitionReader
-    )
+    # Data read surface adapter (unified /data/* engine)
+    @provide(scope=Scope.UOW, provides=DataTableReadStore)
+    def get_data_table_read_store(self, session: AsyncSession) -> PostgresTableReadStore:
+        return PostgresTableReadStore(session=session)
+
+    @provide(scope=Scope.UOW, provides=DataCatalogReadStore)
+    def get_data_catalog_read_store(
+        self, session: AsyncSession, config: Config
+    ) -> PostgresCatalogReadStore:
+        return PostgresCatalogReadStore(session=session, node_domain=Domain(config.domain))
 
     # Record query handlers
     get_record_handler = provide(GetRecordHandler, scope=Scope.UOW)
+    get_stats_handler = provide(GetStatsHandler, scope=Scope.UOW)

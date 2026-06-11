@@ -21,7 +21,10 @@ class Result(BaseModel): ...
 
 
 C = TypeVar("C", bound=Query)
-R = TypeVar("R", bound=Result)
+# Unbound: query results may be Result DTOs, domain read models (e.g. a
+# catalog/manifest that IS the wire shape), or streaming reads. Result remains
+# the conventional base for handler-specific DTOs.
+R = TypeVar("R")
 
 # Unbound async handler method: (self, cmd) -> Coroutine -> Result
 _HandlerMethod = Callable[..., Coroutine[Any, Any, Any]]

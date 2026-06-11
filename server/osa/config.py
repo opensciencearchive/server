@@ -260,6 +260,21 @@ def _normalize_pg_url(url: str) -> str:
     return url
 
 
+class DataConfig(BaseModel):
+    """Bounds for the unified ``/data/`` read surface (nested in Config).
+
+    Caps the cost of a filter tree before it is compiled to SQL (maximum tree
+    depth, total predicate count, distinct feature-hook joins) and the
+    paginated-JSON page size. Overridable via ``OSA_DATA__MAX_FILTER_DEPTH``
+    etc. (FR-012, features 076/137).
+    """
+
+    max_filter_depth: int = 10
+    max_predicates: int = 200
+    max_feature_joins: int = 10  # distinct features.<hook> references in one filter
+    max_page_limit: int = 1000  # page-size ceiling; over-large requests are clamped, not 422d
+
+
 class Config(BaseSettings):
     # Archive identity (promoted from Server model)
     name: str = "Open Science Archive"
@@ -283,12 +298,8 @@ class Config(BaseSettings):
     worker: WorkerConfig = WorkerConfig()  # Background worker settings
     auth: AuthConfig = AuthConfig()  # Defaults are dev-safe; boot check enforces prod-correctness
     runner: RunnerConfig = RunnerConfig()
+    data: DataConfig = DataConfig()  # /data/ read-surface filter-tree bounds
     host_data_dir: str | None = None  # Host path for OSA_DATA_DIR (sibling container mounts)
-
-    # Discovery filter-tree bounds (feature 076)
-    discovery_max_filter_depth: int = 10
-    discovery_max_predicates: int = 200
-    discovery_max_cross_domain_joins: int = 10
 
     model_config = {
         "env_prefix": "OSA_",

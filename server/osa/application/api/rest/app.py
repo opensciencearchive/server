@@ -8,6 +8,7 @@ import logfire
 from dishka import Provider as DishkaProvider
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from osa.application.api.v1.errors import map_osa_error
@@ -16,17 +17,16 @@ from osa.application.api.v1.routes import (
     auth,
     conventions,
     depositions,
-    discovery,
     events,
     ingestions,
     health,
     ontologies,
-    records,
     schemas,
-    search,
     stats,
     validation,
 )
+from osa.application.api.v1.routes import data as data_routes
+from osa.application.api.v1.routes.data._limiter import limiter
 from osa.application.di import create_container
 from osa.config import DEV_JWT_SECRET, Config
 from osa.domain.shared.authorization.startup import validate_all_handlers
@@ -194,8 +194,6 @@ def create_app(
     app_instance.include_router(admin.router, prefix="/api/v1")
     app_instance.include_router(auth.router, prefix="/api/v1")
     app_instance.include_router(events.router, prefix="/api/v1")
-    app_instance.include_router(records.router, prefix="/api/v1")
-    app_instance.include_router(search.router, prefix="/api/v1")
     app_instance.include_router(stats.router, prefix="/api/v1")
     app_instance.include_router(ontologies.router, prefix="/api/v1")
     app_instance.include_router(schemas.router, prefix="/api/v1")
@@ -203,7 +201,18 @@ def create_app(
     app_instance.include_router(depositions.router, prefix="/api/v1")
     app_instance.include_router(ingestions.router, prefix="/api/v1")
     app_instance.include_router(validation.router, prefix="/api/v1")
-    app_instance.include_router(discovery.router, prefix="/api/v1")
+    app_instance.include_router(data_routes.router, prefix="/api/v1")
+
+    # POST /data/* rate limiting (slowapi). The shared limiter is attached to
+    # app state and its 429 handler registered; GET routes are not limited.
+    app_instance.state.limiter = limiter
+
+    @app_instance.exception_handler(RateLimitExceeded)
+    async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+        return JSONResponse(
+            status_code=429,
+            content={"code": "rate_limited", "message": "POST rate limit exceeded (10/min/IP)."},
+        )
 
     # Global OSA error handler - maps domain and infrastructure errors to HTTP responses
     @app_instance.exception_handler(OSAError)

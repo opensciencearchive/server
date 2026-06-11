@@ -55,6 +55,10 @@ class RecordService(Service):
             raise NotFoundError(f"Record not found: {srn}")
         return record
 
+    async def count(self) -> int:
+        """Total published records on this node."""
+        return await self.record_repo.count()
+
     async def _resolve_schema_id(self, convention_srn: ConventionSRN) -> SchemaId:
         """Resolve a convention to its schema id at publication time."""
         convention = await self.convention_repo.get(convention_srn)

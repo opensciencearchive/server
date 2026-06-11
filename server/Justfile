@@ -106,7 +106,8 @@ test-integration:
     @TEST=1 uv run pytest tests/integration -v --tb=short -x
 
 # Run integration tests with PG: ensure DB running → wipe → create → migrate → test → wipe
-test-integration-pg:
+# Optionally narrow to a pytest target, e.g. `just test-integration-pg tests/integration/test_foo.py`
+test-integration-pg target="tests/integration":
     POSTGRES_PORT={{TEST_PG_PORT}} just --justfile ../Justfile db-up
     @just test-db-drop
     @just test-db-create
@@ -116,7 +117,7 @@ test-integration-pg:
     OSA_DATABASE__URL="{{TEST_DB_URL}}" \
     OSA_AUTH__JWT__SECRET="test-secret-for-integration-tests-minimum-32-chars" \
     TEST=1 \
-        uv run pytest tests/integration -v --tb=short -x; \
+        uv run pytest "{{target}}" -v --tb=short -x; \
     just test-db-drop
 
 # === Dependencies ===
