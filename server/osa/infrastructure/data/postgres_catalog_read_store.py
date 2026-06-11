@@ -31,10 +31,7 @@ from osa.domain.data.model.record_summary import RecordSummary
 from osa.domain.semantics.model.value import FieldType
 from osa.domain.shared.model.ids import RecordId
 from osa.domain.shared.model.srn import Domain, RecordSRN, SchemaId
-from osa.infrastructure.data.schema_features import (
-    feature_count_stmt,
-    schema_feature_tables,
-)
+from osa.infrastructure.data.schema_feature_reader import SchemaFeatureReader
 from osa.infrastructure.persistence.feature_table import (
     FeatureSchema,
     build_feature_table,
@@ -57,16 +54,17 @@ _JSON_TYPE_TO_FIELD_TYPE: dict[str, FieldType] = {
 _ALL_FORMATS = ["", "csv", "csv.gz"]
 
 
-def _escape_like(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
-
 class PostgresCatalogReadStore:
     def __init__(self, session: AsyncSession, node_domain: Domain) -> None:
         self.session = session
         # Only the node's DNS domain is needed (to render SRNs in the catalog /
         # manifest) — not the whole Config.
         self.node_domain = node_domain
+        self._features = SchemaFeatureReader(session)
+
+    @staticmethod
+    def _escape_like(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
     # ------------------------------------------------------------------ #
     # Single record by ID
@@ -75,7 +73,7 @@ class PostgresCatalogReadStore:
     async def get_record_by_id(self, id: RecordId, version: int | None) -> RecordSummary | None:
         # The records PK is the SRN ``urn:osa:{domain}:rec:{id}@{version}``.
         # Match the id segment; resolve version (pin or latest published).
-        pattern = f"urn:osa:%:rec:{_escape_like(str(id))}@%"
+        pattern = f"urn:osa:%:rec:{self._escape_like(str(id))}@%"
         t = records_table
         stmt = (
             select(t.c.srn, t.c.schema_id, t.c.schema_version, t.c.published_at, t.c.metadata)
@@ -122,7 +120,7 @@ class PostgresCatalogReadStore:
         for short_id, version in schema_rows:
             schema_id = SchemaId.parse(f"{short_id}@{version}")
             resources = [TableResourceSummary(name="records", kind=TableKind.RECORDS)]
-            for hook_name, _ in await schema_feature_tables(self.session, schema_id):
+            for hook_name, _ in await self._features.feature_tables(schema_id):
                 resources.append(TableResourceSummary(name=hook_name, kind=TableKind.FEATURE))
             entries.append(
                 CatalogEntry(
@@ -180,18 +178,16 @@ class PostgresCatalogReadStore:
     async def _feature_resources(self, schema_id: SchemaId) -> list[TableResource]:
         """Build a TableResource for each feature table registered on the schema."""
         resources: list[TableResource] = []
-        for hook_name, fschema in await schema_feature_tables(self.session, schema_id):
+        for hook_name, fschema in await self._features.feature_tables(schema_id):
             ft = build_feature_table(hook_name, fschema)
-            count = int(
-                (await self.session.execute(feature_count_stmt(ft, schema_id))).scalar_one()
-            )
+            count = await self._features.count_rows(ft, schema_id)
             resources.append(
                 TableResource(
                     name=hook_name,
                     kind=TableKind.FEATURE,
                     # Implicit columns (id, record_srn, created_at) precede the
                     # hook's declared data columns — this is the CSV header order.
-                    columns=[*IMPLICIT_FEATURE_COLUMN_SPECS, *_feature_column_specs(fschema)],
+                    columns=[*IMPLICIT_FEATURE_COLUMN_SPECS, *self._feature_column_specs(fschema)],
                     row_count=count,
                     formats=list(_ALL_FORMATS),
                 )
@@ -220,9 +216,10 @@ class PostgresCatalogReadStore:
         )
         return int((await self.session.execute(stmt)).scalar_one())
 
-
-def _feature_column_specs(fschema: FeatureSchema) -> list[ColumnSpec]:
-    """Map a feature table's declared columns to manifest ColumnSpecs."""
-    return [
-        ColumnSpec(name=c.name, type=_JSON_TYPE_TO_FIELD_TYPE[c.json_type]) for c in fschema.columns
-    ]
+    @staticmethod
+    def _feature_column_specs(fschema: FeatureSchema) -> list[ColumnSpec]:
+        """Map a feature table's declared columns to manifest ColumnSpecs."""
+        return [
+            ColumnSpec(name=c.name, type=_JSON_TYPE_TO_FIELD_TYPE[c.json_type])
+            for c in fschema.columns
+        ]

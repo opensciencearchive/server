@@ -42,10 +42,7 @@ from osa.domain.data.model.record_summary import RecordSummary
 from osa.domain.shared.error import NotFoundError, ValidationError
 from osa.domain.shared.model.ids import RecordId
 from osa.domain.shared.model.srn import RecordSRN, SchemaId
-from osa.infrastructure.data.schema_features import (
-    feature_schema_scope,
-    schema_feature_tables,
-)
+from osa.infrastructure.data.schema_feature_reader import SchemaFeatureReader
 from osa.infrastructure.persistence.feature_table import (
     FeatureSchema,
     build_feature_table,
@@ -64,36 +61,38 @@ from osa.infrastructure.persistence.tables import (
 logger = logging.getLogger(__name__)
 
 
-def _escape_like(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
-
-def statement_timeout_sql(timeout: timedelta) -> str:
-    """Render the caller's execution budget as a ``SET LOCAL`` statement.
-
-    Integer milliseconds, so no operator- or caller-supplied string ever
-    reaches raw SQL. ``SET LOCAL`` reverts on commit/rollback, so the value
-    never leaks to a later request reusing the pooled connection.
-    """
-    return f"SET LOCAL statement_timeout = '{int(timeout.total_seconds() * 1000)}ms'"
-
-
-def _invalid_cursor(exc: Exception) -> ValidationError:
-    """Map a cursor decode/coerce ``ValueError`` to a 400, not a 500.
-
-    Decoding a corrupt cursor (bad base64, missing ``s``/``id`` keys) or coercing
-    a non-conforming value (e.g. a non-integer feature id) raises ``ValueError``,
-    which is not an ``OSAError`` and would otherwise surface as a generic 500.
-    The cursor is opaque client-supplied input, so a malformed one is a 400.
-    """
-    return ValidationError(
-        f"Malformed pagination cursor: {exc}", field="cursor", code="invalid_cursor"
-    )
-
-
 class PostgresTableReadStore:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+        self._features = SchemaFeatureReader(session)
+
+    @staticmethod
+    def statement_timeout_sql(timeout: timedelta) -> str:
+        """Render the caller's execution budget as a ``SET LOCAL`` statement.
+
+        Integer milliseconds, so no operator- or caller-supplied string ever
+        reaches raw SQL. ``SET LOCAL`` reverts on commit/rollback, so the value
+        never leaks to a later request reusing the pooled connection.
+        """
+        return f"SET LOCAL statement_timeout = '{int(timeout.total_seconds() * 1000)}ms'"
+
+    @staticmethod
+    def _escape_like(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    @staticmethod
+    def _invalid_cursor(exc: Exception) -> ValidationError:
+        """Map a cursor decode/coerce ``ValueError`` to a 400, not a 500.
+
+        Decoding a corrupt cursor (bad base64, missing ``s``/``id`` keys) or
+        coercing a non-conforming value (e.g. a non-integer feature id) raises
+        ``ValueError``, which is not an ``OSAError`` and would otherwise surface
+        as a generic 500. The cursor is opaque client-supplied input, so a
+        malformed one is a 400.
+        """
+        return ValidationError(
+            f"Malformed pagination cursor: {exc}", field="cursor", code="invalid_cursor"
+        )
 
     # ------------------------------------------------------------------ #
     # Streaming primitive
@@ -105,7 +104,7 @@ class PostgresTableReadStore:
         # The generator body runs on the route's pre-flight ``__anext__`` pull,
         # so the timeout is in place before the SELECT opens its cursor.
         if timeout is not None:
-            await self.session.execute(sa.text(statement_timeout_sql(timeout)))
+            await self.session.execute(sa.text(self.statement_timeout_sql(timeout)))
         if plan.table_kind == TableKind.RECORDS:
             async for row in self._stream_records(plan):
                 yield row
@@ -221,7 +220,7 @@ class PostgresTableReadStore:
                 )
             )
         except ValueError as exc:
-            raise _invalid_cursor(exc) from exc
+            raise self._invalid_cursor(exc) from exc
 
     @staticmethod
     def _coerce_cursor_value(value: Any, sort_expr: sa.ColumnElement[Any]) -> Any:
@@ -266,7 +265,7 @@ class PostgresTableReadStore:
         # A features.<hook> table is shared by every convention that registers
         # the hook name, across schemas — scope to the requested schema's
         # records via the records join.
-        conditions.extend(feature_schema_scope(plan.schema_id))
+        conditions.extend(self._features.records_scope(plan.schema_id))
 
         # Implicit columns (id, record_srn, created_at) precede the hook's
         # declared data columns — this is the CSV header order.
@@ -294,7 +293,7 @@ class PostgresTableReadStore:
         it. Streaming a feature not registered on the schema is a 404, not a
         leak of another schema's table.
         """
-        for hook_name, fschema in await schema_feature_tables(self.session, schema_id):
+        for hook_name, fschema in await self._features.feature_tables(schema_id):
             if hook_name == feature_name:
                 return build_feature_table(hook_name, fschema), fschema
         raise NotFoundError(
@@ -366,7 +365,9 @@ class PostgresTableReadStore:
                     field=predicate.field.dotted(),
                     code="unknown_feature_column",
                 )
-            return _apply_scalar_op(ft.c[predicate.field.column], predicate.op, predicate.value)
+            return self._apply_scalar_op(
+                ft.c[predicate.field.column], predicate.op, predicate.value
+            )
         if isinstance(predicate.field, MetadataFieldRef):
             raise ValidationError(
                 "Metadata-field predicates are not supported on a feature stream.",
@@ -411,7 +412,7 @@ class PostgresTableReadStore:
                     code="unknown_metadata_field",
                 )
             col = metadata_t.c[predicate.field.field]
-            return _apply_scalar_op(col, predicate.op, predicate.value)
+            return self._apply_scalar_op(col, predicate.op, predicate.value)
         if isinstance(predicate.field, FeatureFieldRef):
             # Feature predicates in the records stream are a US5 extension.
             raise ValidationError(
@@ -421,30 +422,34 @@ class PostgresTableReadStore:
             )
         raise TypeError(f"Unexpected field ref type: {type(predicate.field).__name__}")
 
-
-def _apply_scalar_op(col: Any, op: FilterOperator, value: Any) -> Any:
-    if op == FilterOperator.EQ:
-        return col == value
-    if op == FilterOperator.NEQ:
-        return or_(col != value, col.is_(None))
-    if op == FilterOperator.GT:
-        return col > value
-    if op == FilterOperator.GTE:
-        return col >= value
-    if op == FilterOperator.LT:
-        return col < value
-    if op == FilterOperator.LTE:
-        return col <= value
-    if op == FilterOperator.IN:
-        if not isinstance(value, list):
-            raise ValidationError(
-                "Operator 'in' requires a list value.", field=col.key, code="invalid_value_for_op"
+    @staticmethod
+    def _apply_scalar_op(col: Any, op: FilterOperator, value: Any) -> Any:
+        if op == FilterOperator.EQ:
+            return col == value
+        if op == FilterOperator.NEQ:
+            return or_(col != value, col.is_(None))
+        if op == FilterOperator.GT:
+            return col > value
+        if op == FilterOperator.GTE:
+            return col >= value
+        if op == FilterOperator.LT:
+            return col < value
+        if op == FilterOperator.LTE:
+            return col <= value
+        if op == FilterOperator.IN:
+            if not isinstance(value, list):
+                raise ValidationError(
+                    "Operator 'in' requires a list value.",
+                    field=col.key,
+                    code="invalid_value_for_op",
+                )
+            return col.in_(value)
+        if op == FilterOperator.CONTAINS:
+            return cast(col, String).ilike(
+                f"%{PostgresTableReadStore._escape_like(str(value))}%", escape="\\"
             )
-        return col.in_(value)
-    if op == FilterOperator.CONTAINS:
-        return cast(col, String).ilike(f"%{_escape_like(str(value))}%", escape="\\")
-    if op == FilterOperator.IS_NULL:
-        return col.is_(None)
-    raise ValidationError(
-        f"Unsupported operator: {op}", field="filter", code="unsupported_operator"
-    )
+        if op == FilterOperator.IS_NULL:
+            return col.is_(None)
+        raise ValidationError(
+            f"Unsupported operator: {op}", field="filter", code="unsupported_operator"
+        )
