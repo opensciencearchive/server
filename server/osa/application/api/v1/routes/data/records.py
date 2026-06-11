@@ -12,7 +12,7 @@ from dishka.integrations.fastapi import DishkaRoute, FromDishka
 from fastapi import APIRouter
 
 from osa.application.api.v1.routes.data.models import RecordResponse
-from osa.domain.data.service.data_catalog import DataCatalogService
+from osa.domain.data.query.catalog import GetDataRecord, GetDataRecordHandler
 from osa.domain.shared.model.ids import RecordRef
 
 router = APIRouter(route_class=DishkaRoute)
@@ -22,8 +22,7 @@ router = APIRouter(route_class=DishkaRoute)
     "/records/{record_id}", operation_id="data_get_record_by_id", response_model=RecordResponse
 )
 async def get_record_by_id(
-    record_id: str, service: FromDishka[DataCatalogService]
+    record_id: str, handler: FromDishka[GetDataRecordHandler]
 ) -> RecordResponse:
-    ref = RecordRef.parse(record_id)
-    summary = await service.get_record_by_id(ref.id, ref.version)
+    summary = await handler.run(GetDataRecord(ref=RecordRef.parse(record_id)))
     return RecordResponse.from_summary(summary)

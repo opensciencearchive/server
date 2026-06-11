@@ -1,13 +1,11 @@
-"""Unit tests for table-route request parsing (sort spec + plan build)."""
+"""Unit tests for table-route request parsing (sort spec). Plan construction
+lives on the table-read handlers (tests/unit/domain/data/test_table_read_handlers.py)."""
 
 import pytest
 
-from osa.application.api.v1.routes.data._params import build_plan, parse_sort
-from osa.domain.data.model.query_plan import SortDirection, TableKind
+from osa.application.api.v1.routes.data._params import parse_sort
+from osa.domain.data.model.query_plan import SortDirection
 from osa.domain.shared.error import ValidationError
-from osa.domain.shared.model.srn import SchemaId
-
-SCHEMA = SchemaId.parse("compound@1.0.0")
 
 
 def test_parse_sort_empty_is_empty_list() -> None:
@@ -32,49 +30,3 @@ def test_parse_sort_bare_column_defaults_asc() -> None:
 def test_parse_sort_invalid_direction_raises() -> None:
     with pytest.raises(ValidationError):
         parse_sort("mw:sideways")
-
-
-def test_build_plan_wraps_cursor_and_limit() -> None:
-    plan = build_plan(
-        schema_id=SCHEMA,
-        table_kind=TableKind.RECORDS,
-        feature_name=None,
-        filter_expr=None,
-        cursor="CUR",
-        limit=10,
-        max_limit=1000,
-        sort="mw:asc",
-    )
-    assert plan.pagination.limit == 10
-    assert str(plan.pagination.cursor) == "CUR"
-    assert plan.sort[0].column == "mw"
-
-
-def test_build_plan_clamps_limit_to_configured_max() -> None:
-    plan = build_plan(
-        schema_id=SCHEMA,
-        table_kind=TableKind.RECORDS,
-        feature_name=None,
-        filter_expr=None,
-        cursor=None,
-        limit=99999,
-        max_limit=200,
-        sort=None,
-    )
-    assert plan.pagination.limit == 200
-
-
-def test_build_plan_no_cursor_is_none() -> None:
-    plan = build_plan(
-        schema_id=SCHEMA,
-        table_kind=TableKind.RECORDS,
-        feature_name=None,
-        filter_expr=None,
-        cursor=None,
-        limit=50,
-        max_limit=1000,
-        sort=None,
-    )
-    assert plan.pagination.cursor is None
-    # default RECORDS sort applied
-    assert plan.sort[0].column == "created_at"

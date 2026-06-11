@@ -3,8 +3,9 @@
 Endpoint *builders* capture a :class:`DataResponseFormat` by closure; the
 generic :func:`register_table_routes` factory registers the GET/POST × format
 matrix from them. GET streams (or paginates JSON) with no body; POST takes a
-``FilterExpr`` body and is rate-limited per IP. Every route applies the
-format's ``statement_timeout`` and resolves the schema (404 before bytes).
+``FilterExpr`` body and is rate-limited per IP. Everything between HTTP and
+the row stream — table resolution, plan construction, limit clamping — lives
+in :class:`ReadRecordsTableHandler`.
 """
 
 from __future__ import annotations
@@ -14,39 +15,31 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from osa.application.api.v1.routes.data._limiter import POST_RATE_LIMIT, limiter
-from osa.application.api.v1.routes.data._params import FilterRequestBody, build_plan
+from osa.application.api.v1.routes.data._params import FilterRequestBody, parse_sort
 from osa.application.api.v1.routes.data._streaming import build_table_response
-from osa.application.api.v1.routes.data.tables import format_key, register_table_routes
-from osa.config import Config
 from osa.application.api.v1.routes.data.formats import DataResponseFormat
-from osa.domain.data.model.query_plan import TableKind
-from osa.domain.data.service.data_catalog import DataCatalogService
-from osa.domain.data.service.data_query import DataQueryService
+from osa.application.api.v1.routes.data.tables import format_key, register_table_routes
+from osa.domain.data.query.read_table import ReadRecordsTable, ReadRecordsTableHandler
 
 
 def _make_get_endpoint(fmt: DataResponseFormat):
     async def endpoint(
         schema: str,
-        query_service: FromDishka[DataQueryService],
-        catalog_service: FromDishka[DataCatalogService],
-        config: FromDishka[Config],
+        handler: FromDishka[ReadRecordsTableHandler],
         cursor: str | None = None,
         limit: int = 50,
         sort: str | None = None,
     ) -> StreamingResponse:
-        table = await catalog_service.resolve_table(schema, TableKind.RECORDS)
-        plan = build_plan(
-            schema_id=table.schema_id,
-            table_kind=TableKind.RECORDS,
-            feature_name=None,
-            filter_expr=None,
-            cursor=cursor,
-            limit=limit,
-            max_limit=config.data.max_page_limit,
-            sort=sort,
+        result = await handler.run(
+            ReadRecordsTable(
+                schema=schema,
+                cursor=cursor,
+                limit=limit,
+                sort=parse_sort(sort),
+                timeout=fmt.timeout,
+            )
         )
-        rows = query_service.stream_records(plan, timeout=fmt.timeout)
-        return await build_table_response(rows, fmt, table.columns, plan)
+        return await build_table_response(result.rows, fmt, result.columns, result.plan)
 
     return endpoint
 
@@ -56,23 +49,19 @@ def _make_post_endpoint(fmt: DataResponseFormat):
         request: Request,
         schema: str,
         body: FilterRequestBody,
-        query_service: FromDishka[DataQueryService],
-        catalog_service: FromDishka[DataCatalogService],
-        config: FromDishka[Config],
+        handler: FromDishka[ReadRecordsTableHandler],
     ) -> StreamingResponse:
-        table = await catalog_service.resolve_table(schema, TableKind.RECORDS)
-        plan = build_plan(
-            schema_id=table.schema_id,
-            table_kind=TableKind.RECORDS,
-            feature_name=None,
-            filter_expr=body.filter,
-            cursor=body.cursor,
-            limit=body.limit,
-            max_limit=config.data.max_page_limit,
-            sort=body.sort,
+        result = await handler.run(
+            ReadRecordsTable(
+                schema=schema,
+                filter=body.filter,
+                cursor=body.cursor,
+                limit=body.limit,
+                sort=parse_sort(body.sort),
+                timeout=fmt.timeout,
+            )
         )
-        rows = query_service.stream_records(plan, timeout=fmt.timeout)
-        return await build_table_response(rows, fmt, table.columns, plan)
+        return await build_table_response(result.rows, fmt, result.columns, result.plan)
 
     # slowapi scopes a rate limit by the decorated function's ``module.__name__``
     # captured at decoration time. These builder closures are all named
