@@ -22,7 +22,7 @@ from fastapi.responses import StreamingResponse
 
 from osa.domain.data.model.format import DataResponseFormat
 from osa.domain.data.model.manifest import ColumnSpec
-from osa.domain.data.model.query_plan import QueryPlan, encode_cursor
+from osa.domain.data.model.query_plan import QueryPlan, TableKind, encode_cursor
 
 
 async def build_table_response(
@@ -98,8 +98,11 @@ def _next_cursor(page: list[Mapping[str, Any]], plan: QueryPlan) -> str | None:
     # PostgresDataReadStore). ``sort=id`` aliases to that same column in the
     # store, so the cursor's sort value must be the tiebreaker value too —
     # encoding the bare record id would compare it against the srn column,
-    # match every row, and never advance.
-    tiebreak = last.get("srn", last.get("id"))
+    # match every row, and never advance. Select the key by table kind, not
+    # by key presence: a hook may declare a data column named "srn", which
+    # must not hijack the feature tiebreaker.
+    tiebreak_key = "srn" if plan.table_kind == TableKind.RECORDS else "id"
+    tiebreak = last.get(tiebreak_key)
     sort_column = plan.sort[0].column
     sort_value = tiebreak if sort_column == "id" else last.get(sort_column)
     return encode_cursor(sort_value, tiebreak)

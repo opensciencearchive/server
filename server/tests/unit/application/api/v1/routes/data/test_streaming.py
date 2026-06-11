@@ -153,3 +153,28 @@ async def test_paginated_features_id_sort_encodes_row_id() -> None:
     decoded = json.loads(base64.urlsafe_b64decode(parsed["next_cursor"]))
     assert decoded["s"] == 2
     assert decoded["id"] == 2
+
+
+@pytest.mark.asyncio
+async def test_paginated_feature_hook_column_named_srn_does_not_hijack_tiebreak() -> None:
+    # A hook may legally declare a data column named "srn" (it's not a feature
+    # auto column). The cursor tiebreaker must still be the integer row id —
+    # picking the hook column's string would 400 on the next page when it's
+    # coerced against the BIGINT id column.
+    rows = [
+        {"id": 1, "record_srn": "urn:osa:localhost:rec:a@1", "srn": "hook-value-1"},
+        {"id": 2, "record_srn": "urn:osa:localhost:rec:a@1", "srn": "hook-value-2"},
+        {"id": 3, "record_srn": "urn:osa:localhost:rec:a@1", "srn": "hook-value-3"},
+    ]
+    plan = QueryPlan(
+        schema_id=SCHEMA,
+        table_kind=TableKind.FEATURE,
+        feature_name="chem_features",
+        pagination={"limit": 2},
+        # default FEATURE sort is id asc
+    )
+    resp = await build_table_response(_aiter(rows), JSON_FMT, COLUMNS, plan)
+    parsed = json.loads(await _body(resp))
+    decoded = json.loads(base64.urlsafe_b64decode(parsed["next_cursor"]))
+    assert decoded["s"] == 2
+    assert decoded["id"] == 2
