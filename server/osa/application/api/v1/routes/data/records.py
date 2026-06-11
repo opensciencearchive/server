@@ -13,24 +13,9 @@ from fastapi import APIRouter
 
 from osa.application.api.v1.routes.data.models import RecordResponse
 from osa.domain.data.service.data_catalog import DataCatalogService
-from osa.domain.shared.error import ValidationError
-from osa.domain.shared.model.ids import RecordId
+from osa.domain.shared.model.ids import RecordRef
 
 router = APIRouter(route_class=DishkaRoute)
-
-
-def _parse_id_and_version(raw: str) -> tuple[RecordId, int | None]:
-    """Split ``{id}`` or ``{id}@{version}`` into a typed id + optional version."""
-    if "@" in raw:
-        id_part, version_part = raw.split("@", 1)
-        try:
-            return RecordId(id_part), int(version_part)
-        except ValueError as exc:
-            raise ValidationError(
-                f"Invalid record version in {raw!r}; expected an integer.",
-                field="id",
-            ) from exc
-    return RecordId(raw), None
 
 
 @router.get(
@@ -39,6 +24,6 @@ def _parse_id_and_version(raw: str) -> tuple[RecordId, int | None]:
 async def get_record_by_id(
     record_id: str, service: FromDishka[DataCatalogService]
 ) -> RecordResponse:
-    rid, version = _parse_id_and_version(record_id)
-    summary = await service.get_record_by_id(rid, version)
+    ref = RecordRef.parse(record_id)
+    summary = await service.get_record_by_id(ref.id, ref.version)
     return RecordResponse.from_summary(summary)
