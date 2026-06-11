@@ -1,6 +1,6 @@
 """DataCatalogService — catalog, manifest, and single-record-by-ID reads.
 
-Read-only orchestration over the :class:`DataReadStore` port. Catalog + manifest
+Read-only orchestration over the :class:`DataCatalogReadStore` port. Catalog + manifest
 (US3) and record-by-ID (US4). The reserved-name 404 is enforced defensively
 here in addition to the write-side aggregate invariants (research §6).
 """
@@ -11,7 +11,7 @@ from osa.domain.data.model.catalog import NodeCatalog
 from osa.domain.data.model.manifest import ResolvedTable, SchemaManifest
 from osa.domain.data.model.query_plan import TableKind
 from osa.domain.data.model.record_summary import RecordSummary
-from osa.domain.data.port.data_read_store import DataReadStore
+from osa.domain.data.port.data_read_store import DataCatalogReadStore
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.model.ids import HookName, RecordId
 from osa.domain.shared.model.reserved import RESERVED_NAMES
@@ -20,7 +20,7 @@ from osa.domain.shared.service import Service
 
 
 class DataCatalogService(Service):
-    read_store: DataReadStore
+    read_store: DataCatalogReadStore
 
     async def resolve_schema(self, raw: str) -> SchemaId:
         """Resolve a URL schema segment (``<id>`` or ``<id>@<semver>``) to a SchemaId.

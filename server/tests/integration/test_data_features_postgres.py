@@ -1,4 +1,4 @@
-"""Integration tests for PostgresDataReadStore feature-table streaming (US5).
+"""Integration tests for PostgresTableReadStore feature-table streaming (US5).
 
 Exercises the FEATURE branch of the unified ``/data/`` engine against a real
 Postgres: a schema with a registered hook produces a ``features.<hook>`` table;
@@ -29,7 +29,8 @@ from osa.domain.semantics.model.value import Cardinality, FieldDefinition, Field
 from osa.domain.shared.error import ConflictError, NotFoundError
 from osa.domain.shared.model.hook import ColumnDef
 from osa.domain.shared.model.srn import Domain, RecordSRN, SchemaId
-from osa.infrastructure.data.postgres_data_read_store import PostgresDataReadStore
+from osa.infrastructure.data.postgres_catalog_read_store import PostgresCatalogReadStore
+from osa.infrastructure.data.postgres_table_read_store import PostgresTableReadStore
 from osa.infrastructure.persistence.feature_store import PostgresFeatureStore
 from osa.infrastructure.persistence.metadata_store import PostgresMetadataStore
 from osa.infrastructure.persistence.repository.schema import (
@@ -133,7 +134,7 @@ def _feature_plan(filter_expr=None, limit=50) -> QueryPlan:
     )
 
 
-async def _drain(store: PostgresDataReadStore, plan: QueryPlan) -> list[dict]:
+async def _drain(store: PostgresTableReadStore, plan: QueryPlan) -> list[dict]:
     return [dict(row) async for row in store.stream_rows(plan)]
 
 
@@ -151,7 +152,7 @@ class TestStreamFeatures:
             HOOK, str(srn), [{"score": 0.9, "label": "high"}, {"score": 0.1, "label": "low"}]
         )
 
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresTableReadStore(pg_session)
         rows = await _drain(rs, _feature_plan())
 
         assert len(rows) == 2
@@ -174,7 +175,7 @@ class TestStreamFeatures:
             HOOK, str(srn), [{"score": 0.9, "label": "high"}, {"score": 0.1, "label": "low"}]
         )
 
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresTableReadStore(pg_session)
         plan = _feature_plan(
             filter_expr=Predicate(
                 field=FeatureFieldRef(hook=HOOK, column="score"),
@@ -190,7 +191,7 @@ class TestStreamFeatures:
     ):
         await _setup_schema(pg_engine, pg_session)
         await pg_session.commit()
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresTableReadStore(pg_session)
         plan = QueryPlan(
             schema_id=SCHEMA,
             table_kind=TableKind.FEATURE,
@@ -220,7 +221,7 @@ class TestFeatureCreatedAtCursor:
         feature_store = PostgresFeatureStore(pg_engine, pg_session)
         await feature_store.insert_features(HOOK, str(srn), [{"score": s} for s in (0.1, 0.2, 0.3)])
 
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresTableReadStore(pg_session)
         sort = [SortSpec(column="created_at", direction=SortDirection.ASC)]
         all_rows = await _drain(
             rs,
@@ -271,7 +272,7 @@ class TestFeatureSchemaScoping:
     ):
         srn_a, _ = await self._seed_shared_hook(pg_engine, pg_session)
 
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresTableReadStore(pg_session)
         rows = await _drain(rs, _feature_plan())
 
         assert [r["record_srn"] for r in rows] == [str(srn_a)]
@@ -281,7 +282,7 @@ class TestFeatureSchemaScoping:
     ):
         await self._seed_shared_hook(pg_engine, pg_session)
 
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresCatalogReadStore(pg_session, Domain("localhost"))
         manifest = await rs.get_schema_manifest(SCHEMA)
         assert manifest is not None
         feature_res = next(t for t in manifest.table_resources if t.name == HOOK)
@@ -300,7 +301,7 @@ class TestFeatureCatalogAndManifest:
         feature_store = PostgresFeatureStore(pg_engine, pg_session)
         await feature_store.insert_features(HOOK, str(srn), [{"score": 0.9, "label": "high"}])
 
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresCatalogReadStore(pg_session, Domain("localhost"))
         manifest = await rs.get_schema_manifest(SCHEMA)
         assert manifest is not None
         feature_res = next(t for t in manifest.table_resources if t.name == HOOK)
@@ -318,7 +319,7 @@ class TestFeatureCatalogAndManifest:
         await pg_session.commit()
         await _register_hook(pg_engine, pg_session)
 
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresCatalogReadStore(pg_session, Domain("localhost"))
         catalog = await rs.get_node_catalog()
         entry = next(e for e in catalog.schemas if e.id == "compound")
         names = {(t.name, t.kind) for t in entry.table_resources}

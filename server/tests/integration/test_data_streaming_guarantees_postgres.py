@@ -31,8 +31,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from osa.domain.data.model.query_plan import PaginationParams, QueryPlan, TableKind
 from osa.domain.semantics.model.schema import Schema
 from osa.domain.semantics.model.value import Cardinality, FieldDefinition, FieldType
-from osa.domain.shared.model.srn import Domain, SchemaId
-from osa.infrastructure.data.postgres_data_read_store import PostgresDataReadStore
+from osa.domain.shared.model.srn import SchemaId
+from osa.infrastructure.data.postgres_table_read_store import PostgresTableReadStore
 from osa.infrastructure.persistence.metadata_store import PostgresMetadataStore
 from osa.infrastructure.persistence.repository.schema import (
     PostgresSemanticsSchemaRepository,
@@ -117,7 +117,7 @@ class TestStreamingGuarantees:
         n = 20_000
         await _setup_schema(pg_engine, pg_session)
         await _bulk_seed(pg_engine, n)
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresTableReadStore(pg_session)
 
         tracemalloc.start()
         count = 0
@@ -137,7 +137,7 @@ class TestStreamingGuarantees:
     ):
         await _setup_schema(pg_engine, pg_session)
         await _bulk_seed(pg_engine, 500)
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresTableReadStore(pg_session)
 
         gen = rs.stream_rows(_records_plan())
         first = await gen.__anext__()  # opens the server-side cursor

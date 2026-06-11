@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 
-from osa.infrastructure.data.postgres_data_read_store import statement_timeout_sql
+from osa.infrastructure.data.postgres_table_read_store import statement_timeout_sql
 
 
 def test_statement_timeout_sql_renders_integer_milliseconds() -> None:

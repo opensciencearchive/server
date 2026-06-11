@@ -2,7 +2,7 @@
 
 Validates the filter tree's bounds (depth, predicate count, distinct feature
 joins) against config, then delegates row streaming to the
-:class:`DataReadStore` port. The returned async iterators are wrapped by the
+:class:`DataTableReadStore` port. The returned async iterators are wrapped by the
 route layer in a serializer + ``StreamingResponse``. Validation runs at the top
 of the generator body, so it surfaces on the route's pre-flight ``__anext__``
 pull — before any response bytes (research §4).
@@ -21,13 +21,13 @@ from typing import Any
 from osa.config import Config
 from osa.domain.data.model.filter import And, FeatureFieldRef, FilterExpr, Not, Or, Predicate
 from osa.domain.data.model.query_plan import QueryPlan, TableKind
-from osa.domain.data.port.data_read_store import DataReadStore
+from osa.domain.data.port.data_read_store import DataTableReadStore
 from osa.domain.shared.error import ValidationError
 from osa.domain.shared.service import Service
 
 
 class DataQueryService(Service):
-    read_store: DataReadStore
+    read_store: DataTableReadStore
     config: Config
 
     async def stream_records(

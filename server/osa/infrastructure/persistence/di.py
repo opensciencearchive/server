@@ -28,8 +28,12 @@ from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.event_repository import EventRepository
 from osa.domain.feature.port.feature_store import FeatureStore
 from osa.domain.validation.port.repository import ValidationRunRepository
-from osa.domain.data.port.data_read_store import DataReadStore
-from osa.infrastructure.data.postgres_data_read_store import PostgresDataReadStore
+from osa.domain.data.port.data_read_store import (
+    DataCatalogReadStore,
+    DataTableReadStore,
+)
+from osa.infrastructure.data.postgres_catalog_read_store import PostgresCatalogReadStore
+from osa.infrastructure.data.postgres_table_read_store import PostgresTableReadStore
 from osa.infrastructure.persistence.adapter.readers import (
     OntologyReaderAdapter,
     SchemaReaderAdapter,
@@ -171,9 +175,15 @@ class PersistenceProvider(Provider):
         )
 
     # Data read surface adapter (unified /data/* engine)
-    @provide(scope=Scope.UOW, provides=DataReadStore)
-    def get_data_read_store(self, session: AsyncSession, config: Config) -> PostgresDataReadStore:
-        return PostgresDataReadStore(session=session, node_domain=Domain(config.domain))
+    @provide(scope=Scope.UOW, provides=DataTableReadStore)
+    def get_data_table_read_store(self, session: AsyncSession) -> PostgresTableReadStore:
+        return PostgresTableReadStore(session=session)
+
+    @provide(scope=Scope.UOW, provides=DataCatalogReadStore)
+    def get_data_catalog_read_store(
+        self, session: AsyncSession, config: Config
+    ) -> PostgresCatalogReadStore:
+        return PostgresCatalogReadStore(session=session, node_domain=Domain(config.domain))
 
     # Record query handlers
     get_record_handler = provide(GetRecordHandler, scope=Scope.UOW)

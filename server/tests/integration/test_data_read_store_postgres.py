@@ -1,4 +1,4 @@
-"""Integration tests for PostgresDataReadStore against a real Postgres.
+"""Integration tests for PostgresTableReadStore against a real Postgres.
 
 Exercises the unified /data/ engine end-to-end: records streaming via the
 server-side cursor, filtered streaming, single-record-by-id, node catalog, and
@@ -28,7 +28,8 @@ from osa.domain.semantics.model.schema import Schema
 from osa.domain.semantics.model.value import Cardinality, FieldDefinition, FieldType
 from osa.domain.shared.model.ids import RecordId
 from osa.domain.shared.model.srn import Domain, RecordSRN, SchemaId
-from osa.infrastructure.data.postgres_data_read_store import PostgresDataReadStore
+from osa.infrastructure.data.postgres_catalog_read_store import PostgresCatalogReadStore
+from osa.infrastructure.data.postgres_table_read_store import PostgresTableReadStore
 from osa.infrastructure.persistence.metadata_store import PostgresMetadataStore
 from osa.infrastructure.persistence.repository.schema import (
     PostgresSemanticsSchemaRepository,
@@ -95,7 +96,7 @@ def _records_plan(filter_expr=None, limit=50, cursor=None) -> QueryPlan:
     )
 
 
-async def _drain(store: PostgresDataReadStore, plan: QueryPlan) -> list[dict]:
+async def _drain(store: PostgresTableReadStore, plan: QueryPlan) -> list[dict]:
     return [dict(row) async for row in store.stream_rows(plan)]
 
 
@@ -113,7 +114,7 @@ class TestStreamRecords:
         )
         await pg_session.commit()
 
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresTableReadStore(pg_session)
         rows = await _drain(rs, _records_plan())
 
         assert len(rows) == 2
@@ -139,7 +140,7 @@ class TestStreamRecords:
         )
         await pg_session.commit()
 
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresTableReadStore(pg_session)
         plan = _records_plan(
             filter_expr=Predicate(
                 field=MetadataFieldRef(field="species"),
@@ -155,7 +156,7 @@ class TestStreamRecords:
     ):
         await _setup_schema(pg_engine, pg_session)
         await pg_session.commit()
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresTableReadStore(pg_session)
         assert await _drain(rs, _records_plan()) == []
 
 
@@ -170,7 +171,7 @@ class TestGetRecordById:
         )
         await pg_session.commit()
 
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresCatalogReadStore(pg_session, Domain("localhost"))
         rec = await rs.get_record_by_id(RecordId("abc"), None)
         assert rec is not None
         assert str(rec.id) == "abc"
@@ -182,7 +183,7 @@ class TestGetRecordById:
     async def test_unknown_id_returns_none(self, pg_engine: AsyncEngine, pg_session: AsyncSession):
         await _setup_schema(pg_engine, pg_session)
         await pg_session.commit()
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresCatalogReadStore(pg_session, Domain("localhost"))
         assert await rs.get_record_by_id(RecordId("missing"), None) is None
 
 
@@ -193,7 +194,7 @@ class TestCatalogAndManifest:
     ):
         await _setup_schema(pg_engine, pg_session)
         await pg_session.commit()
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresCatalogReadStore(pg_session, Domain("localhost"))
         catalog = await rs.get_node_catalog()
         assert catalog.node_domain == "localhost"
         ids = {(e.id, e.version) for e in catalog.schemas}
@@ -206,7 +207,7 @@ class TestCatalogAndManifest:
         )
         await pg_session.commit()
 
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresCatalogReadStore(pg_session, Domain("localhost"))
         manifest = await rs.get_schema_manifest(SCHEMA)
         assert manifest is not None
         assert manifest.id == "compound"
@@ -224,7 +225,7 @@ class TestCatalogAndManifest:
     async def test_get_latest_schema_id(self, pg_engine: AsyncEngine, pg_session: AsyncSession):
         await _setup_schema(pg_engine, pg_session)
         await pg_session.commit()
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresCatalogReadStore(pg_session, Domain("localhost"))
         resolved = await rs.get_latest_schema_id("compound")
         assert resolved is not None
         assert resolved.render() == "compound@1.0.0"
@@ -247,7 +248,7 @@ class TestStreamPaginationOrder:
                 datetime(2026, 1, 1 + i, tzinfo=UTC),
             )
         await pg_session.commit()
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresTableReadStore(pg_session)
 
         # Sort by created_at desc (default). Page 1: take 2, derive cursor from row 2.
         all_rows = await _drain(rs, _records_plan())
@@ -281,7 +282,7 @@ class TestStreamPaginationOrder:
                 datetime(2026, 1, 1, tzinfo=UTC),
             )
         await pg_session.commit()
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresTableReadStore(pg_session)
 
         sort = [SortSpec(column="id", direction=SortDirection.ASC)]
         all_rows = await _drain(
@@ -342,7 +343,7 @@ class TestMetadataDateCursor:
             await store.insert(ASSAY_SCHEMA, srn, {"assay_date": f"2026-01-0{i + 1}"})
         await pg_session.commit()
 
-        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        rs = PostgresTableReadStore(pg_session)
         sort = [SortSpec(column="assay_date", direction=SortDirection.ASC)]
         all_rows = await _drain(
             rs, QueryPlan(schema_id=ASSAY_SCHEMA, table_kind=TableKind.RECORDS, sort=sort)

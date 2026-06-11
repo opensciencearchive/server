@@ -1,15 +1,14 @@
-"""Postgres adapter for the ``DataReadStore`` port.
+"""Postgres adapter for the ``DataTableReadStore`` port (streaming reads).
 
 The streaming primitive (:meth:`stream_rows`) builds the records / feature
 SELECT, then iterates it through ``AsyncSession.stream()`` — a server-side
 cursor (research §2). Rows are yielded one at a time as flattened column→value
-mappings, so memory stays bounded regardless of result size. The ``async with``
+mappings, so memory stays bounded regardless of result size. The try/finally
 around the streaming result closes the cursor on client disconnect, returning
 the connection to the pool.
 
-The records filter compilation reuses the proven approach from the discovery
-adapter, ported onto the ``data`` domain's own filter model so the adapter has
-no dependency on ``discovery`` once that domain is deleted (research §10).
+Catalog/manifest/record-by-id reads live in
+:class:`~osa.infrastructure.data.postgres_catalog_read_store.PostgresCatalogReadStore`.
 """
 
 from __future__ import annotations
@@ -20,24 +19,9 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 import sqlalchemy as sa
-from sqlalchemy import (
-    RowMapping,
-    String,
-    and_,
-    cast,
-    false,
-    func,
-    not_,
-    or_,
-    select,
-)
+from sqlalchemy import RowMapping, String, and_, cast, false, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from osa.domain.data.model.catalog import (
-    CatalogEntry,
-    NodeCatalog,
-    TableResourceSummary,
-)
 from osa.domain.data.model.filter import (
     And,
     FeatureFieldRef,
@@ -48,14 +32,6 @@ from osa.domain.data.model.filter import (
     Or,
     Predicate,
 )
-from osa.domain.data.model.manifest import (
-    IMPLICIT_FEATURE_COLUMN_SPECS,
-    IMPLICIT_RECORD_COLUMN_SPECS,
-    ColumnSpec,
-    FieldSpec,
-    SchemaManifest,
-    TableResource,
-)
 from osa.domain.data.model.query_plan import (
     QueryPlan,
     SortDirection,
@@ -63,10 +39,13 @@ from osa.domain.data.model.query_plan import (
     decode_cursor,
 )
 from osa.domain.data.model.record_summary import RecordSummary
-from osa.domain.semantics.model.value import FieldType
 from osa.domain.shared.error import NotFoundError, ValidationError
 from osa.domain.shared.model.ids import RecordId
-from osa.domain.shared.model.srn import Domain, RecordSRN, SchemaId
+from osa.domain.shared.model.srn import RecordSRN, SchemaId
+from osa.infrastructure.data.schema_features import (
+    feature_schema_scope,
+    schema_feature_tables,
+)
 from osa.infrastructure.persistence.feature_table import (
     FeatureSchema,
     build_feature_table,
@@ -78,27 +57,11 @@ from osa.infrastructure.persistence.metadata_table import (
     build_metadata_table,
 )
 from osa.infrastructure.persistence.tables import (
-    conventions_table,
-    feature_tables_table,
     metadata_tables_table,
     records_table,
-    schemas_table,
 )
 
 logger = logging.getLogger(__name__)
-
-# A feature column's JSON-primitive type → the manifest's semantic FieldType.
-_JSON_TYPE_TO_FIELD_TYPE: dict[str, FieldType] = {
-    "string": FieldType.TEXT,
-    "number": FieldType.NUMBER,
-    "integer": FieldType.NUMBER,
-    "boolean": FieldType.BOOLEAN,
-    "array": FieldType.TEXT,
-    "object": FieldType.TEXT,
-}
-
-# All URL-exposed format suffixes (mirrors the route-layer FORMATS registry).
-_ALL_FORMATS = ["", "csv", "csv.gz"]
 
 
 def _escape_like(value: str) -> str:
@@ -128,12 +91,9 @@ def _invalid_cursor(exc: Exception) -> ValidationError:
     )
 
 
-class PostgresDataReadStore:
-    def __init__(self, session: AsyncSession, node_domain: Domain) -> None:
+class PostgresTableReadStore:
+    def __init__(self, session: AsyncSession) -> None:
         self.session = session
-        # Only the node's DNS domain is needed (to render SRNs in the catalog /
-        # manifest) — not the whole Config.
-        self.node_domain = node_domain
 
     # ------------------------------------------------------------------ #
     # Streaming primitive
@@ -306,7 +266,7 @@ class PostgresDataReadStore:
         # A features.<hook> table is shared by every convention that registers
         # the hook name, across schemas — scope to the requested schema's
         # records via the records join.
-        conditions.extend(self._feature_schema_scope(plan.schema_id))
+        conditions.extend(feature_schema_scope(plan.schema_id))
 
         # Implicit columns (id, record_srn, created_at) precede the hook's
         # declared data columns — this is the CSV header order.
@@ -334,7 +294,7 @@ class PostgresDataReadStore:
         it. Streaming a feature not registered on the schema is a 404, not a
         leak of another schema's table.
         """
-        for hook_name, fschema in await self._schema_feature_tables(schema_id):
+        for hook_name, fschema in await schema_feature_tables(self.session, schema_id):
             if hook_name == feature_name:
                 return build_feature_table(hook_name, fschema), fschema
         raise NotFoundError(
@@ -342,48 +302,6 @@ class PostgresDataReadStore:
             f"See /api/v1/data/{schema_id.render()} for its table resources.",
             code="feature_not_found",
         )
-
-    async def _schema_hook_names(self, schema_id: SchemaId) -> set[str]:
-        """Hook names registered on the schema's conventions (the schema→feature link)."""
-        stmt = select(conventions_table.c.hooks).where(
-            conventions_table.c.schema_id == schema_id.id.root,
-            conventions_table.c.schema_version == schema_id.version.root,
-        )
-        result = await self.session.execute(stmt)
-        names: set[str] = set()
-        for (hooks,) in result.all():
-            for hook in hooks or []:
-                names.add(hook["name"])
-        return names
-
-    async def _schema_feature_tables(self, schema_id: SchemaId) -> list[tuple[str, FeatureSchema]]:
-        """(hook_name, FeatureSchema) for every materialized feature table on the schema."""
-        hook_names = await self._schema_hook_names(schema_id)
-        if not hook_names:
-            return []
-        stmt = select(
-            feature_tables_table.c.hook_name, feature_tables_table.c.feature_schema
-        ).where(feature_tables_table.c.hook_name.in_(hook_names))
-        result = await self.session.execute(stmt)
-        return [
-            (row["hook_name"], FeatureSchema.model_validate(row["feature_schema"]))
-            for row in result.mappings()
-        ]
-
-    @staticmethod
-    def _feature_schema_scope(schema_id: SchemaId) -> list[Any]:
-        return [
-            records_table.c.schema_id == schema_id.id.root,
-            records_table.c.schema_version == schema_id.version.root,
-        ]
-
-    async def _feature_count(self, ft: sa.Table, schema_id: SchemaId) -> int:
-        stmt = (
-            select(func.count())
-            .select_from(ft.join(records_table, records_table.c.srn == ft.c.record_srn))
-            .where(and_(*self._feature_schema_scope(schema_id)))
-        )
-        return int((await self.session.execute(stmt)).scalar_one())
 
     def _features_sort(self, plan: QueryPlan, ft: sa.Table) -> tuple[list[Any], Any | None]:
         # plan.keyset owns tiebreak choice and sort=id aliasing; this method
@@ -458,156 +376,7 @@ class PostgresDataReadStore:
         raise TypeError(f"Unexpected field ref type: {type(predicate.field).__name__}")
 
     # ------------------------------------------------------------------ #
-    # Single record by ID
-    # ------------------------------------------------------------------ #
-
-    async def get_record_by_id(self, id: RecordId, version: int | None) -> RecordSummary | None:
-        # The records PK is the SRN ``urn:osa:{domain}:rec:{id}@{version}``.
-        # Match the id segment; resolve version (pin or latest published).
-        pattern = f"urn:osa:%:rec:{_escape_like(str(id))}@%"
-        t = records_table
-        stmt = (
-            select(t.c.srn, t.c.schema_id, t.c.schema_version, t.c.published_at, t.c.metadata)
-            .where(t.c.srn.like(pattern, escape="\\"))
-            .order_by(t.c.published_at.desc())
-        )
-        result = await self.session.execute(stmt)
-        rows = result.mappings().all()
-        if not rows:
-            return None
-
-        chosen = None
-        for row in rows:
-            srn = RecordSRN.parse(row["srn"])
-            if srn.id.root != str(id):
-                continue
-            if version is None:
-                chosen = (srn, row)
-                break
-            if int(srn.version.root) == version:
-                chosen = (srn, row)
-                break
-        if chosen is None:
-            return None
-        srn, row = chosen
-        return RecordSummary(
-            id=RecordId(srn.id.root),
-            srn=srn,
-            schema_id=SchemaId.parse(f"{row['schema_id']}@{row['schema_version']}"),
-            version=int(srn.version.root),
-            metadata=row["metadata"] or {},
-            created_at=row["published_at"],
-        )
-
-    # ------------------------------------------------------------------ #
-    # Catalog & manifest
-    # ------------------------------------------------------------------ #
-
-    async def get_node_catalog(self) -> NodeCatalog:
-        stmt = select(schemas_table.c.id, schemas_table.c.version)
-        result = await self.session.execute(stmt)
-        schema_rows = [(row["id"], row["version"]) for row in result.mappings()]
-        entries: list[CatalogEntry] = []
-        for short_id, version in schema_rows:
-            schema_id = SchemaId.parse(f"{short_id}@{version}")
-            resources = [TableResourceSummary(name="records", kind=TableKind.RECORDS)]
-            for hook_name, _ in await self._schema_feature_tables(schema_id):
-                resources.append(TableResourceSummary(name=hook_name, kind=TableKind.FEATURE))
-            entries.append(
-                CatalogEntry(
-                    id=short_id,
-                    version=version,
-                    srn=schema_id.to_srn(self.node_domain).render(),
-                    table_resources=resources,
-                )
-            )
-        return NodeCatalog(node_domain=self.node_domain.root, schemas=entries)
-
-    async def get_schema_manifest(self, schema_id: SchemaId) -> SchemaManifest | None:
-        stmt = select(schemas_table.c.fields).where(
-            schemas_table.c.id == schema_id.id.root,
-            schemas_table.c.version == schema_id.version.root,
-        )
-        result = await self.session.execute(stmt)
-        row = result.mappings().first()
-        if row is None:
-            return None
-
-        field_specs: list[FieldSpec] = []
-        column_specs: list[ColumnSpec] = []
-        for f in row["fields"]:
-            ftype = FieldType(f["type"])
-            field_specs.append(
-                FieldSpec(
-                    name=f["name"],
-                    type=ftype,
-                    ontology_id=f.get("ontology_id"),
-                    ontology_version=f.get("ontology_version"),
-                )
-            )
-            column_specs.append(ColumnSpec(name=f["name"], type=ftype))
-
-        record_count = await self._records_count(schema_id)
-        records_resource = TableResource(
-            name="records",
-            kind=TableKind.RECORDS,
-            # Implicit columns (id, srn, schema_id, version, created_at) precede
-            # the schema's declared metadata fields — this is the CSV header order.
-            columns=[*IMPLICIT_RECORD_COLUMN_SPECS, *column_specs],
-            row_count=record_count,
-            formats=list(_ALL_FORMATS),
-        )
-        feature_resources = await self._feature_resources(schema_id)
-        return SchemaManifest(
-            id=schema_id.id.root,
-            version=schema_id.version.root,
-            srn=schema_id.to_srn(self.node_domain).render(),
-            fields=field_specs,
-            table_resources=[records_resource, *feature_resources],
-        )
-
-    async def _feature_resources(self, schema_id: SchemaId) -> list[TableResource]:
-        """Build a TableResource for each feature table registered on the schema."""
-        resources: list[TableResource] = []
-        for hook_name, fschema in await self._schema_feature_tables(schema_id):
-            ft = build_feature_table(hook_name, fschema)
-            resources.append(
-                TableResource(
-                    name=hook_name,
-                    kind=TableKind.FEATURE,
-                    # Implicit columns (id, record_srn, created_at) precede the
-                    # hook's declared data columns — this is the CSV header order.
-                    columns=[*IMPLICIT_FEATURE_COLUMN_SPECS, *_feature_column_specs(fschema)],
-                    row_count=await self._feature_count(ft, schema_id),
-                    formats=list(_ALL_FORMATS),
-                )
-            )
-        return resources
-
-    async def get_latest_schema_id(self, schema_short_id: str) -> SchemaId | None:
-        stmt = select(schemas_table.c.version).where(schemas_table.c.id == schema_short_id)
-        result = await self.session.execute(stmt)
-        versions = [row[0] for row in result.all()]
-        if not versions:
-            return None
-        # Pick the highest SemVer (string sort is wrong for e.g. 1.10.0 vs 1.9.0).
-        latest = max(versions, key=lambda v: tuple(int(p) for p in v.split("-")[0].split(".")))
-        return SchemaId.parse(f"{schema_short_id}@{latest}")
-
-    async def _records_count(self, schema_id: SchemaId) -> int:
-        t = records_table
-        stmt = (
-            select(func.count())
-            .select_from(t)
-            .where(
-                t.c.schema_id == schema_id.id.root,
-                t.c.schema_version == schema_id.version.root,
-            )
-        )
-        return int((await self.session.execute(stmt)).scalar_one())
-
-    # ------------------------------------------------------------------ #
-    # Helpers (ported from the discovery adapter, records-only)
+    # Records filter compilation
     # ------------------------------------------------------------------ #
 
     async def _metadata_catalog_for(self, schema_id: SchemaId) -> dict[str, Any] | None:
@@ -651,13 +420,6 @@ class PostgresDataReadStore:
                 code="feature_predicate_unsupported",
             )
         raise TypeError(f"Unexpected field ref type: {type(predicate.field).__name__}")
-
-
-def _feature_column_specs(fschema: FeatureSchema) -> list[ColumnSpec]:
-    """Map a feature table's declared columns to manifest ColumnSpecs."""
-    return [
-        ColumnSpec(name=c.name, type=_JSON_TYPE_TO_FIELD_TYPE[c.json_type]) for c in fschema.columns
-    ]
 
 
 def _apply_scalar_op(col: Any, op: FilterOperator, value: Any) -> Any:

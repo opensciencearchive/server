@@ -1,12 +1,15 @@
-"""DataReadStore port — read-only access feeding every ``/data/`` format.
+"""Read-store ports feeding the ``/data/`` surface — split along the service seam.
 
-``stream_rows`` is the single streaming primitive behind both the paginated
+``DataTableReadStore`` is the streaming primitive behind both the paginated
 JSON path and the unbounded CSV/CSV.gz path; the concrete adapter backs it with
 a Postgres server-side cursor (research §2) so memory stays bounded regardless
 of result size. Rows are yielded as column→value mappings (already projected):
 records-table rows include the implicit ``id``/``srn``/``schema_id``/
 ``version``/``created_at`` columns plus metadata fields; feature-table rows
 carry the hook's declared columns.
+
+``DataCatalogReadStore`` serves the non-streaming reads: node catalog, schema
+manifest, latest-schema resolution, and single-record-by-id.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ if TYPE_CHECKING:
     from osa.domain.shared.model.srn import SchemaId
 
 
-class DataReadStore(Protocol):
+class DataTableReadStore(Protocol):
     def stream_rows(
         self, plan: "QueryPlan", timeout: timedelta | None = None
     ) -> AsyncIterator[Mapping[str, Any]]:
@@ -35,6 +38,8 @@ class DataReadStore(Protocol):
         """
         ...
 
+
+class DataCatalogReadStore(Protocol):
     async def get_record_by_id(self, id: "RecordId", version: int | None) -> "RecordSummary | None":
         """Resolve a single record by bare ID (schema resolved via PK). ``None`` if absent."""
         ...
