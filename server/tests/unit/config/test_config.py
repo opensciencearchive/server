@@ -168,3 +168,14 @@ class TestAuthProvidersConfig:
         """auth.providers defaults to empty OrcidConfig."""
         cfg = config_from_yaml({})
         assert cfg.auth.providers.orcid.client_id == ""
+
+
+class TestDataConfig:
+    """The /data/ page-size ceiling is operator configuration, not a code constant."""
+
+    def test_max_page_limit_default(self):
+        assert config_from_yaml({}).data.max_page_limit == 1000
+
+    def test_max_page_limit_yaml_override(self):
+        cfg = config_from_yaml({"data": {"max_page_limit": 250}})
+        assert cfg.data.max_page_limit == 250

@@ -263,14 +263,16 @@ def _normalize_pg_url(url: str) -> str:
 class DataConfig(BaseModel):
     """Bounds for the unified ``/data/`` read surface (nested in Config).
 
-    Caps the cost of a filter tree before it is compiled to SQL: maximum tree
-    depth, total predicate count, and distinct feature-hook joins. Overridable
-    via ``OSA_DATA__MAX_FILTER_DEPTH`` etc. (FR-012, features 076/137).
+    Caps the cost of a filter tree before it is compiled to SQL (maximum tree
+    depth, total predicate count, distinct feature-hook joins) and the
+    paginated-JSON page size. Overridable via ``OSA_DATA__MAX_FILTER_DEPTH``
+    etc. (FR-012, features 076/137).
     """
 
     max_filter_depth: int = 10
     max_predicates: int = 200
     max_feature_joins: int = 10  # distinct features.<hook> references in one filter
+    max_page_limit: int = 1000  # page-size ceiling; over-large requests are clamped, not 422d
 
 
 class Config(BaseSettings):

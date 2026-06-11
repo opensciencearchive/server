@@ -23,8 +23,8 @@ class FilterRequestBody(BaseModel):
 
     filter: FilterExpr | None = None
     cursor: str | None = None
-    # Unbounded at the edge: PaginationParams clamps out-of-range values to
-    # [1, MAX_LIMIT] — over-large requests get the max page, not a 422.
+    # Unbounded at the edge: build_plan clamps to [1, DataConfig.max_page_limit]
+    # via PaginationParams.clamped — over-large requests get the max page, not a 422.
     limit: int = 50
     sort: str | None = None
 
@@ -61,11 +61,13 @@ def build_plan(
     filter_expr: FilterExpr | None,
     cursor: str | None,
     limit: int,
+    max_limit: int,
     sort: str | None,
 ) -> QueryPlan:
-    pagination = PaginationParams(
+    pagination = PaginationParams.clamped(
         cursor=PaginationCursor(value=cursor) if cursor else None,
         limit=limit,
+        max_limit=max_limit,
     )
     return QueryPlan(
         schema_id=schema_id,

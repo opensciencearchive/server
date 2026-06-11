@@ -21,6 +21,7 @@ from osa.application.api.v1.routes.data._params import FilterRequestBody, build_
 from osa.application.api.v1.routes.data._runtime import apply_statement_timeout
 from osa.application.api.v1.routes.data._streaming import build_table_response
 from osa.application.api.v1.routes.data.tables import format_key, register_table_routes
+from osa.config import Config
 from osa.domain.data.model.format import DataResponseFormat
 from osa.domain.data.model.manifest import ColumnSpec
 from osa.domain.data.model.query_plan import TableKind
@@ -45,6 +46,7 @@ def _make_get_endpoint(fmt: DataResponseFormat):
         query_service: FromDishka[DataQueryService],
         catalog_service: FromDishka[DataCatalogService],
         session: FromDishka[AsyncSession],
+        config: FromDishka[Config],
         cursor: str | None = None,
         limit: int = 50,
         sort: str | None = None,
@@ -58,6 +60,7 @@ def _make_get_endpoint(fmt: DataResponseFormat):
             filter_expr=None,
             cursor=cursor,
             limit=limit,
+            max_limit=config.data.max_page_limit,
             sort=sort,
         )
         rows = query_service.stream_records(plan)
@@ -74,6 +77,7 @@ def _make_post_endpoint(fmt: DataResponseFormat):
         query_service: FromDishka[DataQueryService],
         catalog_service: FromDishka[DataCatalogService],
         session: FromDishka[AsyncSession],
+        config: FromDishka[Config],
     ) -> StreamingResponse:
         columns, schema_id = await _records_columns(catalog_service, schema)
         await apply_statement_timeout(session, fmt)
@@ -84,6 +88,7 @@ def _make_post_endpoint(fmt: DataResponseFormat):
             filter_expr=body.filter,
             cursor=body.cursor,
             limit=body.limit,
+            max_limit=config.data.max_page_limit,
             sort=body.sort,
         )
         rows = query_service.stream_records(plan)

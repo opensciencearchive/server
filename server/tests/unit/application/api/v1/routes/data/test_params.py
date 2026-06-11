@@ -42,11 +42,26 @@ def test_build_plan_wraps_cursor_and_limit() -> None:
         filter_expr=None,
         cursor="CUR",
         limit=10,
+        max_limit=1000,
         sort="mw:asc",
     )
     assert plan.pagination.limit == 10
     assert str(plan.pagination.cursor) == "CUR"
     assert plan.sort[0].column == "mw"
+
+
+def test_build_plan_clamps_limit_to_configured_max() -> None:
+    plan = build_plan(
+        schema_id=SCHEMA,
+        table_kind=TableKind.RECORDS,
+        feature_name=None,
+        filter_expr=None,
+        cursor=None,
+        limit=99999,
+        max_limit=200,
+        sort=None,
+    )
+    assert plan.pagination.limit == 200
 
 
 def test_build_plan_no_cursor_is_none() -> None:
@@ -57,6 +72,7 @@ def test_build_plan_no_cursor_is_none() -> None:
         filter_expr=None,
         cursor=None,
         limit=50,
+        max_limit=1000,
         sort=None,
     )
     assert plan.pagination.cursor is None
