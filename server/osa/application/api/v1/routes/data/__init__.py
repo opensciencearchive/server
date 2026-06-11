@@ -5,9 +5,6 @@ Subroutes are registered by the user-story phases:
 - single record by ID (``GET /data/records/{id}``) — US4
 - records table matrix (``/data/{schema}/records*``) — US1/US2 via the factory
 - feature table matrix (``/data/{schema}/{feature}*``) — US5 via the factory
-
-The router coexists with the legacy ``/discovery``, ``/records``, ``/search``
-routers until US6 removes them (research §10).
 """
 
 from __future__ import annotations

@@ -103,7 +103,8 @@ def decode_cursor(cursor: str) -> dict[str, Any]:
     try:
         raw = base64.urlsafe_b64decode(cursor.encode())
         data = json.loads(raw)
-    except Exception as exc:
+    except ValueError as exc:
+        # binascii.Error and json.JSONDecodeError are both ValueError subclasses.
         raise ValueError(f"Malformed cursor: {exc}") from exc
     if not isinstance(data, dict) or "s" not in data or "id" not in data:
         raise ValueError("Cursor must contain 's' and 'id' keys")
