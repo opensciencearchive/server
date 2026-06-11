@@ -216,16 +216,26 @@ class PostgresDataReadStore:
 
             try:
                 decoded = decode_cursor(str(plan.pagination.cursor))
-                sort_value = self._coerce_cursor_value(decoded["s"], primary.column)
+                sort_value = self._coerce_cursor_value(decoded["s"], sort_expr)
                 cursor_after = page.after((sort_value, decoded["id"]))
             except ValueError as exc:
                 raise _invalid_cursor(exc) from exc
         return page.order_by(), cursor_after
 
     @staticmethod
-    def _coerce_cursor_value(value: Any, column: str) -> Any:
-        if column in ("created_at", "published_at") and isinstance(value, str):
-            return datetime.fromisoformat(value)
+    def _coerce_cursor_value(value: Any, sort_expr: sa.ColumnElement[Any]) -> Any:
+        """Coerce a decoded cursor sort value to the sort column's Python type.
+
+        Cursors carry date/datetime values as ISO strings (``encode_cursor``
+        renders with ``default=str``), but asyncpg rejects a str bound against
+        a DATE / TIMESTAMP column — including dynamic metadata columns of
+        FieldType.DATE, so dispatch on the column type, not the column name.
+        """
+        if isinstance(value, str):
+            if isinstance(sort_expr.type, sa.DateTime):
+                return datetime.fromisoformat(value)
+            if isinstance(sort_expr.type, sa.Date):
+                return date.fromisoformat(value)
         return value
 
     # ------------------------------------------------------------------ #

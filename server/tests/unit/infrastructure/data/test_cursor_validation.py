@@ -11,9 +11,10 @@ decode the cursor before any DB access.
 
 import base64
 import json
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
+import sqlalchemy as sa
 
 from osa.domain.data.model.query_plan import (
     PaginationCursor,
@@ -78,6 +79,21 @@ class TestRecordsCursorValidation:
         with pytest.raises(ValidationError) as exc:
             _store()._records_sort(_records_plan(bad), records_table)
         assert exc.value.field == "cursor"
+
+    def test_date_metadata_cursor_value_coerced_to_date(self) -> None:
+        # A FieldType.DATE metadata column is a sa.Date in the dynamic table;
+        # the cursor carries its value as an ISO string — asyncpg rejects a
+        # str bound against DATE, so the decoder must coerce by column type.
+        value = PostgresDataReadStore._coerce_cursor_value(
+            "2026-01-02", sa.Column("assay_date", sa.Date())
+        )
+        assert isinstance(value, date)
+
+    def test_datetime_metadata_cursor_value_coerced_to_datetime(self) -> None:
+        value = PostgresDataReadStore._coerce_cursor_value(
+            "2026-01-02T03:04:05+00:00", sa.Column("measured_at", sa.DateTime(timezone=True))
+        )
+        assert isinstance(value, datetime)
 
 
 class TestFeatureCursorValidation:

@@ -15,11 +15,13 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from osa.domain.data.model.filter import FilterOperator, MetadataFieldRef, Predicate
 from osa.domain.data.model.query_plan import (
+    PaginationCursor,
     PaginationParams,
     QueryPlan,
     SortDirection,
     SortSpec,
     TableKind,
+    encode_cursor,
 )
 from osa.domain.data.model.query_plan import TableKind as TK
 from osa.domain.semantics.model.schema import Schema
@@ -248,8 +250,6 @@ class TestStreamPaginationOrder:
         rs = PostgresDataReadStore(pg_session, Domain("localhost"))
 
         # Sort by created_at desc (default). Page 1: take 2, derive cursor from row 2.
-        from osa.domain.data.model.query_plan import PaginationCursor, encode_cursor
-
         all_rows = await _drain(rs, _records_plan())
         assert [r["id"] for r in all_rows] == ["rec4", "rec3", "rec2", "rec1", "rec0"]
 
@@ -263,3 +263,65 @@ class TestStreamPaginationOrder:
         )
         page2 = await _drain(rs, plan2)
         assert [r["id"] for r in page2] == ["rec2", "rec1", "rec0"]
+
+
+ASSAY_SCHEMA = SchemaId.parse("assay@1.0.0")
+
+
+@pytest.mark.asyncio
+class TestMetadataDateCursor:
+    """Pagination sorted by a FieldType.DATE metadata column must round-trip.
+
+    The cursor carries the sort value as an ISO string; the records sort must
+    coerce it back to a Python date before binding — asyncpg rejects a str
+    bound against the dynamic table's sa.Date column."""
+
+    async def test_date_sort_cursor_round_trips(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession
+    ):
+        fields = [
+            FieldDefinition(
+                name="assay_date",
+                type=FieldType.DATE,
+                required=True,
+                cardinality=Cardinality.EXACTLY_ONE,
+            ),
+        ]
+        store = PostgresMetadataStore(pg_engine, pg_session)
+        await store.ensure_table(ASSAY_SCHEMA, fields)
+        await PostgresSemanticsSchemaRepository(pg_session).save(
+            Schema(id=ASSAY_SCHEMA, title="assay", fields=fields, created_at=datetime.now(UTC))
+        )
+        for i in range(3):
+            srn = RecordSRN.parse(f"urn:osa:localhost:rec:arec{i}@1")
+            await seed_record(
+                pg_engine,
+                srn=str(srn),
+                schema_id=ASSAY_SCHEMA.id.root,
+                schema_version=ASSAY_SCHEMA.version.root,
+                metadata={"assay_date": f"2026-01-0{i + 1}"},
+                published_at=datetime(2026, 1, 1, tzinfo=UTC),
+            )
+            await store.insert(ASSAY_SCHEMA, srn, {"assay_date": f"2026-01-0{i + 1}"})
+        await pg_session.commit()
+
+        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+        sort = [SortSpec(column="assay_date", direction=SortDirection.ASC)]
+        all_rows = await _drain(
+            rs, QueryPlan(schema_id=ASSAY_SCHEMA, table_kind=TableKind.RECORDS, sort=sort)
+        )
+        assert [r["id"] for r in all_rows] == ["arec0", "arec1", "arec2"]
+
+        # Encode the cursor as the route layer does — the date sort value
+        # serializes to an ISO string via default=str.
+        cursor = encode_cursor(all_rows[1]["assay_date"], all_rows[1]["srn"])
+        page2 = await _drain(
+            rs,
+            QueryPlan(
+                schema_id=ASSAY_SCHEMA,
+                table_kind=TableKind.RECORDS,
+                sort=sort,
+                pagination=PaginationParams(cursor=PaginationCursor(value=cursor)),
+            ),
+        )
+        assert [r["id"] for r in page2] == ["arec2"]
