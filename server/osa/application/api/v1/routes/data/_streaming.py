@@ -94,8 +94,12 @@ def _next_cursor(page: list[Mapping[str, Any]], plan: QueryPlan) -> str | None:
     if not page:
         return None
     last = page[-1]
+    # The keyset tiebreaker is the records srn / feature id (see
+    # PostgresDataReadStore). ``sort=id`` aliases to that same column in the
+    # store, so the cursor's sort value must be the tiebreaker value too —
+    # encoding the bare record id would compare it against the srn column,
+    # match every row, and never advance.
+    tiebreak = last.get("srn", last.get("id"))
     sort_column = plan.sort[0].column
-    sort_value = last.get(sort_column)
-    # The keyset tiebreaker is the record SRN (see PostgresDataReadStore), so the
-    # cursor's id component is the full srn, not the bare id.
-    return encode_cursor(sort_value, last.get("srn", last.get("id")))
+    sort_value = tiebreak if sort_column == "id" else last.get(sort_column)
+    return encode_cursor(sort_value, tiebreak)

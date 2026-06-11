@@ -264,6 +264,43 @@ class TestStreamPaginationOrder:
         page2 = await _drain(rs, plan2)
         assert [r["id"] for r in page2] == ["rec2", "rec1", "rec0"]
 
+    async def test_id_sort_cursor_round_trips(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession
+    ):
+        # ``sort=id`` aliases to the srn column; the route layer encodes the
+        # srn as the cursor sort value (see _next_cursor). A bare-id cursor
+        # would sort before every SRN and pagination would never advance.
+        store = await _setup_schema(pg_engine, pg_session)
+        for i in range(3):
+            await _publish(
+                pg_engine,
+                store,
+                f"rec{i}",
+                "Homo sapiens",
+                float(i),
+                datetime(2026, 1, 1, tzinfo=UTC),
+            )
+        await pg_session.commit()
+        rs = PostgresDataReadStore(pg_session, Domain("localhost"))
+
+        sort = [SortSpec(column="id", direction=SortDirection.ASC)]
+        all_rows = await _drain(
+            rs, QueryPlan(schema_id=SCHEMA, table_kind=TableKind.RECORDS, sort=sort)
+        )
+        assert [r["id"] for r in all_rows] == ["rec0", "rec1", "rec2"]
+
+        cursor = encode_cursor(all_rows[1]["srn"], all_rows[1]["srn"])
+        page2 = await _drain(
+            rs,
+            QueryPlan(
+                schema_id=SCHEMA,
+                table_kind=TableKind.RECORDS,
+                sort=sort,
+                pagination=PaginationParams(cursor=PaginationCursor(value=cursor)),
+            ),
+        )
+        assert [r["id"] for r in page2] == ["rec2"]
+
 
 ASSAY_SCHEMA = SchemaId.parse("assay@1.0.0")
 

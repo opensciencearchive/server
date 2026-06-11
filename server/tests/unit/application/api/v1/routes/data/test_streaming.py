@@ -13,7 +13,12 @@ import pytest
 from osa.application.api.v1.routes.data._streaming import build_table_response
 from osa.domain.data.model.format import FORMATS
 from osa.domain.data.model.manifest import ColumnSpec
-from osa.domain.data.model.query_plan import QueryPlan, TableKind
+from osa.domain.data.model.query_plan import (
+    QueryPlan,
+    SortDirection,
+    SortSpec,
+    TableKind,
+)
 from osa.domain.semantics.model.value import FieldType
 from osa.domain.shared.model.srn import SchemaId
 
@@ -101,3 +106,50 @@ async def test_paginated_has_more_emits_cursor() -> None:
     # default RECORDS sort is created_at desc, tiebreaker srn
     assert decoded["s"] == "2026-01-02"
     assert decoded["id"] == "s2"
+
+
+@pytest.mark.asyncio
+async def test_paginated_records_id_sort_encodes_srn() -> None:
+    # ``sort=id`` on records aliases to the srn column in the store, so the
+    # cursor's sort value must be the srn too. Encoding the bare id would
+    # compare it against the srn column — every SRN sorts after a bare id, so
+    # the keyset matches all rows and pagination never advances.
+    rows = [
+        {"id": "a", "srn": "urn:osa:localhost:rec:a@1"},
+        {"id": "b", "srn": "urn:osa:localhost:rec:b@1"},
+        {"id": "c", "srn": "urn:osa:localhost:rec:c@1"},
+    ]
+    plan = QueryPlan(
+        schema_id=SCHEMA,
+        table_kind=TableKind.RECORDS,
+        pagination={"limit": 2},
+        sort=[SortSpec(column="id", direction=SortDirection.ASC)],
+    )
+    resp = await build_table_response(_aiter(rows), JSON_FMT, COLUMNS, plan)
+    parsed = json.loads(await _body(resp))
+    decoded = json.loads(base64.urlsafe_b64decode(parsed["next_cursor"]))
+    assert decoded["s"] == "urn:osa:localhost:rec:b@1"
+    assert decoded["id"] == "urn:osa:localhost:rec:b@1"
+
+
+@pytest.mark.asyncio
+async def test_paginated_features_id_sort_encodes_row_id() -> None:
+    # Feature rows have a real integer id column (no srn key), so ``sort=id``
+    # keeps encoding the row's own id.
+    rows = [
+        {"id": 1, "record_srn": "urn:osa:localhost:rec:a@1"},
+        {"id": 2, "record_srn": "urn:osa:localhost:rec:a@1"},
+        {"id": 3, "record_srn": "urn:osa:localhost:rec:a@1"},
+    ]
+    plan = QueryPlan(
+        schema_id=SCHEMA,
+        table_kind=TableKind.FEATURE,
+        feature_name="chem_features",
+        pagination={"limit": 2},
+        # default FEATURE sort is id asc
+    )
+    resp = await build_table_response(_aiter(rows), JSON_FMT, COLUMNS, plan)
+    parsed = json.loads(await _body(resp))
+    decoded = json.loads(base64.urlsafe_b64decode(parsed["next_cursor"]))
+    assert decoded["s"] == 2
+    assert decoded["id"] == 2
