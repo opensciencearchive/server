@@ -16,6 +16,7 @@ from osa.domain.metadata.service.metadata import MetadataService
 from osa.domain.record.port.feature_reader import FeatureReader
 from osa.domain.record.port.repository import RecordRepository
 from osa.domain.record.query.get_record import GetRecordHandler
+from osa.domain.record.query.get_stats import GetStatsHandler
 from osa.domain.record.service import RecordService
 from osa.infrastructure.persistence.adapter.feature_reader import PostgresFeatureReader
 from osa.domain.feature.port.storage import FeatureStoragePort
@@ -176,3 +177,4 @@ class PersistenceProvider(Provider):
 
     # Record query handlers
     get_record_handler = provide(GetRecordHandler, scope=Scope.UOW)
+    get_stats_handler = provide(GetStatsHandler, scope=Scope.UOW)

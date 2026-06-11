@@ -4,7 +4,7 @@ from dishka.integrations.fastapi import DishkaRoute, FromDishka
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from osa.domain.record.port.repository import RecordRepository
+from osa.domain.record.query.get_stats import GetStats, GetStatsHandler
 
 router = APIRouter(
     prefix="/stats",
@@ -28,8 +28,8 @@ class StatsResponse(BaseModel):
 
 @router.get("")
 async def get_stats(
-    record_repo: FromDishka[RecordRepository],
+    handler: FromDishka[GetStatsHandler],
 ) -> StatsResponse:
     """Get system statistics."""
-    record_count = await record_repo.count()
-    return StatsResponse(records=record_count)
+    result = await handler.run(GetStats())
+    return StatsResponse(records=result.records)
