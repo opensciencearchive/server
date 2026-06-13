@@ -18,4 +18,3 @@ class DepositionApproved(Event):
     metadata: dict[str, Any]
     convention_id: ConventionId
     expected_features: list[str] = []
-    hook_run_ids: dict[str, str] = {}  # hook name → hook_runs.id (provenance, #145)

@@ -145,7 +145,6 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
                         published_count=published_count,
                         expected_features=expected_features,
                         upstream_to_record_srn=upstream_to_record_srn,
-                        hook_run_ids=event.hook_run_ids,
                     )
                 )
 

@@ -156,7 +156,6 @@ class RecordService(Service):
             schema_id=schema_id,
             metadata=draft.metadata,
             expected_features=draft.expected_features,
-            hook_run_ids=draft.hook_run_ids,
         )
         await self.outbox.append(published)
 

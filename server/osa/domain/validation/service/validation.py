@@ -79,13 +79,13 @@ class ValidationService(Service):
         deposition_srn: DepositionSRN,
         inputs: HookInputs,
         hook_names: list[HookName],
-    ) -> tuple[ValidationRun, list[HookResult], dict[str, str]]:
+    ) -> tuple[ValidationRun, list[HookResult]]:
         """Execute hooks sequentially with OOM retry. Halt on reject/fail/OOM.
 
-        Resolves each hook's live release once at run start (snapshot, R8),
-        records an append-only ``hook_run`` per hook (deposition context), and
-        returns ``{hook_name: hook_run_id}`` so feature rows can be stamped with
-        their provenance at publication time.
+        Resolves each hook's live release once at run start (snapshot, R8) and
+        records an append-only ``hook_run`` per hook (deposition context). The
+        run ids are reconstructed at feature-insert time from the deposition,
+        so they are recorded here but not returned.
         """
         run.status = RunStatus.RUNNING
         run.started_at = datetime.now(timezone.utc)
@@ -106,7 +106,6 @@ class ValidationService(Service):
                 raise NotFoundError(f"Hook {name!r} has no live release")
             pairs.append((HookIdentity(name=hook.name, feature=hook.feature), release))
 
-        run_id_by_hook: dict[str, str] = {}
         hook_results: list[HookResult] = []
         overall_status: RunStatus = RunStatus.COMPLETED
 
@@ -127,7 +126,6 @@ class ValidationService(Service):
                         finished_at=datetime.now(timezone.utc),
                     )
                 )
-                run_id_by_hook[hook.name] = str(run_id)
                 overall_status = RunStatus.FAILED
                 break
 
@@ -142,7 +140,6 @@ class ValidationService(Service):
                     duration_s=result.duration_seconds,
                 )
             )
-            run_id_by_hook[hook.name] = str(run_id)
             hook_results.append(result)
 
             if result.status == HookStatus.REJECTED:
@@ -154,7 +151,7 @@ class ValidationService(Service):
         run.completed_at = datetime.now(timezone.utc)
         await self.run_repo.save(run)
 
-        return run, hook_results, run_id_by_hook
+        return run, hook_results
 
     async def validate_deposition(
         self,
@@ -162,11 +159,10 @@ class ValidationService(Service):
         convention_id: ConventionId,
         metadata: dict[str, Any],
         hooks: list[HookName],
-    ) -> tuple[ValidationRun, list[HookResult], dict[str, str]]:
+    ) -> tuple[ValidationRun, list[HookResult]]:
         """Full validation workflow using enriched event data.
 
         Uses the unified batch contract: constructs a 1-record batch for depositions.
-        Returns the run, per-hook results, and ``{hook_name: hook_run_id}``.
         """
         local_id = deposition_srn.id.root
         record = HookRecord(id=local_id, metadata=metadata)
@@ -185,7 +181,7 @@ class ValidationService(Service):
             logger.debug("No hooks configured, instant pass")
             run.status = RunStatus.COMPLETED
             await self.run_repo.save(run)
-            return run, [], {}
+            return run, []
 
         return await self.run_hooks(
             run=run,

@@ -177,13 +177,14 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                 )
             )
 
-        # Emit HookBatchCompleted, carrying hook→run_id for feature provenance.
+        # Emit HookBatchCompleted. Feature provenance (run_id per hook) is
+        # reconstructed at insert time from (ingest_run_id, batch_index) via the
+        # hook_runs just recorded — no need to ride it through the event chain.
         await self.outbox.append(
             HookBatchCompleted(
                 id=EventId(uuid4()),
                 ingest_run_id=event.ingest_run_id,
                 batch_index=event.batch_index,
-                hook_run_ids={name: str(rid) for name, rid in run_id_by_hook.items()},
             )
         )
 

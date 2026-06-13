@@ -38,7 +38,6 @@ class AutoApproveCuration(EventHandler[ValidationCompleted]):
             metadata=event.metadata,
             convention_id=event.convention_id,
             expected_features=event.expected_features,
-            hook_run_ids=event.hook_run_ids,
         )
 
         await self.outbox.append(approved)

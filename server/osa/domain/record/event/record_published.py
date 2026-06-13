@@ -21,4 +21,3 @@ class RecordPublished(Event):
     schema_id: SchemaId
     metadata: dict[str, Any]
     expected_features: list[str] = []
-    hook_run_ids: dict[str, str] = {}  # hook name → hook_runs.id (provenance, #145)

@@ -1,5 +1,6 @@
 """InsertBatchFeatures — bulk feature insertion for ingest batches."""
 
+from osa.domain.feature.port.hook_run_reader import HookRunReader
 from osa.domain.feature.port.storage import FeatureStoragePort
 from osa.domain.feature.service.feature import FeatureService
 from osa.domain.ingest.event.events import IngestBatchPublished
@@ -20,6 +21,7 @@ class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
 
     feature_service: FeatureService
     feature_storage: FeatureStoragePort
+    hook_run_reader: HookRunReader
     layout: StorageLayout
 
     async def handle(self, event: IngestBatchPublished) -> None:
@@ -27,6 +29,11 @@ class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
             return
 
         batch_output_dir = str(self.layout.ingest_batch_dir(event.ingest_run_id, event.batch_index))
+
+        # One indexed lookup per batch → {hook_name: hook_run_id} (provenance).
+        run_ids = await self.hook_run_reader.run_ids_for_batch(
+            event.ingest_run_id, event.batch_index
+        )
 
         total_inserted = 0
         skipped_dupes = 0
@@ -54,7 +61,7 @@ class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
                     hook_name=hook_name,
                     record_srn=record_srn,
                     rows=outcome.features,
-                    run_id=event.hook_run_ids[hook_name],
+                    run_id=run_ids[hook_name],
                 )
                 total_inserted += count
 

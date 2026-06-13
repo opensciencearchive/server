@@ -25,7 +25,7 @@ class ValidateDeposition(EventHandler[DepositionSubmittedEvent]):
         logger.info(f"Validating deposition: {event.deposition_id}")
 
         try:
-            run, hook_results, hook_run_ids = await self.validation_service.validate_deposition(
+            run, hook_results = await self.validation_service.validate_deposition(
                 deposition_srn=event.deposition_id,
                 convention_id=event.convention_id,
                 metadata=event.metadata,
@@ -62,7 +62,6 @@ class ValidateDeposition(EventHandler[DepositionSubmittedEvent]):
                 hook_results=[r.model_dump() for r in hook_results],
                 metadata=event.metadata,
                 expected_features=expected_features,
-                hook_run_ids=hook_run_ids,
             )
             await self.outbox.append(completed)
             logger.info(f"Validation completed for: {event.deposition_id}")
