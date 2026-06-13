@@ -56,3 +56,13 @@ class HookRegistryService(Service):
     async def record_run(self, run: HookRun) -> None:
         """Persist a completed hook_run (append-only provenance anchor)."""
         await self.registry.record_run(run)
+
+    async def run_ids_for_batch(
+        self, ingest_run_id: str, batch_index: int
+    ) -> dict[HookName, str]:
+        """Resolve ``{hook_name: hook_run_id}`` for an ingest batch."""
+        return await self.registry.run_ids_for_batch(ingest_run_id, batch_index)
+
+    async def run_ids_for_deposition(self, deposition_id: str) -> dict[HookName, str]:
+        """Resolve ``{hook_name: hook_run_id}`` for a deposition."""
+        return await self.registry.run_ids_for_deposition(deposition_id)

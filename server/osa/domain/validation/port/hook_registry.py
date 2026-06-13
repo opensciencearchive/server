@@ -73,6 +73,22 @@ class HookRegistry(Port, Protocol):
         ...
 
     @abstractmethod
+    async def run_ids_for_batch(
+        self, ingest_run_id: str, batch_index: int
+    ) -> dict[HookName, str]:
+        """``{hook_name: hook_run_id}`` for one ingest batch (latest per hook).
+
+        Reconstructs feature provenance at insert time from the keys the
+        consumer already holds, instead of threading run ids through events.
+        """
+        ...
+
+    @abstractmethod
+    async def run_ids_for_deposition(self, deposition_id: str) -> dict[HookName, str]:
+        """``{hook_name: hook_run_id}`` for a deposition (latest per hook)."""
+        ...
+
+    @abstractmethod
     async def resolve_live(self, names: list[HookName]) -> dict[HookName, HookRelease]:
         """Resolve each hook's current live release in one indexed lookup.
 

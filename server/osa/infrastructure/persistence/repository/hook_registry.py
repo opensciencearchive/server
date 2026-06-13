@@ -223,6 +223,36 @@ class PostgresHookRegistry(HookRegistry):
         )
         await self.session.flush()
 
+    async def run_ids_for_batch(
+        self, ingest_run_id: str, batch_index: int
+    ) -> dict[HookName, str]:
+        return await self._run_ids(
+            and_(
+                hook_runs_table.c.ingest_run_id == ingest_run_id,
+                hook_runs_table.c.batch_index == batch_index,
+            )
+        )
+
+    async def run_ids_for_deposition(self, deposition_id: str) -> dict[HookName, str]:
+        return await self._run_ids(hook_runs_table.c.deposition_id == deposition_id)
+
+    async def _run_ids(self, where: Any) -> dict[HookName, str]:
+        # One indexed join per batch/deposition (not per row). started_at ASC →
+        # later runs overwrite earlier, so a re-run resolves to its latest run.
+        stmt = (
+            select(hook_releases_table.c.hook_name, hook_runs_table.c.id)
+            .select_from(
+                hook_runs_table.join(
+                    hook_releases_table,
+                    hook_runs_table.c.release_id == hook_releases_table.c.id,
+                )
+            )
+            .where(where)
+            .order_by(hook_runs_table.c.started_at)
+        )
+        result = await self.session.execute(stmt)
+        return {row.hook_name: str(row.id) for row in result.all()}
+
     async def resolve_live(self, names: list[HookName]) -> dict[HookName, HookRelease]:
         if not names:
             return {}
