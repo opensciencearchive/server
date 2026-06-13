@@ -15,7 +15,7 @@ from osa.domain.deposition.port.repository import DepositionRepository
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.error import NotFoundError, ValidationError
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, Domain, LocalId
+from osa.domain.shared.model.srn import ConventionId, DepositionSRN, Domain, LocalId
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
 
@@ -29,12 +29,12 @@ class DepositionService(Service):
 
     async def create(
         self,
-        convention_srn: ConventionSRN,
+        convention_id: ConventionId,
         owner_id: UserId,
     ) -> Deposition:
-        convention = await self.convention_repo.get(convention_srn)
+        convention = await self.convention_repo.get(convention_id)
         if convention is None:
-            raise NotFoundError(f"Convention not found: {convention_srn}")
+            raise NotFoundError(f"Convention not found: {convention_id}")
 
         now = datetime.now(UTC)
         srn = DepositionSRN(
@@ -43,7 +43,7 @@ class DepositionService(Service):
         )
         deposition = Deposition(
             srn=srn,
-            convention_srn=convention_srn,
+            convention_id=convention_id,
             owner_id=owner_id,
             created_at=now,
             updated_at=now,
@@ -53,7 +53,7 @@ class DepositionService(Service):
         event = DepositionCreatedEvent(
             id=EventId(uuid4()),
             deposition_id=srn,
-            convention_srn=convention_srn,
+            convention_id=convention_id,
             owner_id=owner_id,
         )
         await self.outbox.append(event)
@@ -90,9 +90,9 @@ class DepositionService(Service):
         size: int,
     ) -> Deposition:
         dep = await self.get(srn)
-        convention = await self.convention_repo.get(dep.convention_srn)
+        convention = await self.convention_repo.get(dep.convention_id)
         if convention is None:
-            raise NotFoundError(f"Convention not found: {dep.convention_srn}")
+            raise NotFoundError(f"Convention not found: {dep.convention_id}")
 
         reqs = convention.file_requirements
 
@@ -181,9 +181,9 @@ class DepositionService(Service):
 
     async def submit(self, srn: DepositionSRN) -> Deposition:
         dep = await self.get(srn)
-        convention = await self.convention_repo.get(dep.convention_srn)
+        convention = await self.convention_repo.get(dep.convention_id)
         if convention is None:
-            raise NotFoundError(f"Convention not found: {dep.convention_srn}")
+            raise NotFoundError(f"Convention not found: {dep.convention_id}")
 
         reqs = convention.file_requirements
         if len(dep.files) < reqs.min_count:
@@ -198,7 +198,7 @@ class DepositionService(Service):
             id=EventId(uuid4()),
             deposition_id=srn,
             metadata=dep.metadata,
-            convention_srn=dep.convention_srn,
+            convention_id=dep.convention_id,
             hooks=convention.hooks,
         )
         await self.outbox.append(event)

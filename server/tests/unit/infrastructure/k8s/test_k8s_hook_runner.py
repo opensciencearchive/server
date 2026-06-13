@@ -13,7 +13,7 @@ from osa.domain.shared.error import (
 )
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
+    HookIdentity,
     OciConfig,
     OciLimits,
     TableFeatureSpec,
@@ -34,8 +34,8 @@ def _make_hook(
     config: dict | None = None,
     image: str = "ghcr.io/example/hook:v1",
     digest: str = "sha256:abc123",
-) -> HookDefinition:
-    return HookDefinition(
+) -> HookIdentity:
+    return HookIdentity(
         name=name,
         runtime=OciConfig(
             image=image,

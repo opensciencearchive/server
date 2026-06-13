@@ -17,7 +17,7 @@ from osa.domain.record.service import RecordService
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.model.source import IngestSource
-from osa.domain.shared.model.srn import ConventionSRN
+from osa.domain.shared.model.srn import ConventionId
 from osa.domain.shared.outbox import Outbox
 from osa.infrastructure.logging import get_logger
 
@@ -41,7 +41,7 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
             raise NotFoundError(f"Ingest run not found: {event.ingest_run_id}")
 
         convention = await self.convention_service.get_convention(
-            ConventionSRN.parse(ingest_run.convention_srn)
+            ConventionId.parse(ingest_run.convention_id)
         )
 
         # Read ingester records via storage port (filesystem or S3)
@@ -51,8 +51,8 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
         # batch_dir used as locator for hook outcome reads
         batch_dir = str(self.ingest_storage.batch_dir(event.ingest_run_id, event.batch_index))
 
-        # Read hook outcomes for all hooks
-        expected_features = [h.name for h in convention.hooks]
+        # Read hook outcomes for all hooks (convention.hooks are names now)
+        expected_features = list(convention.hooks)
 
         # Determine which records passed all hooks (via storage port — works on filesystem + S3)
         # TODO: is this efficient, are we hitting S3 a lot?
@@ -96,12 +96,12 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
                 drafts.append(
                     RecordDraft(
                         source=IngestSource(
-                            id=f"{ingest_run.convention_srn}:{record.source_id}",
+                            id=f"{ingest_run.convention_id}:{record.source_id}",
                             ingest_run_id=ingest_run.id,
                             upstream_source=record.source_id,
                         ),
                         metadata=record.metadata,
-                        convention_srn=ConventionSRN.parse(ingest_run.convention_srn),
+                        convention_id=ConventionId.parse(ingest_run.convention_id),
                         expected_features=expected_features,
                     )
                 )
@@ -139,12 +139,13 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
                     IngestBatchPublished(
                         id=EventId(uuid4()),
                         ingest_run_id=event.ingest_run_id,
-                        convention_srn=ingest_run.convention_srn,
+                        convention_id=ingest_run.convention_id,
                         batch_index=event.batch_index,
                         published_srns=published_srns,
                         published_count=published_count,
                         expected_features=expected_features,
                         upstream_to_record_srn=upstream_to_record_srn,
+                        hook_run_ids=event.hook_run_ids,
                     )
                 )
 

@@ -3,11 +3,14 @@
 import logging
 import uuid
 from datetime import datetime, timezone
+from uuid import uuid4
+
 from typing import Any
 
-from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.error import NotFoundError
+from osa.domain.shared.model.hook import HookIdentity, HookName
 from osa.domain.shared.model.srn import (
-    ConventionSRN,
+    ConventionId,
     DepositionSRN,
     Domain,
     LocalId,
@@ -19,13 +22,24 @@ from osa.domain.validation.model import (
     ValidationRun,
 )
 from osa.domain.validation.model.hook_input import HookRecord
+from osa.domain.validation.model.hook_release import HookRelease
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
+from osa.domain.validation.model.hook_run import HookRun, HookRunId, HookRunStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.domain.validation.port.repository import ValidationRunRepository
 from osa.domain.validation.port.storage import HookStoragePort
 from osa.domain.validation.service.hook import HookService
+from osa.domain.validation.service.hook_registry import HookRegistryService
 
 logger = logging.getLogger(__name__)
+
+
+def _run_status(hook_status: HookStatus | None) -> HookRunStatus:
+    if hook_status == HookStatus.PASSED:
+        return HookRunStatus.PASSED
+    if hook_status == HookStatus.REJECTED:
+        return HookRunStatus.FAILED
+    return HookRunStatus.ERROR
 
 
 class ValidationService(Service):
@@ -34,6 +48,7 @@ class ValidationService(Service):
     run_repo: ValidationRunRepository
     hook_runner: HookRunner
     hook_storage: HookStoragePort
+    hook_registry: HookRegistryService
     node_domain: Domain
 
     async def create_run(
@@ -63,13 +78,14 @@ class ValidationService(Service):
         run: ValidationRun,
         deposition_srn: DepositionSRN,
         inputs: HookInputs,
-        hooks: list[HookDefinition],
-    ) -> tuple[ValidationRun, list[HookResult]]:
+        hook_names: list[HookName],
+    ) -> tuple[ValidationRun, list[HookResult], dict[str, str]]:
         """Execute hooks sequentially with OOM retry. Halt on reject/fail/OOM.
 
-        Hook outputs are written to durable cold storage under the deposition directory.
-        Feature insertion is deferred to record publication time.
-        Each hook is executed via HookService which handles OOM retry with memory doubling.
+        Resolves each hook's live release once at run start (snapshot, R8),
+        records an append-only ``hook_run`` per hook (deposition context), and
+        returns ``{hook_name: hook_run_id}`` so feature rows can be stamped with
+        their provenance at publication time.
         """
         run.status = RunStatus.RUNNING
         run.started_at = datetime.now(timezone.utc)
@@ -80,16 +96,53 @@ class ValidationService(Service):
             hook_storage=self.hook_storage,
         )
 
+        # Resolve identity + live release per hook (snapshot).
+        releases = await self.hook_registry.resolve_live(hook_names)
+        pairs: list[tuple[HookIdentity, HookRelease]] = []
+        for name in hook_names:
+            hook = await self.hook_registry.get_hook(name)
+            release = releases.get(name)
+            if hook is None or release is None:
+                raise NotFoundError(f"Hook {name!r} has no live release")
+            pairs.append((HookIdentity(name=hook.name, feature=hook.feature), release))
+
+        run_id_by_hook: dict[str, str] = {}
         hook_results: list[HookResult] = []
         overall_status: RunStatus = RunStatus.COMPLETED
 
-        for hook in hooks:
+        for hook, release in pairs:
             work_dir = self.hook_storage.get_hook_output_dir(deposition_srn, hook.name)
+            started_at = datetime.now(timezone.utc)
+            run_id = HookRunId(uuid4())
             try:
-                result = await hook_service.run_hook(hook, inputs, work_dir)
+                result = await hook_service.run_hook(hook, release, inputs, work_dir)
             except Exception:
+                await self.hook_registry.record_run(
+                    HookRun(
+                        id=run_id,
+                        release_id=release.id,
+                        deposition_id=deposition_srn,
+                        status=HookRunStatus.ERROR,
+                        started_at=started_at,
+                        finished_at=datetime.now(timezone.utc),
+                    )
+                )
+                run_id_by_hook[hook.name] = str(run_id)
                 overall_status = RunStatus.FAILED
                 break
+
+            await self.hook_registry.record_run(
+                HookRun(
+                    id=run_id,
+                    release_id=release.id,
+                    deposition_id=deposition_srn,
+                    status=_run_status(result.status),
+                    started_at=started_at,
+                    finished_at=datetime.now(timezone.utc),
+                    duration_s=result.duration_seconds,
+                )
+            )
+            run_id_by_hook[hook.name] = str(run_id)
             hook_results.append(result)
 
             if result.status == HookStatus.REJECTED:
@@ -101,18 +154,19 @@ class ValidationService(Service):
         run.completed_at = datetime.now(timezone.utc)
         await self.run_repo.save(run)
 
-        return run, hook_results
+        return run, hook_results, run_id_by_hook
 
     async def validate_deposition(
         self,
         deposition_srn: DepositionSRN,
-        convention_srn: ConventionSRN,
+        convention_id: ConventionId,
         metadata: dict[str, Any],
-        hooks: list[HookDefinition],
-    ) -> tuple[ValidationRun, list[HookResult]]:
+        hooks: list[HookName],
+    ) -> tuple[ValidationRun, list[HookResult], dict[str, str]]:
         """Full validation workflow using enriched event data.
 
         Uses the unified batch contract: constructs a 1-record batch for depositions.
+        Returns the run, per-hook results, and ``{hook_name: hook_run_id}``.
         """
         local_id = deposition_srn.id.root
         record = HookRecord(id=local_id, metadata=metadata)
@@ -131,16 +185,14 @@ class ValidationService(Service):
             logger.debug("No hooks configured, instant pass")
             run.status = RunStatus.COMPLETED
             await self.run_repo.save(run)
-            return run, []
+            return run, [], {}
 
-        run, hook_results = await self.run_hooks(
+        return await self.run_hooks(
             run=run,
             deposition_srn=deposition_srn,
             inputs=inputs,
-            hooks=hooks,
+            hook_names=hooks,
         )
-
-        return run, hook_results
 
     async def save_run(self, run: ValidationRun) -> None:
         """Persist a validation run."""

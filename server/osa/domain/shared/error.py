@@ -55,7 +55,7 @@ class ConflictError(DomainError):
 class ReservedNameError(DomainError):
     """A schema ID or hook/feature name collides with a reserved URL slot.
 
-    Raised at aggregate construction (``Schema``, ``HookDefinition``) when a
+    Raised at aggregate construction (``Schema``, ``HookIdentity``) when a
     name equals one of :data:`osa.domain.shared.model.reserved.RESERVED_NAMES`.
     Surfaced as HTTP 400 with the structured ``code`` field.
     """

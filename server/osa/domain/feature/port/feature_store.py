@@ -22,6 +22,11 @@ class FeatureStore(Port, Protocol):
         hook_name: str,
         record_srn: str,
         rows: list[dict[str, Any]],
+        run_id: str,
     ) -> int:
-        """Insert feature rows into the feature table. Returns row count."""
+        """Insert feature rows into the feature table. Returns row count.
+
+        ``run_id`` is the ``hook_runs.id`` that produced these rows; it is
+        stamped on every row for per-row provenance (feature #145).
+        """
         ...

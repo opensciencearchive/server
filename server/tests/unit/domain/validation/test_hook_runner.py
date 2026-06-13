@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.model.hook import HookIdentity
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
@@ -78,7 +78,7 @@ class TestHookRunnerProtocol:
         class FakeRunner:
             async def run(
                 self,
-                hook: HookDefinition,
+                hook: HookIdentity,
                 inputs: HookInputs,
                 workspace_dir: Path,
             ) -> HookResult:

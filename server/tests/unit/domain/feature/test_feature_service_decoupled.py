@@ -12,7 +12,7 @@ import pytest
 from osa.domain.feature.service.feature import FeatureService
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
+    HookIdentity,
     OciConfig,
     TableFeatureSpec,
 )
@@ -23,8 +23,8 @@ def _make_dep_srn() -> DepositionSRN:
     return DepositionSRN.parse("urn:osa:localhost:dep:test-dep")
 
 
-def _make_hook_definition() -> HookDefinition:
-    return HookDefinition(
+def _make_hook_definition() -> HookIdentity:
+    return HookIdentity(
         name="pocketeer",
         runtime=OciConfig(
             image="osa-hooks/pocketeer:latest",

@@ -7,12 +7,12 @@ from osa.domain.deposition.port.spreadsheet import SpreadsheetPort
 from osa.domain.semantics.model.value import TermConstraints
 from osa.domain.shared.authorization.gate import at_least
 from osa.domain.shared.error import NotFoundError
-from osa.domain.shared.model.srn import ConventionSRN
+from osa.domain.shared.model.srn import ConventionId
 from osa.domain.shared.query import Query, QueryHandler, Result
 
 
 class DownloadTemplate(Query):
-    convention_srn: ConventionSRN
+    convention_id: ConventionId
 
 
 class TemplateResult(Result):
@@ -29,9 +29,9 @@ class DownloadTemplateHandler(QueryHandler[DownloadTemplate, TemplateResult]):
     spreadsheet: SpreadsheetPort
 
     async def run(self, cmd: DownloadTemplate) -> TemplateResult:
-        convention = await self.convention_repo.get(cmd.convention_srn)
+        convention = await self.convention_repo.get(cmd.convention_id)
         if convention is None:
-            raise NotFoundError(f"Convention not found: {cmd.convention_srn}")
+            raise NotFoundError(f"Convention not found: {cmd.convention_id}")
 
         schema = await self.schema_reader.get_schema(convention.schema_id)
         if schema is None:

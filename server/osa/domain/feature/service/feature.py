@@ -5,7 +5,7 @@ from typing import Any
 
 from osa.domain.feature.port.feature_store import FeatureStore
 from osa.domain.feature.port.storage import FeatureStoragePort
-from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.model.hook import HookIdentity
 from osa.domain.shared.service import Service
 
 logger = logging.getLogger(__name__)
@@ -17,8 +17,8 @@ class FeatureService(Service):
     feature_store: FeatureStore
     feature_storage: FeatureStoragePort
 
-    async def create_table(self, hook: HookDefinition) -> None:
-        """Create a feature table from a HookDefinition."""
+    async def create_table(self, hook: HookIdentity) -> None:
+        """Create a feature table from a HookIdentity."""
         await self.feature_store.create_table(hook.name, hook.feature.columns)
 
     async def insert_features(
@@ -26,14 +26,19 @@ class FeatureService(Service):
         hook_name: str,
         record_srn: str,
         rows: list[dict[str, Any]],
+        run_id: str,
     ) -> int:
-        """Insert feature rows into the feature table. Returns row count."""
-        return await self.feature_store.insert_features(hook_name, record_srn, rows)
+        """Insert feature rows into the feature table. Returns row count.
+
+        ``run_id`` is the ``hook_runs.id`` that produced these rows (provenance).
+        """
+        return await self.feature_store.insert_features(hook_name, record_srn, rows, run_id)
 
     async def insert_features_for_record(
         self,
         hook_output_dir: str,
         record_srn: str,
+        run_ids: dict[str, str],
         expected_features: list[str] | None = None,
     ) -> None:
         """Read hook features from the given directory and insert into feature tables.
@@ -58,6 +63,7 @@ class FeatureService(Service):
                     hook_name=feature_name,
                     record_srn=record_srn,
                     rows=features,
+                    run_id=run_ids[feature_name],
                 )
                 logger.info(
                     f"Inserted {count} features for hook={feature_name} record={record_srn}"

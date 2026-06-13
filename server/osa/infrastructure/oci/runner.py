@@ -11,7 +11,8 @@ from shutil import rmtree
 
 import aiodocker
 from osa.domain.shared.error import OOMError, PermanentError, TransientError
-from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.model.hook import HookIdentity
+from osa.domain.validation.model.hook_release import HookRelease
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.infrastructure.logging import get_logger
@@ -50,11 +51,12 @@ class OciHookRunner(HookRunner):
 
     async def run(
         self,
-        hook: HookDefinition,
+        hook: HookIdentity,
+        release: HookRelease,
         inputs: HookInputs,
         work_dir: Path,
     ) -> HookResult:
-        timeout = hook.runtime.limits.timeout_seconds
+        timeout = release.runtime.limits.timeout_seconds
 
         # Create sibling input/ and output/ dirs under work_dir
         staging_dir = work_dir / "input"
@@ -67,8 +69,8 @@ class OciHookRunner(HookRunner):
                 for record in inputs.records:
                     f.write(json.dumps(record.model_dump()) + "\n")
 
-            if inputs.config or hook.runtime.config:
-                config = {**hook.runtime.config, **(inputs.config or {})}
+            if inputs.config or release.runtime.config:
+                config = {**release.runtime.config, **(inputs.config or {})}
                 (staging_dir / "config.json").write_text(json.dumps(config))
 
             # Create files directory structure: $OSA_FILES/{id}/ per record
@@ -80,13 +82,16 @@ class OciHookRunner(HookRunner):
             try:
 
                 async def _resolve_and_run():
-                    image_ref = await self._resolve_image(hook.runtime.image, hook.runtime.digest)
+                    image_ref = await self._resolve_image(
+                        release.runtime.image, release.runtime.digest
+                    )
                     return await self._run_container(
                         image_ref,
                         staging_dir,
                         inputs.files_dirs,
                         container_output,
                         hook,
+                        release,
                         files_base,
                     )
 
@@ -120,7 +125,8 @@ class OciHookRunner(HookRunner):
         staging_dir: Path,
         files_dirs: dict[str, Path],
         output_dir: Path,
-        hook: HookDefinition,
+        hook: HookIdentity,
+        release: HookRelease,
         files_base: Path,
     ) -> dict:
         container = None
@@ -153,9 +159,9 @@ class OciHookRunner(HookRunner):
                 "User": "65534:65534",
                 "HostConfig": {
                     "Binds": binds,
-                    "Memory": parse_memory(hook.runtime.limits.memory),
-                    "MemorySwap": parse_memory(hook.runtime.limits.memory),
-                    "NanoCpus": int(float(hook.runtime.limits.cpu) * 1e9),
+                    "Memory": parse_memory(release.runtime.limits.memory),
+                    "MemorySwap": parse_memory(release.runtime.limits.memory),
+                    "NanoCpus": int(float(release.runtime.limits.cpu) * 1e9),
                     "NetworkMode": "none",
                     "ReadonlyRootfs": True,
                     "CapDrop": ["ALL"],
@@ -185,12 +191,12 @@ class OciHookRunner(HookRunner):
                 log.error(
                     "OOM: hook={hook_name} limit={memory}",
                     hook_name=hook.name,
-                    memory=hook.runtime.limits.memory,
+                    memory=release.runtime.limits.memory,
                 )
                 if tail_text:
                     for line in tail_text.splitlines():
                         print(f"    OOM [{hook.name}] {line}", file=sys.stderr, flush=True)
-                raise OOMError(f"Hook killed by OOM (limit: {hook.runtime.limits.memory})")
+                raise OOMError(f"Hook killed by OOM (limit: {release.runtime.limits.memory})")
 
             # Parse progress file
             progress = parse_progress_file(output_dir)

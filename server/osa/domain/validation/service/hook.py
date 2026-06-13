@@ -14,8 +14,9 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from osa.domain.shared.error import OOMError
-from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.model.hook import HookIdentity
 from osa.domain.shared.service import Service
+from osa.domain.validation.model.hook_release import HookRelease
 from osa.domain.validation.model.batch_outcome import (
     BatchRecordOutcome,
     HookRecordId,
@@ -40,7 +41,8 @@ class HookService(Service):
 
     async def run_hook(
         self,
-        hook: HookDefinition,
+        hook: HookIdentity,
+        release: HookRelease,
         inputs: HookInputs,
         work_dir: Path,
     ) -> HookResult:
@@ -71,7 +73,7 @@ class HookService(Service):
                 duration_seconds=0.0,
             )
 
-        current_hook = hook
+        current_release = release
         total_duration = 0.0
 
         for attempt in range(1 + MAX_OOM_RETRIES):
@@ -83,7 +85,7 @@ class HookService(Service):
             )
 
             try:
-                result = await self.hook_runner.run(current_hook, attempt_inputs, work_dir)
+                result = await self.hook_runner.run(hook, current_release, attempt_inputs, work_dir)
             except OOMError:
                 # Read any partial output written before OOM
                 new_outcomes = _read_output_dir(work_dir)
@@ -99,13 +101,13 @@ class HookService(Service):
                     break
 
                 if attempt < MAX_OOM_RETRIES:
-                    current_hook = current_hook.with_doubled_memory()
+                    current_release = current_release.with_doubled_memory()
                     log.info(
                         "OOM retry {attempt}/{max_retries} for hook={hook_name}, memory={memory}, remaining={remaining} records",
                         attempt=attempt + 1,
                         max_retries=MAX_OOM_RETRIES,
                         hook_name=hook.name,
-                        memory=current_hook.runtime.limits.memory,
+                        memory=current_release.runtime.limits.memory,
                         remaining=len(remaining),
                     )
                     continue
@@ -115,7 +117,7 @@ class HookService(Service):
                         outcomes[HookRecordId(r.id)] = BatchRecordOutcome(
                             record_id=HookRecordId(r.id),
                             status=OutcomeStatus.ERRORED,
-                            error=f"OOM after {MAX_OOM_RETRIES} retries (last limit: {current_hook.runtime.limits.memory})",
+                            error=f"OOM after {MAX_OOM_RETRIES} retries (last limit: {current_release.runtime.limits.memory})",
                         )
                     await self.hook_storage.write_batch_outcomes(work_dir, outcomes)
                     raise
@@ -155,18 +157,19 @@ class HookService(Service):
 
     async def run_hooks_for_batch(
         self,
-        hooks: list[HookDefinition],
+        hook_releases: list[tuple[HookIdentity, HookRelease]],
         inputs: HookInputs,
         work_dirs: dict[str, Path],
     ) -> list[HookResult]:
         """Run multiple hooks sequentially for a batch of records.
 
-        work_dirs maps hook_name → output directory.
+        *hook_releases* pairs each hook identity with the release resolved for
+        this run (snapshot, R8). work_dirs maps hook_name → output directory.
         """
         results: list[HookResult] = []
-        for hook in hooks:
+        for hook, release in hook_releases:
             work_dir = work_dirs[hook.name]
-            result = await self.run_hook(hook, inputs, work_dir)
+            result = await self.run_hook(hook, release, inputs, work_dir)
             results.append(result)
         return results
 

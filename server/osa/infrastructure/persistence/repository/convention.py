@@ -6,21 +6,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.port.convention_repository import ConventionRepository
-from osa.domain.shared.model.hook import HookDefinition
 from osa.domain.shared.model.source import IngesterDefinition
-from osa.domain.shared.model.srn import ConventionSRN, LocalId, SchemaId, Semver
+from osa.domain.shared.model.srn import ConventionId, LocalId, SchemaId, Semver
 from osa.infrastructure.persistence.tables import conventions_table
 
 
 def _convention_to_row(convention: Convention) -> dict[str, Any]:
     return {
-        "srn": str(convention.srn),
+        "id": convention.id.render(),
         "title": convention.title,
         "description": convention.description,
         "schema_id": convention.schema_id.id.root,
         "schema_version": convention.schema_id.version.root,
         "file_requirements": convention.file_requirements.model_dump(),
-        "hooks": [h.model_dump() for h in convention.hooks],
+        "hooks": list(convention.hooks),  # hook names (str) — registry refs
         "source": convention.ingester.model_dump() if convention.ingester else None,
         "created_at": convention.created_at,
     }
@@ -29,7 +28,7 @@ def _convention_to_row(convention: Convention) -> dict[str, Any]:
 def _row_to_convention(row: dict[str, Any]) -> Convention:
     source_data = row.get("source")
     return Convention(
-        srn=ConventionSRN.parse(row["srn"]),
+        id=ConventionId.parse(row["id"]),
         title=row["title"],
         description=row.get("description"),
         schema_id=SchemaId(
@@ -37,7 +36,7 @@ def _row_to_convention(row: dict[str, Any]) -> Convention:
             version=Semver.from_string(row["schema_version"]),
         ),
         file_requirements=FileRequirements.model_validate(row["file_requirements"]),
-        hooks=[HookDefinition.model_validate(h) for h in (row.get("hooks") or [])],
+        hooks=list(row.get("hooks") or []),
         ingester=IngesterDefinition.model_validate(source_data) if source_data else None,
         created_at=row["created_at"],
     )
@@ -52,8 +51,8 @@ class PostgresConventionRepository(ConventionRepository):
         await self.session.execute(insert(conventions_table).values(**row))
         await self.session.flush()
 
-    async def get(self, srn: ConventionSRN) -> Convention | None:
-        stmt = select(conventions_table).where(conventions_table.c.srn == str(srn))
+    async def get(self, id: ConventionId) -> Convention | None:
+        stmt = select(conventions_table).where(conventions_table.c.id == id.render())
         result = await self.session.execute(stmt)
         row = result.mappings().first()
         return _row_to_convention(dict(row)) if row else None
@@ -70,8 +69,8 @@ class PostgresConventionRepository(ConventionRepository):
         result = await self.session.execute(stmt)
         return [_row_to_convention(dict(r)) for r in result.mappings().all()]
 
-    async def exists(self, srn: ConventionSRN) -> bool:
-        stmt = select(conventions_table.c.srn).where(conventions_table.c.srn == str(srn))
+    async def exists(self, id: ConventionId) -> bool:
+        stmt = select(conventions_table.c.id).where(conventions_table.c.id == id.render())
         result = await self.session.execute(stmt)
         return result.first() is not None
 

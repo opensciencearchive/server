@@ -8,7 +8,7 @@ from osa.domain.shared.command import Command, CommandHandler, Result
 class StartIngest(Command):
     """Start an ingest run for a convention."""
 
-    convention_srn: str
+    convention_id: str
     batch_size: int = 1000
     limit: int | None = None  # Max total records to ingest (None = unlimited)
 
@@ -17,7 +17,7 @@ class IngestRunCreated(Result):
     """Result of starting an ingest run."""
 
     srn: str
-    convention_srn: str
+    convention_id: str
     status: str
     started_at: str
 
@@ -38,7 +38,7 @@ class StartIngestHandler(CommandHandler[StartIngest, IngestRunCreated]):
         from osa.domain.shared.model.srn import Domain  # TODO: lazy needed?
 
         ingest_run = await self.service.start_ingest(
-            convention_srn=cmd.convention_srn,
+            convention_id=cmd.convention_id,
             batch_size=cmd.batch_size,
             limit=cmd.limit,
         )
@@ -48,7 +48,7 @@ class StartIngestHandler(CommandHandler[StartIngest, IngestRunCreated]):
 
         return IngestRunCreated(
             srn=srn,
-            convention_srn=ingest_run.convention_srn,
+            convention_id=ingest_run.convention_id,
             status=ingest_run.status,
             started_at=ingest_run.started_at.isoformat(),
         )

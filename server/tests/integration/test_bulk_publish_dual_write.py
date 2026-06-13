@@ -28,7 +28,7 @@ from osa.domain.record.service import RecordService
 from osa.domain.semantics.model.value import Cardinality, FieldDefinition, FieldType
 from osa.domain.semantics.service.schema import SchemaService
 from osa.domain.shared.model.source import DepositionSource
-from osa.domain.shared.model.srn import ConventionSRN, Domain, SchemaIdentifier
+from osa.domain.shared.model.srn import ConventionId, Domain, SchemaIdentifier
 from osa.infrastructure.persistence.metadata_store import PostgresMetadataStore
 from osa.infrastructure.persistence.repository.convention import PostgresConventionRepository
 from osa.infrastructure.persistence.repository.ontology import PostgresOntologyRepository
@@ -132,7 +132,7 @@ class TestBulkPublishDualWrite:
             RecordDraft(
                 source=DepositionSource(id=f"dep-{uuid4()}"),
                 metadata={"species": "Homo sapiens", "resolution": 2.0 + i * 0.1},
-                convention_srn=ConventionSRN.parse(conv_srn_str),
+                convention_id=ConventionId.parse(conv_srn_str),
             )
             for i in range(3)
         ]
@@ -184,7 +184,7 @@ class TestBulkPublishDualWrite:
             RecordDraft(
                 source=DepositionSource(id=f"dep-{uuid4()}"),
                 metadata={"species": "A", "resolution": "not-a-number"},
-                convention_srn=ConventionSRN.parse(conv_srn_str),
+                convention_id=ConventionId.parse(conv_srn_str),
             )
         ]
 

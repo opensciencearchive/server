@@ -41,7 +41,7 @@ def _make_principal(
 class TestCreateDepositionHandlerAuth:
     @pytest.mark.asyncio
     async def test_create_deposition_allows_depositor(self) -> None:
-        from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+        from osa.domain.shared.model.srn import ConventionId, DepositionSRN
 
         depositor = _make_principal(frozenset({Role.DEPOSITOR}))
         service = AsyncMock()
@@ -53,19 +53,19 @@ class TestCreateDepositionHandlerAuth:
             deposition_service=service,
         )
 
-        conv_srn = ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
-        result = await handler.run(CreateDeposition(convention_srn=conv_srn))
+        conv_srn = ConventionId.parse("urn:osa:localhost:conv:test@1.0.0")
+        result = await handler.run(CreateDeposition(convention_id=conv_srn))
         assert result.srn is not None
 
     @pytest.mark.asyncio
     async def test_create_deposition_rejects_unauthenticated(self) -> None:
-        from osa.domain.shared.model.srn import ConventionSRN
+        from osa.domain.shared.model.srn import ConventionId
 
         handler = CreateDepositionHandler.__new__(CreateDepositionHandler)
 
         with pytest.raises(AuthorizationError) as exc_info:
-            conv_srn = ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
-            await handler.run(CreateDeposition(convention_srn=conv_srn))
+            conv_srn = ConventionId.parse("urn:osa:localhost:conv:test@1.0.0")
+            await handler.run(CreateDeposition(convention_id=conv_srn))
         assert exc_info.value.code == "missing_token"
 
 

@@ -25,9 +25,9 @@ class ValidateDeposition(EventHandler[DepositionSubmittedEvent]):
         logger.info(f"Validating deposition: {event.deposition_id}")
 
         try:
-            run, hook_results = await self.validation_service.validate_deposition(
+            run, hook_results, hook_run_ids = await self.validation_service.validate_deposition(
                 deposition_srn=event.deposition_id,
-                convention_srn=event.convention_srn,
+                convention_id=event.convention_id,
                 metadata=event.metadata,
                 hooks=event.hooks,
             )
@@ -44,24 +44,25 @@ class ValidateDeposition(EventHandler[DepositionSubmittedEvent]):
             failed = ValidationFailed(
                 id=EventId(uuid4()),
                 deposition_srn=event.deposition_id,
-                convention_srn=event.convention_srn,
+                convention_id=event.convention_id,
                 status=run.status,
                 reasons=reasons,
             )
             await self.outbox.append(failed)
             logger.info(f"Validation failed for: {event.deposition_id}")
         else:
-            # Extract expected_features from hooks at the validation boundary
-            expected_features = [h.name for h in event.hooks]
+            # event.hooks are already hook names (the feature-table slots).
+            expected_features = list(event.hooks)
             completed = ValidationCompleted(
                 id=EventId(uuid4()),
                 validation_run_srn=run.srn,
                 deposition_srn=event.deposition_id,
-                convention_srn=event.convention_srn,
+                convention_id=event.convention_id,
                 status=run.status,
                 hook_results=[r.model_dump() for r in hook_results],
                 metadata=event.metadata,
                 expected_features=expected_features,
+                hook_run_ids=hook_run_ids,
             )
             await self.outbox.append(completed)
             logger.info(f"Validation completed for: {event.deposition_id}")

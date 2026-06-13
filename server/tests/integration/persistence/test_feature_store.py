@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
+    HookIdentity,
     OciConfig,
     TableFeatureSpec,
 )
@@ -17,13 +17,13 @@ from osa.infrastructure.persistence.feature_table import FEATURES_SCHEMA
 def _make_hook(
     name: str = "quality_check",
     columns: list[ColumnDef] | None = None,
-) -> HookDefinition:
+) -> HookIdentity:
     if columns is None:
         columns = [
             ColumnDef(name="score", json_type="number", required=True),
             ColumnDef(name="label", json_type="string", required=False),
         ]
-    return HookDefinition(
+    return HookIdentity(
         name=name,
         runtime=OciConfig(
             image="ghcr.io/example/validator:latest",

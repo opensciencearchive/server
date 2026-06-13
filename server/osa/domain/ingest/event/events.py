@@ -9,7 +9,7 @@ class IngestRunStarted(Event):
 
     id: EventId
     ingest_run_id: IngestRunId
-    convention_srn: str
+    convention_id: str
     batch_size: int
 
 
@@ -22,7 +22,7 @@ class NextBatchRequested(Event):
 
     id: EventId
     ingest_run_id: IngestRunId
-    convention_srn: str
+    convention_id: str
     batch_size: int
 
 
@@ -42,11 +42,15 @@ class HookBatchCompleted(Event):
     """Emitted when hook processing completes for a batch.
 
     Outcomes (features/rejections/errors) are on disk at the batch output path.
+    ``hook_run_ids`` maps each hook name → the ``hook_runs.id`` that recorded
+    its execution for this batch (feature #145), so feature rows can be stamped
+    with the run that produced them.
     """
 
     id: EventId
     ingest_run_id: IngestRunId
     batch_index: int
+    hook_run_ids: dict[str, str] = {}
 
 
 class IngestBatchPublished(Event):
@@ -58,12 +62,13 @@ class IngestBatchPublished(Event):
 
     id: EventId
     ingest_run_id: IngestRunId
-    convention_srn: str
+    convention_id: str
     batch_index: int
     published_srns: list[str]
     published_count: int
     expected_features: list[str]
     upstream_to_record_srn: dict[str, str]  # upstream source ID → published record SRN
+    hook_run_ids: dict[str, str] = {}  # hook name → hook_runs.id (provenance, #145)
 
 
 class IngestCompleted(Event):

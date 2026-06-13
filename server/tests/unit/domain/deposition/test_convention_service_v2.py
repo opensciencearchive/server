@@ -10,7 +10,7 @@ from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.semantics.model.value import Cardinality, FieldDefinition, FieldType
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
+    HookIdentity,
     OciConfig,
     TableFeatureSpec,
 )
@@ -44,8 +44,8 @@ def _make_file_reqs() -> FileRequirements:
     )
 
 
-def _make_hook_def(name: str = "detect_pockets") -> HookDefinition:
-    return HookDefinition(
+def _make_hook_def(name: str = "detect_pockets") -> HookIdentity:
+    return HookIdentity(
         name=name,
         runtime=OciConfig(
             image="ghcr.io/example/pocketeer",
@@ -194,7 +194,7 @@ class TestConventionRegisteredEvent:
         outbox.append.assert_called_once()
         emitted = outbox.append.call_args[0][0]
         assert isinstance(emitted, ConventionRegistered)
-        assert emitted.convention_srn == result.srn
+        assert emitted.convention_id == result.srn
 
     @pytest.mark.asyncio
     async def test_create_convention_without_source_still_emits_event(self):
@@ -210,4 +210,4 @@ class TestConventionRegisteredEvent:
         outbox.append.assert_called_once()
         emitted = outbox.append.call_args[0][0]
         assert isinstance(emitted, ConventionRegistered)
-        assert emitted.convention_srn == result.srn
+        assert emitted.convention_id == result.srn

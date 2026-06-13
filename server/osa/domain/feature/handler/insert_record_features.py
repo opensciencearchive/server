@@ -23,5 +23,6 @@ class InsertRecordFeatures(EventHandler[RecordPublished]):
         await self.feature_service.insert_features_for_record(
             hook_output_dir=hook_output_dir,
             record_srn=str(event.record_srn),
+            run_ids=event.hook_run_ids,
             expected_features=event.expected_features,
         )

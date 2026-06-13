@@ -355,3 +355,54 @@ class SchemaId(ValueObject):
 
     def to_srn(self, domain: Domain) -> "SchemaSRN":
         return SchemaSRN(domain=domain, id=self.id, version=self.version)
+
+
+# ---------- Convention identity (short form — internal primitive) ----------
+
+
+class ConventionId(ValueObject):
+    """Short-form convention identity — the internal primitive handle.
+
+    Mirrors :class:`SchemaId`: a convention is unambiguously identified by
+    ``(id, version)`` within a single OSA node. The caller supplies a
+    human-readable slug at deploy time (e.g. ``"proteins"``) which combines
+    with the version into ``"<slug>@<semver>"``.
+
+    Replaces the opaque, server-generated :class:`ConventionSRN` as the primary
+    handle for all non-federation code paths. Use :class:`ConventionSRN` only at
+    federation edges where the publishing node's domain becomes meaningful.
+
+    Wire form: ``"<id>@<semver>"`` (e.g., ``"proteins@1.0.0"``).
+    """
+
+    id: LocalId
+    version: Semver
+
+    @property
+    def major(self) -> int:
+        """Major version component."""
+        return int(self.version.root.split(".")[0])
+
+    def render(self) -> str:
+        return f"{self.id.root}@{self.version.root}"
+
+    def __str__(self) -> str:
+        return self.render()
+
+    @classmethod
+    def parse(cls, value: str) -> "ConventionId":
+        """Parse wire form ``"<id>@<semver>"``.
+
+        Raises ``ValueError`` on malformed input.
+        """
+        if not isinstance(value, str) or "@" not in value:
+            raise ValueError(f"ConventionId must be '<id>@<semver>', got {value!r}")
+        id_part, version_part = value.split("@", 1)
+        return cls(id=LocalId(id_part), version=Semver.from_string(version_part))
+
+    @classmethod
+    def from_srn(cls, srn: "ConventionSRN") -> "ConventionId":
+        return cls(id=srn.id, version=srn.version)
+
+    def to_srn(self, domain: Domain) -> "ConventionSRN":
+        return ConventionSRN(domain=domain, id=self.id, version=self.version)

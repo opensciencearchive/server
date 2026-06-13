@@ -3,23 +3,23 @@ from datetime import datetime
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.shared.authorization.gate import public
-from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.model.hook import HookName
 from osa.domain.shared.model.source import IngesterDefinition
-from osa.domain.shared.model.srn import ConventionSRN, SchemaId
+from osa.domain.shared.model.srn import ConventionId, SchemaId
 from osa.domain.shared.query import Query, QueryHandler, Result
 
 
 class GetConvention(Query):
-    srn: ConventionSRN
+    id: ConventionId
 
 
 class ConventionDetail(Result):
-    srn: ConventionSRN
+    id: ConventionId
     title: str
     description: str | None
     schema_id: SchemaId
     file_requirements: FileRequirements
-    hooks: list[HookDefinition]
+    hooks: list[HookName]
     ingester: IngesterDefinition | None = None
     created_at: datetime
 
@@ -29,14 +29,14 @@ class GetConventionHandler(QueryHandler[GetConvention, ConventionDetail]):
     convention_service: ConventionService
 
     async def run(self, cmd: GetConvention) -> ConventionDetail:
-        conv = await self.convention_service.get_convention(cmd.srn)
+        conv = await self.convention_service.get_convention(cmd.id)
         return ConventionDetail(
-            srn=conv.srn,
+            id=conv.id,
             title=conv.title,
             description=conv.description,
             schema_id=conv.schema_id,
             file_requirements=conv.file_requirements,
-            hooks=conv.hooks,
+            hooks=list(conv.hooks),
             ingester=conv.ingester,
             created_at=conv.created_at,
         )

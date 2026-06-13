@@ -25,7 +25,7 @@ class CreateFeatureTables(EventHandler[ConventionRegistered]):
             logger.info(
                 "Creating feature table: hook=%s convention=%s",
                 hook.name,
-                event.convention_srn,
+                event.convention_id,
             )
             try:
                 await self.feature_service.create_table(hook)
@@ -33,5 +33,5 @@ class CreateFeatureTables(EventHandler[ConventionRegistered]):
                 logger.warning(
                     "Feature table already exists, skipping: hook=%s convention=%s",
                     hook.name,
-                    event.convention_srn,
+                    event.convention_id,
                 )

@@ -9,7 +9,7 @@ from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
+    HookIdentity,
     OciConfig,
     OciLimits,
     TableFeatureSpec,
@@ -20,7 +20,7 @@ from osa.domain.shared.model.source import (
     IngesterScheduleConfig,
     InitialRunConfig,
 )
-from osa.domain.shared.model.srn import ConventionSRN, SchemaId
+from osa.domain.shared.model.srn import ConventionId, SchemaId
 from osa.infrastructure.persistence.repository.convention import (
     PostgresConventionRepository,
 )
@@ -31,11 +31,11 @@ def _make_convention(
     srn: str = "urn:osa:localhost:conv:test-convention-001@1.0.0",
     title: str = "Test Convention",
     schema_id: str = "test-schema-001@1.0.0",
-    hooks: list[HookDefinition] | None = None,
+    hooks: list[HookIdentity] | None = None,
     ingester: IngesterDefinition | None = None,
 ) -> Convention:
     return Convention(
-        srn=ConventionSRN.parse(srn),
+        srn=ConventionId.parse(srn),
         title=title,
         description="A test convention for integration tests",
         schema_id=SchemaId.parse(schema_id),
@@ -51,8 +51,8 @@ def _make_convention(
     )
 
 
-def _make_hook() -> HookDefinition:
-    return HookDefinition(
+def _make_hook() -> HookIdentity:
+    return HookIdentity(
         name="quality_check",
         runtime=OciConfig(
             image="ghcr.io/example/validator:latest",
@@ -115,7 +115,7 @@ class TestConventionRepoRoundTrip:
 
     async def test_get_nonexistent_returns_none(self, pg_session: AsyncSession):
         repo = PostgresConventionRepository(pg_session)
-        got = await repo.get(ConventionSRN.parse("urn:osa:localhost:conv:does-not-exist@1.0.0"))
+        got = await repo.get(ConventionId.parse("urn:osa:localhost:conv:does-not-exist@1.0.0"))
         assert got is None
 
     async def test_list_returns_ordered_by_created_at_desc(self, pg_session: AsyncSession):
@@ -161,7 +161,7 @@ class TestConventionRepoRoundTrip:
 
     async def test_exists_false(self, pg_session: AsyncSession):
         repo = PostgresConventionRepository(pg_session)
-        assert await repo.exists(ConventionSRN.parse("urn:osa:localhost:conv:nope@1.0.0")) is False
+        assert await repo.exists(ConventionId.parse("urn:osa:localhost:conv:nope@1.0.0")) is False
 
     async def test_convention_without_ingester(self, pg_session: AsyncSession):
         """Ingester is optional — should be None on retrieval when not set."""

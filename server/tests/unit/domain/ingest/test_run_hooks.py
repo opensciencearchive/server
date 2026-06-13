@@ -10,11 +10,11 @@ from osa.domain.ingest.handler.run_hooks import RunHooks
 from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId, IngestStatus
 from osa.domain.shared.error import OOMError, PermanentError
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.hook import HookDefinition, OciConfig, OciLimits, TableFeatureSpec
+from osa.domain.shared.model.hook import HookIdentity, OciConfig, OciLimits, TableFeatureSpec
 
 
-def _make_hook(name: str = "pockets") -> HookDefinition:
-    return HookDefinition(
+def _make_hook(name: str = "pockets") -> HookIdentity:
+    return HookIdentity(
         name=name,
         runtime=OciConfig(
             image="ghcr.io/test/pockets:v1",
@@ -47,7 +47,7 @@ def _make_handler(*, hook_service_side_effect=None) -> RunHooks:
     ingest_repo = AsyncMock()
     ingest_repo.get.return_value = IngestRun(
         id=IngestRunId("run-1"),
-        convention_srn="urn:osa:localhost:conv:test@1.0.0",
+        convention_id="urn:osa:localhost:conv:test@1.0.0",
         status=IngestStatus.RUNNING,
         batch_size=100,
         started_at=__import__("datetime").datetime.now(__import__("datetime").UTC),

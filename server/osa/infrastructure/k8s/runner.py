@@ -15,7 +15,8 @@ from osa.domain.shared.error import (
     PermanentError,
     TransientError,
 )
-from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.model.hook import HookIdentity
+from osa.domain.validation.model.hook_release import HookRelease
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.infrastructure.k8s.errors import classify_api_error
@@ -83,7 +84,8 @@ class K8sHookRunner(HookRunner):
 
     async def run(
         self,
-        hook: HookDefinition,
+        hook: HookIdentity,
+        release: HookRelease,
         inputs: HookInputs,
         work_dir: Path,
     ) -> HookResult:
@@ -92,15 +94,16 @@ class K8sHookRunner(HookRunner):
         # Write records.jsonl (unified batch contract)
         records_jsonl = "\n".join(json.dumps(r.model_dump()) for r in inputs.records) + "\n"
         await self._s3.put_object(f"{input_prefix}/records.jsonl", records_jsonl)
-        if inputs.config or hook.runtime.config:
-            config = {**hook.runtime.config, **(inputs.config or {})}
+        if inputs.config or release.runtime.config:
+            config = {**release.runtime.config, **(inputs.config or {})}
             await self._s3.put_object(f"{input_prefix}/config.json", json.dumps(config))
 
-        return await self._run_job(hook, inputs, work_dir)
+        return await self._run_job(hook, release, inputs, work_dir)
 
     async def _run_job(
         self,
-        hook: HookDefinition,
+        hook: HookIdentity,
+        release: HookRelease,
         inputs: HookInputs,
         work_dir: Path,
     ) -> HookResult:
@@ -140,6 +143,7 @@ class K8sHookRunner(HookRunner):
                     files_dir = first_dir.parent
                 spec = self._build_job_spec(
                     hook,
+                    release,
                     work_dir,
                     run_id=inputs.run_id,
                     files_dir=files_dir,
@@ -161,7 +165,7 @@ class K8sHookRunner(HookRunner):
             await self._wait_for_completion(
                 job_name_to_watch,
                 namespace,
-                timeout_seconds=hook.runtime.limits.timeout_seconds + 30,
+                timeout_seconds=release.runtime.limits.timeout_seconds + 30,
             )
 
             return await self._parse_hook_result(hook, work_dir, start_time)
@@ -184,7 +188,7 @@ class K8sHookRunner(HookRunner):
                 await self._cleanup_job(job_name_to_watch, namespace)
 
     async def _parse_hook_result(
-        self, hook: HookDefinition, work_dir: Path, start_time: float
+        self, hook: HookIdentity, work_dir: Path, start_time: float
     ) -> HookResult:
         """Parse output from a completed Job (reads from S3)."""
         from osa.infrastructure.runner_utils import parse_progress_from_s3
@@ -243,7 +247,8 @@ class K8sHookRunner(HookRunner):
 
     def _build_job_spec(
         self,
-        hook: HookDefinition,
+        hook: HookIdentity,
+        release: HookRelease,
         work_dir: Path,
         *,
         run_id: str,
@@ -316,7 +321,7 @@ class K8sHookRunner(HookRunner):
 
         container = V1Container(
             name="hook",
-            image=f"{hook.runtime.image}@{hook.runtime.digest}",
+            image=f"{release.runtime.image}@{release.runtime.digest}",
             env=[
                 V1EnvVar(name="OSA_IN", value="/osa/in"),
                 V1EnvVar(name="OSA_OUT", value="/osa/out"),
@@ -325,8 +330,8 @@ class K8sHookRunner(HookRunner):
             ],
             resources=V1ResourceRequirements(
                 limits={
-                    "memory": to_k8s_quantity(hook.runtime.limits.memory),
-                    "cpu": hook.runtime.limits.cpu,
+                    "memory": to_k8s_quantity(release.runtime.limits.memory),
+                    "cpu": release.runtime.limits.cpu,
                 },
             ),
             security_context=V1SecurityContext(
@@ -365,7 +370,7 @@ class K8sHookRunner(HookRunner):
             metadata=V1ObjectMeta(name=name, namespace=self._config.namespace, labels=labels),
             spec=V1JobSpec(
                 backoff_limit=0,
-                active_deadline_seconds=SCHEDULING_TIMEOUT + hook.runtime.limits.timeout_seconds,
+                active_deadline_seconds=SCHEDULING_TIMEOUT + release.runtime.limits.timeout_seconds,
                 ttl_seconds_after_finished=self._config.job_ttl_seconds,
                 template=V1PodTemplateSpec(
                     metadata=V1ObjectMeta(labels=labels),

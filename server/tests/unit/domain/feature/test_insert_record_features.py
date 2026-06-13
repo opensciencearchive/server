@@ -11,7 +11,7 @@ from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.source import DepositionSource, IngestSource
 from osa.domain.shared.model.srn import (
-    ConventionSRN,
+    ConventionId,
     RecordSRN,
     SchemaId,
 )
@@ -21,8 +21,8 @@ def _make_record_srn() -> RecordSRN:
     return RecordSRN.parse("urn:osa:localhost:rec:test-rec@1")
 
 
-def _make_conv_srn() -> ConventionSRN:
-    return ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
+def _make_conv_srn() -> ConventionId:
+    return ConventionId.parse("urn:osa:localhost:conv:test@1.0.0")
 
 
 def _make_schema_id() -> SchemaId:
@@ -37,7 +37,7 @@ def _make_event(
         record_srn=_make_record_srn(),
         source=DepositionSource(id="urn:osa:localhost:dep:test-dep"),
         metadata={"title": "Test"},
-        convention_srn=_make_conv_srn(),
+        convention_id=_make_conv_srn(),
         schema_id=_make_schema_id(),
         expected_features=expected_features or [],
     )
@@ -224,7 +224,7 @@ class TestInsertRecordFeaturesIngestSource:
                 upstream_source="pdb",
             ),
             metadata={"title": "Ingested"},
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_srn(),
             schema_id=_make_schema_id(),
             expected_features=["pocket_detect"],
         )

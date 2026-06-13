@@ -13,11 +13,11 @@ import pytest
 
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
+    HookIdentity,
     OciConfig,
     TableFeatureSpec,
 )
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, Domain
+from osa.domain.shared.model.srn import ConventionId, DepositionSRN, Domain
 from osa.domain.validation.model import RunStatus
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.service.validation import ValidationService
@@ -27,12 +27,12 @@ def _make_dep_srn() -> DepositionSRN:
     return DepositionSRN.parse("urn:osa:localhost:dep:test-dep")
 
 
-def _make_conv_srn() -> ConventionSRN:
-    return ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
+def _make_conv_srn() -> ConventionId:
+    return ConventionId.parse("urn:osa:localhost:conv:test@1.0.0")
 
 
-def _make_hook_definition() -> HookDefinition:
-    return HookDefinition(
+def _make_hook_definition() -> HookIdentity:
+    return HookIdentity(
         name="pocketeer",
         runtime=OciConfig(
             image="osa-hooks/pocketeer:latest",
@@ -92,7 +92,7 @@ class TestDecoupledValidationService:
         hook = _make_hook_definition()
         run, hook_results = await service.validate_deposition(
             deposition_srn=_make_dep_srn(),
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_srn(),
             metadata={"pdb_id": "4HHB"},
             hooks=[hook],
         )

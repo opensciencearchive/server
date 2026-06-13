@@ -12,15 +12,15 @@ from osa.domain.semantics.model.value import Cardinality, FieldDefinition, Field
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
+    HookIdentity,
     OciConfig,
     TableFeatureSpec,
 )
-from osa.domain.shared.model.srn import ConventionSRN, Domain, SchemaId, SchemaIdentifier
+from osa.domain.shared.model.srn import ConventionId, Domain, SchemaId, SchemaIdentifier
 
 
-def _make_conv_srn(id: str = "test-conv", version: str = "1.0.0") -> ConventionSRN:
-    return ConventionSRN.parse(f"urn:osa:localhost:conv:{id}@{version}")
+def _make_conv_srn(id: str = "test-conv", version: str = "1.0.0") -> ConventionId:
+    return ConventionId.parse(f"urn:osa:localhost:conv:{id}@{version}")
 
 
 def _make_schema_id(id: str = "test-schema", version: str = "1.0.0") -> SchemaId:
@@ -47,8 +47,8 @@ def _make_file_reqs() -> FileRequirements:
     )
 
 
-def _make_hook_def(name: str = "pocket_detect") -> HookDefinition:
-    return HookDefinition(
+def _make_hook_def(name: str = "pocket_detect") -> HookIdentity:
+    return HookIdentity(
         name=name,
         runtime=OciConfig(
             image="ghcr.io/example/hook",

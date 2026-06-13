@@ -1,7 +1,7 @@
 """Unit tests for enriched ConventionRegistered event.
 
 Tests for User Story 2: Convention Initialization Chain.
-Verifies ConventionRegistered carries hooks: list[HookDefinition].
+Verifies ConventionRegistered carries hooks: list[HookIdentity].
 """
 
 from uuid import uuid4
@@ -10,23 +10,23 @@ from osa.domain.deposition.event.convention_registered import ConventionRegister
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
+    HookIdentity,
     OciConfig,
     TableFeatureSpec,
 )
-from osa.domain.shared.model.srn import ConventionSRN, SchemaId
+from osa.domain.shared.model.srn import ConventionId, SchemaId
 
 
-def _make_conv_srn() -> ConventionSRN:
-    return ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
+def _make_conv_srn() -> ConventionId:
+    return ConventionId.parse("urn:osa:localhost:conv:test@1.0.0")
 
 
 def _make_schema_id() -> SchemaId:
     return SchemaId.parse("test@1.0.0")
 
 
-def _make_hook_definition(name: str = "pocket_detect") -> HookDefinition:
-    return HookDefinition(
+def _make_hook_definition(name: str = "pocket_detect") -> HookIdentity:
+    return HookIdentity(
         name=name,
         runtime=OciConfig(
             image="ghcr.io/example/hook",
@@ -41,11 +41,11 @@ def _make_hook_definition(name: str = "pocket_detect") -> HookDefinition:
 
 class TestConventionRegisteredWithHooks:
     def test_event_carries_hooks(self):
-        """ConventionRegistered carries hooks: list[HookDefinition]."""
+        """ConventionRegistered carries hooks: list[HookIdentity]."""
         hooks = [_make_hook_definition("hook_a"), _make_hook_definition("hook_b")]
         event = ConventionRegistered(
             id=EventId(uuid4()),
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_srn(),
             schema_id=_make_schema_id(),
             schema_fields=[],
             hooks=hooks,
@@ -59,7 +59,7 @@ class TestConventionRegisteredWithHooks:
         """ConventionRegistered defaults to empty hooks list."""
         event = ConventionRegistered(
             id=EventId(uuid4()),
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_srn(),
             schema_id=_make_schema_id(),
         )
 
@@ -70,7 +70,7 @@ class TestConventionRegisteredWithHooks:
         hooks = [_make_hook_definition()]
         event = ConventionRegistered(
             id=EventId(uuid4()),
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_srn(),
             schema_id=_make_schema_id(),
             schema_fields=[],
             hooks=hooks,

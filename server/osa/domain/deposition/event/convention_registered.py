@@ -2,8 +2,8 @@
 
 from osa.domain.semantics.model.value import FieldDefinition
 from osa.domain.shared.event import Event, EventId
-from osa.domain.shared.model.hook import HookDefinition
-from osa.domain.shared.model.srn import ConventionSRN, SchemaId
+from osa.domain.shared.model.hook import HookIdentity
+from osa.domain.shared.model.srn import ConventionId, SchemaId
 
 
 class ConventionRegistered(Event):
@@ -18,7 +18,7 @@ class ConventionRegistered(Event):
     """
 
     id: EventId
-    convention_srn: ConventionSRN
+    convention_id: ConventionId
     schema_id: SchemaId
     schema_fields: list[FieldDefinition] = []
-    hooks: list[HookDefinition] = []
+    hooks: list[HookIdentity] = []

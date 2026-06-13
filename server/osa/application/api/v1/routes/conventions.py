@@ -7,9 +7,9 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from osa.domain.deposition.command.create_convention import (
-    CreateConvention,
-    CreateConventionHandler,
     ConventionCreated,
+    DeployConvention,
+    DeployConventionHandler,
 )
 from osa.domain.deposition.query.download_template import (
     DownloadTemplate,
@@ -25,15 +25,15 @@ from osa.domain.deposition.query.list_conventions import (
     ListConventionsHandler,
     ConventionList,
 )
-from osa.domain.shared.model.srn import ConventionSRN
+from osa.domain.shared.model.srn import ConventionId
 
 router = APIRouter(prefix="/conventions", tags=["Conventions"], route_class=DishkaRoute)
 
 
 @router.post("", response_model=ConventionCreated, status_code=201)
-async def create_convention(
-    body: CreateConvention,
-    handler: FromDishka[CreateConventionHandler],
+async def deploy_convention(
+    body: DeployConvention,
+    handler: FromDishka[DeployConventionHandler],
 ) -> ConventionCreated:
     return await handler.run(body)
 
@@ -43,7 +43,7 @@ async def download_convention_template(
     srn: str,
     handler: FromDishka[DownloadTemplateHandler],
 ) -> StreamingResponse:
-    result = await handler.run(DownloadTemplate(convention_srn=ConventionSRN.parse(srn)))
+    result = await handler.run(DownloadTemplate(convention_id=ConventionId.parse(srn)))
     return StreamingResponse(
         iter([result.content]),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -58,7 +58,7 @@ async def get_convention(
     srn: str,
     handler: FromDishka[GetConventionHandler],
 ) -> ConventionDetail:
-    return await handler.run(GetConvention(srn=ConventionSRN.parse(srn)))
+    return await handler.run(GetConvention(id=ConventionId.parse(srn)))
 
 
 @router.get("", response_model=ConventionList)

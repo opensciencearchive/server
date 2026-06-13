@@ -1,6 +1,6 @@
 from osa.domain.auth.model.value import UserId
 from osa.domain.shared.event import Event, EventId
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+from osa.domain.shared.model.srn import ConventionId, DepositionSRN
 
 
 class DepositionCreatedEvent(Event):
@@ -8,5 +8,5 @@ class DepositionCreatedEvent(Event):
 
     id: EventId
     deposition_id: DepositionSRN
-    convention_srn: ConventionSRN
+    convention_id: ConventionId
     owner_id: UserId

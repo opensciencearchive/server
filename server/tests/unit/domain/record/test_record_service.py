@@ -15,7 +15,7 @@ from osa.domain.record.port.repository import RecordRepository
 from osa.domain.record.service.record import RecordService
 from osa.domain.shared.model.source import DepositionSource, IngestSource
 from osa.domain.shared.model.srn import (
-    ConventionSRN,
+    ConventionId,
     DepositionSRN,
     Domain,
     LocalId,
@@ -24,8 +24,8 @@ from osa.domain.shared.model.srn import (
 from osa.domain.shared.outbox import Outbox
 
 
-def _make_conv_srn() -> ConventionSRN:
-    return ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
+def _make_conv_srn() -> ConventionId:
+    return ConventionId.parse("urn:osa:localhost:conv:test@1.0.0")
 
 
 def _make_schema_id() -> SchemaId:
@@ -76,7 +76,7 @@ def sample_draft(node_domain: Domain) -> RecordDraft:
     return RecordDraft(
         source=DepositionSource(id=str(dep_srn)),
         metadata={"title": "Test Record", "organism": "human", "platform": "GPL570"},
-        convention_srn=_make_conv_srn(),
+        convention_id=_make_conv_srn(),
         expected_features=["pocket_detect"],
     )
 
@@ -113,7 +113,7 @@ class TestRecordService:
 
         assert record is not None
         assert record.source == sample_draft.source
-        assert record.convention_srn == sample_draft.convention_srn
+        assert record.convention_id == sample_draft.convention_id
         assert record.schema_id == _make_schema_id()
         assert record.metadata == sample_draft.metadata
         mock_record_repo.save.assert_called_once()
@@ -136,7 +136,7 @@ class TestRecordService:
         assert isinstance(event, RecordPublished)
         assert event.record_srn == record.srn
         assert event.source == sample_draft.source
-        assert event.convention_srn == sample_draft.convention_srn
+        assert event.convention_id == sample_draft.convention_id
         assert event.schema_id == _make_schema_id()
         assert event.expected_features == sample_draft.expected_features
         assert event.metadata == sample_draft.metadata
@@ -173,7 +173,7 @@ class TestRecordServiceIngestSource:
                 upstream_source="pdb",
             ),
             metadata={"title": "Ingested Protein"},
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_srn(),
             expected_features=["pocket_detect"],
         )
 
@@ -183,7 +183,7 @@ class TestRecordServiceIngestSource:
 
         assert record.source.type == "ingest"
         assert record.source.upstream_source == "pdb"
-        assert record.convention_srn == _make_conv_srn()
+        assert record.convention_id == _make_conv_srn()
         mock_record_repo.save.assert_called_once()
 
         event = mock_outbox.append.call_args[0][0]

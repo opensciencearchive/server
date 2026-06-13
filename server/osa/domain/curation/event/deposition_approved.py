@@ -3,7 +3,7 @@
 from typing import Any
 
 from osa.domain.shared.event import Event, EventId
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+from osa.domain.shared.model.srn import ConventionId, DepositionSRN
 
 
 class DepositionApproved(Event):
@@ -16,5 +16,6 @@ class DepositionApproved(Event):
     id: EventId
     deposition_srn: DepositionSRN
     metadata: dict[str, Any]
-    convention_srn: ConventionSRN
+    convention_id: ConventionId
     expected_features: list[str] = []
+    hook_run_ids: dict[str, str] = {}  # hook name → hook_runs.id (provenance, #145)

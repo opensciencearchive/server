@@ -4,11 +4,11 @@ from datetime import UTC, datetime
 
 from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.value import FileRequirements
-from osa.domain.shared.model.srn import ConventionSRN, SchemaId
+from osa.domain.shared.model.srn import ConventionId, SchemaId
 
 
-def _make_conv_srn(id: str = "test-conv", version: str = "1.0.0") -> ConventionSRN:
-    return ConventionSRN.parse(f"urn:osa:localhost:conv:{id}@{version}")
+def _make_conv_srn(id: str = "test-conv", version: str = "1.0.0") -> ConventionId:
+    return ConventionId.parse(f"urn:osa:localhost:conv:{id}@{version}")
 
 
 def _make_schema_id(id: str = "test-schema", version: str = "1.0.0") -> SchemaId:

@@ -82,7 +82,7 @@ async def download_template(
     template_handler: FromDishka[DownloadTemplateHandler],
 ) -> StreamingResponse:
     dep = await handler.run(GetDeposition(srn=DepositionSRN.parse(srn)))
-    result = await template_handler.run(DownloadTemplate(convention_srn=dep.convention_srn))
+    result = await template_handler.run(DownloadTemplate(convention_id=dep.convention_id))
     return StreamingResponse(
         iter([result.content]),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

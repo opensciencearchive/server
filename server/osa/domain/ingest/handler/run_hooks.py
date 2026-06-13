@@ -1,7 +1,6 @@
 """RunHooks — runs hook containers on an ingester batch."""
 
-from osa.domain.validation.model import HookResult
-
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,14 +12,29 @@ from osa.domain.ingest.port.storage import IngestStoragePort
 from osa.domain.ingest.service.ingest import IngestService
 from osa.domain.shared.error import NotFoundError, OOMError, PermanentError
 from osa.domain.shared.event import EventHandler, EventId
-from osa.domain.shared.model.srn import ConventionSRN
+from osa.domain.shared.model.hook import HookIdentity
+from osa.domain.shared.model.srn import ConventionId
 from osa.domain.shared.outbox import Outbox
+from osa.domain.validation.model import HookResult
 from osa.domain.validation.model.hook_input import HookRecord
+from osa.domain.validation.model.hook_release import HookRelease
+from osa.domain.validation.model.hook_result import HookStatus
+from osa.domain.validation.model.hook_run import HookRun, HookRunId, HookRunStatus
 from osa.domain.validation.port.hook_runner import HookInputs
 from osa.domain.validation.service.hook import HookService
+from osa.domain.validation.service.hook_registry import HookRegistryService
 from osa.infrastructure.logging import get_logger
 
 log = get_logger(__name__)
+
+
+def _run_status(hook_status: HookStatus | None) -> HookRunStatus:
+    """Map a per-hook execution outcome to its append-only run status."""
+    if hook_status == HookStatus.PASSED:
+        return HookRunStatus.PASSED
+    if hook_status == HookStatus.REJECTED:
+        return HookRunStatus.FAILED
+    return HookRunStatus.ERROR
 
 
 class RunHooks(EventHandler[IngesterBatchReady]):
@@ -33,6 +47,7 @@ class RunHooks(EventHandler[IngesterBatchReady]):
     ingest_service: IngestService
     convention_service: ConventionService
     hook_service: HookService
+    hook_registry: HookRegistryService
     outbox: Outbox
     ingest_storage: IngestStoragePort
 
@@ -42,7 +57,7 @@ class RunHooks(EventHandler[IngesterBatchReady]):
             raise NotFoundError(f"Ingest run not found: {event.ingest_run_id}")
 
         convention = await self.convention_service.get_convention(
-            ConventionSRN.parse(ingest_run.convention_srn)
+            ConventionId.parse(ingest_run.convention_id)
         )
 
         # Read records via storage port (filesystem or S3)
@@ -77,18 +92,35 @@ class RunHooks(EventHandler[IngesterBatchReady]):
             files_dirs=files_dirs,
         )
 
+        # Resolve each hook's live release ONCE and snapshot it for this run
+        # (R8) so a mid-run deploy can't split the batch across versions.
+        hook_names = list(convention.hooks)
+        releases = await self.hook_registry.resolve_live(hook_names)
+        pairs: list[tuple[HookIdentity, HookRelease]] = []
+        for name in hook_names:
+            hook = await self.hook_registry.get_hook(name)
+            release = releases.get(name)
+            if hook is None or release is None:
+                raise NotFoundError(f"Hook {name!r} has no live release")
+            pairs.append((HookIdentity(name=hook.name, feature=hook.feature), release))
+
         # Build work_dirs for each hook via storage port
         work_dirs: dict[str, Path] = {}
-        for hook in convention.hooks:
-            work_dirs[hook.name] = self.ingest_storage.hook_work_dir(
-                event.ingest_run_id, event.batch_index, hook.name
+        for name in hook_names:
+            work_dirs[name] = self.ingest_storage.hook_work_dir(
+                event.ingest_run_id, event.batch_index, name
             )
+
+        # Pre-allocate a hook_run id per hook so provenance is stable even on
+        # partial (OOM) outcomes; rows produced this batch reference these ids.
+        run_id_by_hook = {name: HookRunId(uuid4()) for name in hook_names}
+        started_at = datetime.now(UTC)
 
         # Run all hooks via HookService
         results: list[HookResult] = []
         try:
             results = await self.hook_service.run_hooks_for_batch(
-                hooks=convention.hooks,
+                hook_releases=pairs,
                 inputs=inputs,
                 work_dirs=work_dirs,
             )
@@ -127,12 +159,31 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                 ingest_run_id=event.ingest_run_id,
             )
 
-        # Emit HookBatchCompleted
+        # Record one append-only hook_run per hook (provenance anchor, #145).
+        finished_at = datetime.now(UTC)
+        status_by_hook = {r.hook_name: r.status for r in results}
+        duration_by_hook = {r.hook_name: r.duration_seconds for r in results}
+        for hook, release in pairs:
+            await self.hook_registry.record_run(
+                HookRun(
+                    id=run_id_by_hook[hook.name],
+                    release_id=release.id,
+                    ingest_run_id=event.ingest_run_id,
+                    batch_index=event.batch_index,
+                    status=_run_status(status_by_hook.get(hook.name)),
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    duration_s=duration_by_hook.get(hook.name),
+                )
+            )
+
+        # Emit HookBatchCompleted, carrying hook→run_id for feature provenance.
         await self.outbox.append(
             HookBatchCompleted(
                 id=EventId(uuid4()),
                 ingest_run_id=event.ingest_run_id,
                 batch_index=event.batch_index,
+                hook_run_ids={name: str(rid) for name, rid in run_id_by_hook.items()},
             )
         )
 

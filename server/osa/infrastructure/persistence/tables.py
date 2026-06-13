@@ -2,8 +2,10 @@
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -15,6 +17,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.types import JSON
 
 # Metadata object for all tables
@@ -27,7 +30,7 @@ depositions_table = Table(
     "depositions",
     metadata,
     Column("srn", String, primary_key=True),
-    Column("convention_srn", String, nullable=False),  # Convention submitted against
+    Column("convention_id", String, nullable=False),  # Convention submitted against
     Column("status", String(32), nullable=False),  # DepositionStatus as string
     Column("metadata", JSON, nullable=False),
     Column("files", JSON, nullable=False),
@@ -65,7 +68,7 @@ records_table = Table(
     "records",
     metadata,
     Column("srn", String, primary_key=True),
-    Column("convention_srn", Text, nullable=False),
+    Column("convention_id", Text, nullable=False),
     Column("schema_id", Text, nullable=False),
     Column("schema_version", Text, nullable=False),
     Column("source", JSONB, nullable=False),
@@ -73,7 +76,7 @@ records_table = Table(
     Column("published_at", DateTime(timezone=True), nullable=False),
 )
 
-Index("idx_records_convention_srn", records_table.c.convention_srn)
+Index("idx_records_convention_id", records_table.c.convention_id)
 Index("idx_records_schema_id", records_table.c.schema_id)
 Index(
     "uq_records_source",
@@ -274,13 +277,14 @@ Index("idx_schemas_id", schemas_table.c.id)
 conventions_table = Table(
     "conventions",
     metadata,
-    Column("srn", String, primary_key=True),  # Convention SRN stays as-is (published artifact)
+    # Caller-supplied ConventionId ("<slug>@<version>") — feature #145.
+    Column("id", String, primary_key=True),
     Column("title", String(255), nullable=False),
     Column("description", Text, nullable=True),
     Column("schema_id", String, nullable=False),
     Column("schema_version", String, nullable=False),
     Column("file_requirements", JSON, nullable=False),  # FileRequirements as dict
-    Column("hooks", JSON, nullable=False, default=[]),  # List of HookDefinition dicts
+    Column("hooks", JSON, nullable=False, default=[]),  # List of hook names (str) — registry refs
     Column("source", JSON, nullable=True),  # IngesterDefinition as dict
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
@@ -346,7 +350,7 @@ ingest_runs_table = Table(
     "ingest_runs",
     metadata,
     Column("id", String, primary_key=True),
-    Column("convention_srn", String, nullable=False),
+    Column("convention_id", String, nullable=False),
     Column("status", String(32), nullable=False, server_default=text("'pending'")),
     Column("ingestion_finished", Boolean, nullable=False, server_default=text("false")),
     Column("batches_ingested", Integer, nullable=False, server_default=text("0")),
@@ -359,7 +363,7 @@ ingest_runs_table = Table(
     Column("completed_at", DateTime(timezone=True), nullable=True),
 )
 
-Index("idx_ingest_runs_convention", ingest_runs_table.c.convention_srn)
+Index("idx_ingest_runs_convention", ingest_runs_table.c.convention_id)
 Index("idx_ingest_runs_status", ingest_runs_table.c.status)
 
 
@@ -385,3 +389,74 @@ Index(
     device_authorizations_table.c.status,
     device_authorizations_table.c.expires_at,
 )
+
+
+# ============================================================================
+# HOOK REGISTRY (Validation — feature #145)
+# ============================================================================
+# A hook's stable identity + fixed output contract + live-release pointer.
+# The circular hooks.live_release_id ↔ hook_releases.hook_name dependency is
+# broken by using a NOT-VALID-at-create deferred ordering: the release is
+# inserted first, then the pointer is set in the same transaction.
+hooks_table = Table(
+    "hooks",
+    metadata,
+    Column("name", String(40), primary_key=True),  # HookName, globally unique
+    Column("feature_spec", JSONB, nullable=False),  # serialized TableFeatureSpec
+    Column(
+        "live_release_id", PGUUID(as_uuid=True), nullable=True
+    ),  # FK added in migration (deferrable)
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+
+# Immutable, integer-versioned hook artifact: what image runs, built from where.
+hook_releases_table = Table(
+    "hook_releases",
+    metadata,
+    Column("id", PGUUID(as_uuid=True), primary_key=True),  # HookReleaseId (UUIDv7)
+    Column("hook_name", String(40), ForeignKey("hooks.name"), nullable=False),
+    Column("version", Integer, nullable=False),  # monotonic per hook, gap-free
+    Column("image", Text, nullable=False),
+    Column("digest", Text, nullable=False),
+    Column("config", JSONB, nullable=False, server_default=text("'{}'")),
+    Column("limits", JSONB, nullable=False),
+    Column("source_ref", Text, nullable=False),  # git SHA / build id (reproducibility)
+    Column("built_by", Text, nullable=True),
+    Column("built_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("hook_name", "version", name="uq_hook_releases_hook_version"),
+    UniqueConstraint("hook_name", "digest", name="uq_hook_releases_hook_digest"),
+)
+
+Index(
+    "idx_hook_releases_hook_version",
+    hook_releases_table.c.hook_name,
+    hook_releases_table.c.version.desc(),
+)
+
+
+# Append-only execution record + per-row provenance anchor. Exactly one of
+# ingest_run_id / deposition_id is set (CHECK).
+hook_runs_table = Table(
+    "hook_runs",
+    metadata,
+    Column("id", PGUUID(as_uuid=True), primary_key=True),  # HookRunId; stamped on feature rows
+    Column("release_id", PGUUID(as_uuid=True), ForeignKey("hook_releases.id"), nullable=False),
+    Column("ingest_run_id", String, ForeignKey("ingest_runs.id"), nullable=True),
+    Column("deposition_id", String, nullable=True),
+    Column("batch_index", Integer, nullable=True),
+    Column("status", String(16), nullable=False),  # HookRunStatus
+    Column("started_at", DateTime(timezone=True), nullable=False),
+    Column("finished_at", DateTime(timezone=True), nullable=True),
+    Column("duration_s", Float, nullable=True),
+    Column("oom_retries", Integer, nullable=False, server_default=text("0")),
+    Column("log_ref", Text, nullable=True),
+    CheckConstraint(
+        "(ingest_run_id IS NOT NULL) <> (deposition_id IS NOT NULL)",
+        name="ck_hook_runs_one_context",
+    ),
+)
+
+Index("idx_hook_runs_ingest_run", hook_runs_table.c.ingest_run_id)
+Index("idx_hook_runs_deposition", hook_runs_table.c.deposition_id)
+Index("idx_hook_runs_release", hook_runs_table.c.release_id)  # recall: rows from a release

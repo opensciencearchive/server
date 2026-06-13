@@ -80,6 +80,7 @@ class PostgresFeatureStore(FeatureStore):
         hook_name: str,
         record_srn: str,
         rows: list[dict[str, Any]],
+        run_id: str,
     ) -> int:
         if not rows:
             return 0
@@ -90,6 +91,7 @@ class PostgresFeatureStore(FeatureStore):
         enriched_rows = [
             {
                 "record_srn": record_srn,
+                "run_id": run_id,
                 "created_at": now,
                 **{k: json.dumps(v) if isinstance(v, (list, dict)) else v for k, v in row.items()},
             }

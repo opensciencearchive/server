@@ -7,7 +7,7 @@ import pytest
 
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
+    HookIdentity,
     OciConfig,
     TableFeatureSpec,
 )
@@ -20,8 +20,8 @@ from osa.domain.validation.port.hook_runner import HookInputs
 from osa.domain.validation.service.validation import ValidationService
 
 
-def _make_hook_definition(name: str = "pocket_detect") -> HookDefinition:
-    return HookDefinition(
+def _make_hook_definition(name: str = "pocket_detect") -> HookIdentity:
+    return HookIdentity(
         name=name,
         runtime=OciConfig(
             image="ghcr.io/example/hook",

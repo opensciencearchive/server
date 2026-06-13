@@ -9,7 +9,7 @@ from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId, IngestSta
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.shared.error import ConflictError, NotFoundError
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.srn import ConventionSRN, Domain
+from osa.domain.shared.model.srn import ConventionId, Domain
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
 from osa.infrastructure.logging import get_logger
@@ -27,7 +27,7 @@ class IngestService(Service):
 
     async def start_ingest(
         self,
-        convention_srn: str,  # TODO: use convention ID instead of SRN
+        convention_id: str,  # TODO: use convention ID instead of SRN
         batch_size: int = 1000,
         limit: int | None = None,
     ) -> IngestRun:
@@ -38,19 +38,19 @@ class IngestService(Service):
         - Convention has an ingester configured
         - No ingest is already running for this convention
         """
-        parsed_srn = ConventionSRN.parse(convention_srn)
+        parsed_srn = ConventionId.parse(convention_id)
         convention = await self.convention_service.get_convention(parsed_srn)
 
         if convention.ingester is None:
             raise NotFoundError(
-                f"No ingester configured for convention {convention_srn}",
+                f"No ingester configured for convention {convention_id}",
                 code="no_ingester_configured",
             )
 
-        existing = await self.ingest_repo.get_running_for_convention(convention_srn)
+        existing = await self.ingest_repo.get_running_for_convention(convention_id)
         if existing is not None:
             raise ConflictError(
-                f"Ingest already running for convention {convention_srn}",
+                f"Ingest already running for convention {convention_id}",
                 code="ingest_already_running",
             )
 
@@ -59,7 +59,7 @@ class IngestService(Service):
 
         ingest_run = IngestRun(
             id=run_id,
-            convention_srn=convention_srn,
+            convention_id=convention_id,
             status=IngestStatus.PENDING,
             batch_size=batch_size,
             limit=limit,
@@ -72,7 +72,7 @@ class IngestService(Service):
             IngestRunStarted(
                 id=EventId(uuid4()),
                 ingest_run_id=run_id,
-                convention_srn=convention_srn,
+                convention_id=convention_id,
                 batch_size=batch_size,
             )
         )
@@ -81,16 +81,16 @@ class IngestService(Service):
             NextBatchRequested(
                 id=EventId(uuid4()),
                 ingest_run_id=run_id,
-                convention_srn=convention_srn,
+                convention_id=convention_id,
                 batch_size=batch_size,
             )
         )
 
         srn = f"urn:osa:{self.node_domain.root}:ing:{run_id}"
         log.info(
-            "ingest started for {convention_srn}",
+            "ingest started for {convention_id}",
             ingest_run_srn=srn,
-            convention_srn=convention_srn,
+            convention_id=convention_id,
             batch_size=batch_size,
             limit=limit,
         )

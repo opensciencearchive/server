@@ -54,6 +54,7 @@ class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
                     hook_name=hook_name,
                     record_srn=record_srn,
                     rows=outcome.features,
+                    run_id=event.hook_run_ids[hook_name],
                 )
                 total_inserted += count
 

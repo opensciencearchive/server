@@ -28,6 +28,7 @@ from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.event_repository import EventRepository
 from osa.domain.feature.port.feature_store import FeatureStore
 from osa.domain.validation.port.repository import ValidationRunRepository
+from osa.domain.validation.port.hook_registry import HookRegistry
 from osa.domain.data.port.data_read_store import (
     DataCatalogReadStore,
     DataTableReadStore,
@@ -45,6 +46,9 @@ from osa.infrastructure.persistence.database import (
 )
 from osa.infrastructure.persistence.repository.convention import (
     PostgresConventionRepository,
+)
+from osa.infrastructure.persistence.repository.hook_registry import (
+    PostgresHookRegistry,
 )
 from osa.infrastructure.persistence.repository.deposition import (
     PostgresDepositionRepository,
@@ -123,6 +127,9 @@ class PersistenceProvider(Provider):
     convention_repo = provide(
         PostgresConventionRepository, scope=Scope.UOW, provides=ConventionRepository
     )
+
+    # Hook registry (validation domain — feature #145)
+    hook_registry_repo = provide(PostgresHookRegistry, scope=Scope.UOW, provides=HookRegistry)
 
     # Cross-domain readers
     schema_reader = provide(SchemaReaderAdapter, scope=Scope.UOW, provides=SchemaReader)

@@ -16,7 +16,7 @@ from osa.domain.record.port.repository import RecordRepository
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.srn import (
-    ConventionSRN,
+    ConventionId,
     Domain,
     LocalId,
     RecordSRN,
@@ -59,11 +59,11 @@ class RecordService(Service):
         """Total published records on this node."""
         return await self.record_repo.count()
 
-    async def _resolve_schema_id(self, convention_srn: ConventionSRN) -> SchemaId:
+    async def _resolve_schema_id(self, convention_id: ConventionId) -> SchemaId:
         """Resolve a convention to its schema id at publication time."""
-        convention = await self.convention_repo.get(convention_srn)
+        convention = await self.convention_repo.get(convention_id)
         if convention is None:
-            raise NotFoundError(f"Convention not found: {convention_srn}")
+            raise NotFoundError(f"Convention not found: {convention_id}")
         return convention.schema_id
 
     async def bulk_publish(self, drafts: list[RecordDraft]) -> list[Record]:
@@ -82,9 +82,9 @@ class RecordService(Service):
 
         records: list[Record] = []
         for draft in drafts:
-            key = str(draft.convention_srn)
+            key = str(draft.convention_id)
             if key not in schema_id_by_conv:
-                schema_id_by_conv[key] = await self._resolve_schema_id(draft.convention_srn)
+                schema_id_by_conv[key] = await self._resolve_schema_id(draft.convention_id)
             record_srn = RecordSRN(
                 domain=self.node_domain,
                 id=LocalId(str(uuid4())),
@@ -94,7 +94,7 @@ class RecordService(Service):
                 Record(
                     srn=record_srn,
                     source=draft.source,
-                    convention_srn=draft.convention_srn,
+                    convention_id=draft.convention_id,
                     schema_id=schema_id_by_conv[key],
                     metadata=draft.metadata,
                     published_at=datetime.now(UTC),
@@ -121,7 +121,7 @@ class RecordService(Service):
         """Create and persist a Record from a draft."""
         logger.info(f"Creating record from {draft.source.type} source: {draft.source.id}")
 
-        schema_id = await self._resolve_schema_id(draft.convention_srn)
+        schema_id = await self._resolve_schema_id(draft.convention_id)
 
         record_srn = RecordSRN(
             domain=self.node_domain,
@@ -132,7 +132,7 @@ class RecordService(Service):
         record = Record(
             srn=record_srn,
             source=draft.source,
-            convention_srn=draft.convention_srn,
+            convention_id=draft.convention_id,
             schema_id=schema_id,
             metadata=draft.metadata,
             published_at=datetime.now(UTC),
@@ -152,10 +152,11 @@ class RecordService(Service):
             id=EventId(uuid4()),
             record_srn=record_srn,
             source=draft.source,
-            convention_srn=draft.convention_srn,
+            convention_id=draft.convention_id,
             schema_id=schema_id,
             metadata=draft.metadata,
             expected_features=draft.expected_features,
+            hook_run_ids=draft.hook_run_ids,
         )
         await self.outbox.append(published)
 

@@ -4,7 +4,7 @@ from typing import Any
 
 from osa.domain.shared.event import Event, EventId
 from osa.domain.shared.model.source import RecordSource
-from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaId
+from osa.domain.shared.model.srn import ConventionId, RecordSRN, SchemaId
 
 
 class RecordPublished(Event):
@@ -17,7 +17,8 @@ class RecordPublished(Event):
     id: EventId
     record_srn: RecordSRN
     source: RecordSource
-    convention_srn: ConventionSRN
+    convention_id: ConventionId
     schema_id: SchemaId
     metadata: dict[str, Any]
     expected_features: list[str] = []
+    hook_run_ids: dict[str, str] = {}  # hook name → hook_runs.id (provenance, #145)

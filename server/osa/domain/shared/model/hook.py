@@ -53,7 +53,7 @@ def parse_memory(memory: str) -> int:
             raise ValueError(f"Unknown memory unit: {unit}")
 
 
-def _format_memory(byte_count: int) -> str:
+def format_memory(byte_count: int) -> str:
     """Format bytes to a compact memory string (e.g. '2g', '1536m')."""
     if byte_count % _GIB == 0:
         return f"{byte_count // _GIB}g"
@@ -120,11 +120,19 @@ class TableFeatureSpec(FeatureSpec):
 # ── Hook ──
 
 
-class HookDefinition(ValueObject):
-    """Complete specification for a hook: how it runs + what it produces."""
+class HookIdentity(ValueObject):
+    """A hook's stable **identity**: its name + the output contract it produces.
+
+    Feature #145 split the old monolithic hook spec into two: this identity
+    (``name`` + ``feature``, fixed forever and owning the feature table) and the
+    versioned, immutable ``HookRelease`` entity (``runtime`` + ``source_ref``)
+    in the ``validation`` domain that says *what image* currently computes that
+    output. This value object is the identity shape used by the bundled deploy
+    input and the ``ConventionRegistered`` event; its persisted form is the
+    ``Hook`` aggregate.
+    """
 
     name: HookName
-    runtime: Annotated[OciConfig, Field(discriminator="type")]
     feature: Annotated[TableFeatureSpec, Field(discriminator="kind")]
 
     def model_post_init(self, __context: object) -> None:
@@ -136,14 +144,15 @@ class HookDefinition(ValueObject):
         if self.name in RESERVED_NAMES:
             raise ReservedNameError(self.name, "hook")
 
-    def with_memory(self, memory: str) -> "HookDefinition":
-        """Return a copy with a different memory limit."""
-        new_limits = self.runtime.limits.model_copy(update={"memory": memory})
-        new_runtime = self.runtime.model_copy(update={"limits": new_limits})
-        return self.model_copy(update={"runtime": new_runtime})
 
-    def with_doubled_memory(self) -> "HookDefinition":
-        """Return a copy with 2x the current memory limit."""
-        current_bytes = parse_memory(self.runtime.limits.memory)
-        doubled = _format_memory(current_bytes * 2)
-        return self.with_memory(doubled)
+class HookDeploySpec(ValueObject):
+    """One hook in a bundled deploy: its identity + the release to mint.
+
+    Pairs the fixed :class:`HookIdentity` (name + feature contract) with the
+    release runtime (image/digest/config/limits) and the build ``source_ref``.
+    The deploy fan-out upserts the identity and creates the release from this.
+    """
+
+    identity: HookIdentity
+    runtime: Annotated[OciConfig, Field(discriminator="type")]
+    source_ref: str

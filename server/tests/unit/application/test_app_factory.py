@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from osa.application.api.rest.app import create_app
 from osa.application.di import create_container
 from osa.domain.shared.event import Event, EventHandler, EventId
-from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.model.hook import HookIdentity
 from osa.domain.shared.model.source import IngesterDefinition
 from osa.domain.shared.model.subscription_registry import SubscriptionRegistry
 from osa.domain.shared.port.ingester_runner import IngesterInputs, IngesterOutput, IngesterRunner
@@ -46,7 +46,7 @@ os.environ.setdefault("OSA_BASE_URL", "http://localhost:8000")
 class StubHookRunner:
     """Stub HookRunner for testing provider overrides."""
 
-    async def run(self, hook: HookDefinition, inputs: HookInputs, work_dir: Path) -> HookResult:
+    async def run(self, hook: HookIdentity, inputs: HookInputs, work_dir: Path) -> HookResult:
         return HookResult(hook_name=hook.name, status=HookStatus.PASSED, duration_seconds=0.0)
 
 

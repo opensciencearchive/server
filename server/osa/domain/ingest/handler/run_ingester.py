@@ -11,7 +11,7 @@ from osa.domain.ingest.port.storage import IngestStoragePort
 from osa.domain.ingest.service.ingest import IngestService
 from osa.domain.shared.error import NotFoundError, PermanentError
 from osa.domain.shared.event import EventHandler, EventId
-from osa.domain.shared.model.srn import ConventionSRN
+from osa.domain.shared.model.srn import ConventionId
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.ingester_runner import IngesterInputs, IngesterRunner
 from osa.infrastructure.logging import get_logger
@@ -51,7 +51,7 @@ class RunIngester(EventHandler[NextBatchRequested]):
                 NextBatchRequested(
                     id=EventId(uuid4()),
                     ingest_run_id=event.ingest_run_id,
-                    convention_srn=event.convention_srn,
+                    convention_id=event.convention_id,
                     batch_size=event.batch_size,
                 ),
                 deliver_after=datetime.now(UTC) + BACKPRESSURE_DELAY,
@@ -63,10 +63,10 @@ class RunIngester(EventHandler[NextBatchRequested]):
             await self.ingest_repo.save(ingest_run)
 
         convention = await self.convention_service.get_convention(
-            ConventionSRN.parse(event.convention_srn)
+            ConventionId.parse(event.convention_id)
         )
         if convention.ingester is None:
-            raise NotFoundError(f"No ingester for convention {event.convention_srn}")
+            raise NotFoundError(f"No ingester for convention {event.convention_id}")
 
         batch_index = ingest_run.batches_ingested
 
@@ -91,7 +91,7 @@ class RunIngester(EventHandler[NextBatchRequested]):
             effective_batch_limit = min(ingest_run.batch_size, remaining)
 
         inputs = IngesterInputs(
-            convention_srn=convention.srn,
+            convention_id=convention.id,
             ingest_run_id=event.ingest_run_id,
             batch_index=batch_index,
             config=convention.ingester.config,
@@ -160,7 +160,7 @@ class RunIngester(EventHandler[NextBatchRequested]):
                 NextBatchRequested(
                     id=EventId(uuid4()),
                     ingest_run_id=event.ingest_run_id,
-                    convention_srn=event.convention_srn,
+                    convention_id=event.convention_id,
                     batch_size=ingest_run.batch_size,
                 )
             )

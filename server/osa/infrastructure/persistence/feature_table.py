@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 from osa.domain.shared.model.hook import ColumnDef
 from osa.domain.shared.model.value import ValueObject
 from osa.infrastructure.persistence.api_naming import feature_pg_schema, feature_pg_table
 from osa.infrastructure.persistence.column_mapper import map_column
-from osa.infrastructure.persistence.tables import records_table
+from osa.infrastructure.persistence.tables import hook_runs_table, records_table
 
 # Back-compat re-export for callers that import the constant directly.
 # Prefer ``feature_pg_schema()`` in new code.
 FEATURES_SCHEMA = feature_pg_schema()
 
-AUTO_COLUMN_NAMES = frozenset({"id", "record_srn", "created_at"})
+AUTO_COLUMN_NAMES = frozenset({"id", "record_srn", "run_id", "created_at"})
 
 
 class FeatureSchema(ValueObject):
@@ -52,6 +53,14 @@ def build_feature_table(api_feature_name: str, schema: FeatureSchema) -> sa.Tabl
             "record_srn",
             sa.Text,
             sa.ForeignKey(records_table.c.srn, ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
+        # Per-row provenance (feature #145): which hook_run produced this row.
+        sa.Column(
+            "run_id",
+            PG_UUID(as_uuid=True),
+            sa.ForeignKey(hook_runs_table.c.id),
             nullable=False,
             index=True,
         ),

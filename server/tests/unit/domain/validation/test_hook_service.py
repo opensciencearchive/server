@@ -8,7 +8,7 @@ import pytest
 
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
+    HookIdentity,
     OciConfig,
     OciLimits,
     TableFeatureSpec,
@@ -24,8 +24,8 @@ from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs
 
 
-def _make_hook(name: str = "detect_pockets", memory: str = "1g") -> HookDefinition:
-    return HookDefinition(
+def _make_hook(name: str = "detect_pockets", memory: str = "1g") -> HookIdentity:
+    return HookIdentity(
         name=name,
         runtime=OciConfig(
             image="img:v1",

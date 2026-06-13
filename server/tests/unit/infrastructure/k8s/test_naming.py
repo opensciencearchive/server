@@ -2,7 +2,7 @@
 
 import re
 
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+from osa.domain.shared.model.srn import ConventionId, DepositionSRN
 from osa.infrastructure.k8s.naming import job_name, label_value, sanitize_label
 
 
@@ -78,8 +78,8 @@ class TestLabelValue:
         assert result == "localhost.dep.abc123"
         assert ":" not in result
 
-    def test_convention_srn_with_version(self):
-        srn = ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
+    def test_convention_id_with_version(self):
+        srn = ConventionId.parse("urn:osa:localhost:conv:test@1.0.0")
         result = label_value(srn)
         assert result == "localhost.conv.test.1.0.0"
 

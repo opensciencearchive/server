@@ -8,7 +8,7 @@ import pytest
 from osa.domain.shared.error import OOMError, PermanentError, TransientError
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
+    HookIdentity,
     OciConfig,
     OciLimits,
     TableFeatureSpec,
@@ -31,8 +31,8 @@ def _make_hook(
     memory: str = "2g",
     cpu: str = "2.0",
     config: dict | None = None,
-) -> HookDefinition:
-    return HookDefinition(
+) -> HookIdentity:
+    return HookIdentity(
         name=name,
         runtime=OciConfig(
             image="ghcr.io/example/hook:v1",

@@ -33,7 +33,7 @@ class IngestRun(Aggregate):
     """
 
     id: IngestRunId
-    convention_srn: str
+    convention_id: str
     status: IngestStatus = IngestStatus.PENDING
     ingestion_finished: bool = False
     batches_ingested: int = 0

@@ -1,18 +1,18 @@
-"""T065 — HookDefinition rejects reserved hook names (records, datasets)."""
+"""T065 — HookIdentity rejects reserved hook names (records, datasets)."""
 
 import pytest
 
 from osa.domain.shared.error import ReservedNameError
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
+    HookIdentity,
     OciConfig,
     TableFeatureSpec,
 )
 
 
-def _hook(name: str) -> HookDefinition:
-    return HookDefinition(
+def _hook(name: str) -> HookIdentity:
+    return HookIdentity(
         name=name,
         runtime=OciConfig(image="ghcr.io/example/hook", digest="sha256:abc123"),
         feature=TableFeatureSpec(

@@ -2,19 +2,25 @@ from datetime import datetime
 
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.shared.model.aggregate import Aggregate
-from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.model.hook import HookName
 from osa.domain.shared.model.source import IngesterDefinition
-from osa.domain.shared.model.srn import ConventionSRN, SchemaId
+from osa.domain.shared.model.srn import ConventionId, SchemaId
 
 
 class Convention(Aggregate):
-    """An immutable, user-facing submission template."""
+    """An immutable, user-facing submission template.
 
-    srn: ConventionSRN
+    Feature #145: identified by a caller-supplied ``ConventionId``
+    (``"<slug>@<version>"``) rather than an opaque server-generated SRN, and
+    references its hooks by **name** — the versioned release each name resolves
+    to lives in the ``validation`` hook registry, not inline here.
+    """
+
+    id: ConventionId
     title: str
     description: str | None = None
     schema_id: SchemaId
     file_requirements: FileRequirements
-    hooks: list[HookDefinition] = []
+    hooks: list[HookName] = []
     ingester: IngesterDefinition | None = None
     created_at: datetime

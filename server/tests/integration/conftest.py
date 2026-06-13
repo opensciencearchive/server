@@ -28,7 +28,7 @@ async def seed_record(
     engine: AsyncEngine,
     *,
     srn: str,
-    convention_srn: str = "urn:osa:localhost:conv:test@1.0.0",
+    convention_id: str = "urn:osa:localhost:conv:test@1.0.0",
     schema_id: str = "test",
     schema_version: str = "1.0.0",
     source: dict[str, Any] | None = None,
@@ -45,7 +45,7 @@ async def seed_record(
         await conn.execute(
             text(
                 """
-                INSERT INTO records (srn, convention_srn, schema_id, schema_version,
+                INSERT INTO records (srn, convention_id, schema_id, schema_version,
                                      source, metadata, published_at)
                 VALUES (:srn, :conv, :schema_id, :schema_version,
                         CAST(:source AS JSONB), CAST(:meta AS JSONB), :published_at)
@@ -53,7 +53,7 @@ async def seed_record(
             ),
             {
                 "srn": srn,
-                "conv": convention_srn,
+                "conv": convention_id,
                 "schema_id": schema_id,
                 "schema_version": schema_version,
                 "source": json.dumps(src),

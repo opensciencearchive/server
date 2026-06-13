@@ -1,6 +1,6 @@
 """Unit tests for enriched RecordPublished event.
 
-Verifies the event carries source, convention_srn, and expected_features.
+Verifies the event carries source, convention_id, and expected_features.
 """
 
 from uuid import uuid4
@@ -8,7 +8,7 @@ from uuid import uuid4
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.source import DepositionSource
-from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaId
+from osa.domain.shared.model.srn import ConventionId, RecordSRN, SchemaId
 
 
 SCHEMA = SchemaId.parse("test@1.0.0")
@@ -22,24 +22,24 @@ class TestRecordPublishedEnriched:
             record_srn=RecordSRN.parse("urn:osa:localhost:rec:test@1"),
             source=source,
             metadata={"title": "Test"},
-            convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0"),
+            convention_id=ConventionId.parse("urn:osa:localhost:conv:test@1.0.0"),
             schema_id=SCHEMA,
             expected_features=["pocketeer"],
         )
         assert event.source.type == "deposition"
         assert event.source.id == "urn:osa:localhost:dep:test"
 
-    def test_carries_convention_srn(self):
+    def test_carries_convention_id(self):
         event = RecordPublished(
             id=EventId(uuid4()),
             record_srn=RecordSRN.parse("urn:osa:localhost:rec:test@1"),
             source=DepositionSource(id="urn:osa:localhost:dep:test"),
             metadata={"title": "Test"},
-            convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0"),
+            convention_id=ConventionId.parse("urn:osa:localhost:conv:test@1.0.0"),
             schema_id=SCHEMA,
             expected_features=[],
         )
-        assert event.convention_srn == ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
+        assert event.convention_id == ConventionId.parse("urn:osa:localhost:conv:test@1.0.0")
 
     def test_carries_expected_features(self):
         event = RecordPublished(
@@ -47,7 +47,7 @@ class TestRecordPublishedEnriched:
             record_srn=RecordSRN.parse("urn:osa:localhost:rec:test@1"),
             source=DepositionSource(id="urn:osa:localhost:dep:test"),
             metadata={"title": "Test"},
-            convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0"),
+            convention_id=ConventionId.parse("urn:osa:localhost:conv:test@1.0.0"),
             schema_id=SCHEMA,
             expected_features=["pocketeer", "qc_check"],
         )

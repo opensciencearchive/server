@@ -17,13 +17,13 @@ from osa.domain.record.handler.convert_deposition_to_record import ConvertDeposi
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
+    HookIdentity,
     OciConfig,
     TableFeatureSpec,
 )
 from osa.domain.shared.model.source import DepositionSource
 from osa.domain.shared.model.srn import (
-    ConventionSRN,
+    ConventionId,
     DepositionSRN,
     RecordSRN,
     SchemaId,
@@ -42,8 +42,8 @@ def _make_dep_srn() -> DepositionSRN:
     return DepositionSRN.parse("urn:osa:localhost:dep:test-dep")
 
 
-def _make_conv_srn() -> ConventionSRN:
-    return ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
+def _make_conv_srn() -> ConventionId:
+    return ConventionId.parse("urn:osa:localhost:conv:test@1.0.0")
 
 
 def _make_record_srn() -> RecordSRN:
@@ -53,7 +53,7 @@ def _make_record_srn() -> RecordSRN:
 def _make_deposition() -> Deposition:
     return Deposition(
         srn=_make_dep_srn(),
-        convention_srn=_make_conv_srn(),
+        convention_id=_make_conv_srn(),
         status=DepositionStatus.IN_VALIDATION,
         owner_id=UserId(uuid4()),
         created_at=datetime.now(UTC),
@@ -61,8 +61,8 @@ def _make_deposition() -> Deposition:
     )
 
 
-def _make_hook_definition(name: str = "pocket_detect") -> HookDefinition:
-    return HookDefinition(
+def _make_hook_definition(name: str = "pocket_detect") -> HookIdentity:
+    return HookIdentity(
         name=name,
         runtime=OciConfig(
             image="ghcr.io/example/hook",
@@ -77,13 +77,13 @@ def _make_hook_definition(name: str = "pocket_detect") -> HookDefinition:
 
 def _make_submitted_event(
     dep_srn: DepositionSRN | None = None,
-    hooks: list[HookDefinition] | None = None,
+    hooks: list[HookIdentity] | None = None,
 ) -> DepositionSubmittedEvent:
     return DepositionSubmittedEvent(
         id=EventId(uuid4()),
         deposition_id=dep_srn or _make_dep_srn(),
         metadata={"title": "Test"},
-        convention_srn=_make_conv_srn(),
+        convention_id=_make_conv_srn(),
         hooks=hooks or [],
     )
 
@@ -138,7 +138,7 @@ class TestValidateDepositionPassesEventData:
 
         validation_service.validate_deposition.assert_called_once_with(
             deposition_srn=dep.srn,
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_srn(),
             metadata={"title": "Test"},
             hooks=hooks,
         )
@@ -193,7 +193,7 @@ class TestAutoApproveCurationEmitsApproved:
             id=EventId(uuid4()),
             validation_run_srn=ValidationRunSRN.parse("urn:osa:localhost:val:run1"),
             deposition_srn=_make_dep_srn(),
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_srn(),
             status=RunStatus.COMPLETED,
             hook_results=[],
             metadata={"title": "Test"},
@@ -211,7 +211,7 @@ class TestAutoApproveCurationEmitsApproved:
             id=EventId(uuid4()),
             validation_run_srn=ValidationRunSRN.parse("urn:osa:localhost:val:run1"),
             deposition_srn=_make_dep_srn(),
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_srn(),
             status=RunStatus.FAILED,
             hook_results=[],
             metadata={"title": "Test"},
@@ -234,7 +234,7 @@ class TestConvertDepositionToRecord:
             id=EventId(uuid4()),
             deposition_srn=_make_dep_srn(),
             metadata={"title": "Test"},
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_srn(),
             expected_features=["pocket_detect"],
         )
         await handler.handle(event)
@@ -244,7 +244,7 @@ class TestConvertDepositionToRecord:
         assert isinstance(draft, RecordDraft)
         assert isinstance(draft.source, DepositionSource)
         assert draft.source.id == str(_make_dep_srn())
-        assert draft.convention_srn == _make_conv_srn()
+        assert draft.convention_id == _make_conv_srn()
         assert draft.expected_features == ["pocket_detect"]
         assert draft.metadata == {"title": "Test"}
 
@@ -267,7 +267,7 @@ class TestInsertRecordFeatures:
             record_srn=_make_record_srn(),
             source=DepositionSource(id=str(_make_dep_srn())),
             metadata={"title": "Test"},
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_srn(),
             schema_id=_make_schema_id(),
             expected_features=["pocket_detect"],
         )

@@ -12,7 +12,7 @@ from typing import Any
 from osa.domain.deposition.model.value import DepositionFile
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.error import InfrastructureError
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+from osa.domain.shared.model.srn import ConventionId, DepositionSRN
 from osa.domain.validation.model.batch_outcome import (
     BatchRecordOutcome,
     HookRecordId,
@@ -160,16 +160,16 @@ class FilesystemStorageAdapter(FileStoragePort):
         if dep_dir.exists():
             shutil.rmtree(dep_dir)
 
-    def _conv_id(self, convention_srn: ConventionSRN) -> str:
-        return f"{convention_srn.domain.root}_{convention_srn.id.root}"
+    def _conv_id(self, convention_id: ConventionId) -> str:
+        return f"{convention_id.id.root}_{convention_id.version.root}"
 
-    def get_source_staging_dir(self, convention_srn: ConventionSRN, run_id: str) -> Path:
-        staging = self.base_path / "sources" / self._conv_id(convention_srn) / "staging" / run_id
+    def get_source_staging_dir(self, convention_id: ConventionId, run_id: str) -> Path:
+        staging = self.base_path / "sources" / self._conv_id(convention_id) / "staging" / run_id
         staging.mkdir(parents=True, exist_ok=True)
         return staging
 
-    def get_source_output_dir(self, convention_srn: ConventionSRN, run_id: str) -> Path:
-        output = self.base_path / "sources" / self._conv_id(convention_srn) / "runs" / run_id
+    def get_source_output_dir(self, convention_id: ConventionId, run_id: str) -> Path:
+        output = self.base_path / "sources" / self._conv_id(convention_id) / "runs" / run_id
         output.mkdir(parents=True, exist_ok=True)
         return output
 
