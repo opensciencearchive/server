@@ -10,7 +10,7 @@ from typing import Any
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.model.hook import HookIdentity, HookName
 from osa.domain.shared.model.srn import (
-    ConventionId,
+    ConventionSlug,
     DepositionSRN,
     Domain,
     LocalId,
@@ -32,14 +32,6 @@ from osa.domain.validation.service.hook import HookService
 from osa.domain.validation.service.hook_registry import HookRegistryService
 
 logger = logging.getLogger(__name__)
-
-
-def _run_status(hook_status: HookStatus | None) -> HookRunStatus:
-    if hook_status == HookStatus.PASSED:
-        return HookRunStatus.PASSED
-    if hook_status == HookStatus.REJECTED:
-        return HookRunStatus.FAILED
-    return HookRunStatus.ERROR
 
 
 class ValidationService(Service):
@@ -110,34 +102,39 @@ class ValidationService(Service):
         overall_status: RunStatus = RunStatus.COMPLETED
 
         for hook, release in pairs:
-            work_dir = self.hook_storage.get_hook_output_dir(deposition_srn, hook.name)
+            work_dir = self.hook_storage.get_hook_output_dir(deposition_srn, hook.name.root)
             started_at = datetime.now(timezone.utc)
             run_id = HookRunId(uuid4())
             try:
                 result = await hook_service.run_hook(hook, release, inputs, work_dir)
             except Exception:
+                finished_at = datetime.now(timezone.utc)
                 await self.hook_registry.record_run(
                     HookRun(
                         id=run_id,
                         release_id=release.id,
-                        deposition_id=deposition_srn,
                         status=HookRunStatus.ERROR,
                         started_at=started_at,
-                        finished_at=datetime.now(timezone.utc),
+                        finished_at=finished_at,
+                        duration_s=(finished_at - started_at).total_seconds(),
+                        oom_retries=0,
                     )
                 )
                 overall_status = RunStatus.FAILED
                 break
 
+            finished_at = datetime.now(timezone.utc)
+            # run.json carries run_id to InsertRecordFeatures — no DB lookup (§6).
+            await self.hook_storage.write_run_ref(work_dir, str(run_id), str(release.id))
             await self.hook_registry.record_run(
                 HookRun(
                     id=run_id,
                     release_id=release.id,
-                    deposition_id=deposition_srn,
-                    status=_run_status(result.status),
+                    status=HookRunStatus.from_hook_status(result.status),
                     started_at=started_at,
-                    finished_at=datetime.now(timezone.utc),
+                    finished_at=finished_at,
                     duration_s=result.duration_seconds,
+                    oom_retries=0,
                 )
             )
             hook_results.append(result)
@@ -156,7 +153,7 @@ class ValidationService(Service):
     async def validate_deposition(
         self,
         deposition_srn: DepositionSRN,
-        convention_id: ConventionId,
+        convention_id: ConventionSlug,
         metadata: dict[str, Any],
         hooks: list[HookName],
     ) -> tuple[ValidationRun, list[HookResult]]:

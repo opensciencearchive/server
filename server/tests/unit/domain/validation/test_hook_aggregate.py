@@ -20,7 +20,7 @@ def _feature() -> TableFeatureSpec:
 
 def test_hook_holds_identity_and_no_live_release_initially() -> None:
     hook = Hook(name="pocket_detect", feature=_feature(), created_at=datetime.now(UTC))
-    assert hook.name == "pocket_detect"
+    assert hook.name.root == "pocket_detect"
     assert hook.feature.cardinality == "many"
     assert hook.live_release_id is None
 

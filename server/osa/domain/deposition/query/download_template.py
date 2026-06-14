@@ -7,12 +7,12 @@ from osa.domain.deposition.port.spreadsheet import SpreadsheetPort
 from osa.domain.semantics.model.value import TermConstraints
 from osa.domain.shared.authorization.gate import at_least
 from osa.domain.shared.error import NotFoundError
-from osa.domain.shared.model.srn import ConventionId
+from osa.domain.shared.model.srn import ConventionSlug
 from osa.domain.shared.query import Query, QueryHandler, Result
 
 
 class DownloadTemplate(Query):
-    convention_id: ConventionId
+    convention_id: ConventionSlug
 
 
 class TemplateResult(Result):

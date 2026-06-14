@@ -17,6 +17,7 @@ from osa.application.api.v1.routes.data._streaming import build_table_response
 from osa.application.api.v1.routes.data.formats import DataResponseFormat
 from osa.application.api.v1.routes.data.tables import format_key, register_table_routes
 from osa.domain.data.query.read_table import ReadFeatureTable, ReadFeatureTableHandler
+from osa.domain.shared.model.ids import FeatureName
 
 
 def _make_get_endpoint(fmt: DataResponseFormat):
@@ -31,7 +32,7 @@ def _make_get_endpoint(fmt: DataResponseFormat):
         result = await handler.run(
             ReadFeatureTable(
                 schema=schema,
-                feature=feature,
+                feature=FeatureName(feature),
                 cursor=cursor,
                 limit=limit,
                 sort=parse_sort(sort),
@@ -54,7 +55,7 @@ def _make_post_endpoint(fmt: DataResponseFormat):
         result = await handler.run(
             ReadFeatureTable(
                 schema=schema,
-                feature=feature,
+                feature=FeatureName(feature),
                 filter=body.filter,
                 cursor=body.cursor,
                 limit=body.limit,

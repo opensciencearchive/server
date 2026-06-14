@@ -4,7 +4,6 @@ from osa.domain.feature.port.storage import FeatureStoragePort
 from osa.domain.feature.service.feature import FeatureService
 from osa.domain.ingest.event.events import IngestBatchPublished
 from osa.domain.shared.event import EventHandler
-from osa.domain.validation.service.hook_registry import HookRegistryService
 from osa.infrastructure.logging import get_logger
 from osa.infrastructure.storage.layout import StorageLayout
 
@@ -17,11 +16,14 @@ class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
     Handles IngestBatchPublished (batch-level event) rather than
     per-record RecordPublished. Uses read_batch_outcomes to parse
     the JSONL output format (not the single-record features.json).
+
+    Per-row provenance: each hook's ``run_id`` is read from the ``run.json`` the
+    producing run wrote into that hook's output dir (design-revisions §6) — no
+    registry call, no DB run-id lookup.
     """
 
     feature_service: FeatureService
     feature_storage: FeatureStoragePort
-    hook_registry: HookRegistryService
     layout: StorageLayout
 
     async def handle(self, event: IngestBatchPublished) -> None:
@@ -30,17 +32,24 @@ class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
 
         batch_output_dir = str(self.layout.ingest_batch_dir(event.ingest_run_id, event.batch_index))
 
-        # One indexed lookup per batch → {hook_name: hook_run_id} (provenance).
-        run_ids = await self.hook_registry.run_ids_for_batch(
-            event.ingest_run_id, event.batch_index
-        )
-
         total_inserted = 0
         skipped_dupes = 0
 
-        for hook_name in event.expected_features:
-            # Read JSONL outcomes for this hook
-            outcomes = await self.feature_storage.read_batch_outcomes(batch_output_dir, hook_name)
+        for feature in event.expected_features:
+            name = feature.root
+            # Read JSONL outcomes for this feature's hook
+            outcomes = await self.feature_storage.read_batch_outcomes(batch_output_dir, name)
+
+            run_ref = await self.feature_storage.read_run_ref(batch_output_dir, name)
+            if run_ref is None:
+                log.warn(
+                    "no run.json for feature {feature} in batch {batch_index}; "
+                    "skipping feature insert (no provenance)",
+                    feature=name,
+                    batch_index=event.batch_index,
+                    ingest_run_id=event.ingest_run_id,
+                )
+                continue
 
             # Insert features for each published record that passed this hook.
             # Map upstream source ID → published record SRN so features
@@ -58,10 +67,10 @@ class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
                     continue
 
                 count = await self.feature_service.insert_features(
-                    hook_name=hook_name,
+                    feature=feature,
                     record_srn=record_srn,
                     rows=outcome.features,
-                    run_id=run_ids[hook_name],
+                    run_id=run_ref.run_id,
                 )
                 total_inserted += count
 

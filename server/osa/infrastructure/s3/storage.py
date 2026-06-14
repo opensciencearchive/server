@@ -15,7 +15,8 @@ from typing import Any
 from osa.domain.deposition.model.value import DepositionFile
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.error import InfrastructureError, NotFoundError
-from osa.domain.shared.model.srn import ConventionId, DepositionSRN
+from osa.domain.shared.model.provenance import RunRef
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
 from osa.domain.validation.model.batch_outcome import (
     BatchRecordOutcome,
     HookRecordId,
@@ -47,8 +48,8 @@ class S3StorageAdapter(FileStoragePort):
     def _safe_id(self, srn: DepositionSRN) -> str:
         return f"{srn.domain.root}_{srn.id.root}"
 
-    def _conv_id(self, convention_id: ConventionId) -> str:
-        return f"{convention_id.id.root}_{convention_id.version.root}"
+    def _conv_id(self, convention_id: ConventionSlug) -> str:
+        return convention_id.root
 
     def _dep_prefix(self, deposition_id: DepositionSRN) -> str:
         return f"depositions/{self._safe_id(deposition_id)}"
@@ -122,7 +123,7 @@ class S3StorageAdapter(FileStoragePort):
 
     # ── Ingester storage ──────────────────────────────────────────────
 
-    def get_source_staging_dir(self, convention_id: ConventionId, run_id: str) -> Path:
+    def get_source_staging_dir(self, convention_id: ConventionSlug, run_id: str) -> Path:
         """Return path for PVC subpath computation (no I/O)."""
         return (
             Path(self._data_mount_path)
@@ -132,7 +133,7 @@ class S3StorageAdapter(FileStoragePort):
             / run_id
         )
 
-    def get_source_output_dir(self, convention_id: ConventionId, run_id: str) -> Path:
+    def get_source_output_dir(self, convention_id: ConventionSlug, run_id: str) -> Path:
         """Return path for PVC subpath computation (no I/O)."""
         return (
             Path(self._data_mount_path) / "sources" / self._conv_id(convention_id) / "runs" / run_id
@@ -247,6 +248,22 @@ class S3StorageAdapter(FileStoragePort):
         prefix = relative_path(Path(hook_output_dir), self._data_mount_path)
         key = f"{prefix}/hooks/{feature_name}/output/features.json"
         return await self._s3.head_object(key)
+
+    async def write_run_ref(self, work_dir: Path, run_id: str, release_id: str) -> None:
+        """Write run.json alongside a hook's features (per-row provenance, #145)."""
+        prefix = relative_path(work_dir, self._data_mount_path)
+        key = f"{prefix}/output/run.json"
+        await self._s3.put_object(key, json.dumps({"run_id": run_id, "release_id": release_id}))
+
+    async def read_run_ref(self, output_dir: str, hook_name: str) -> RunRef | None:
+        prefix = relative_path(Path(output_dir), self._data_mount_path)
+        key = f"{prefix}/hooks/{hook_name}/output/run.json"
+        try:
+            data_bytes = await self._s3.get_object(key)
+        except Exception:
+            return None
+        data = json.loads(data_bytes)
+        return RunRef(run_id=data["run_id"], release_id=data["release_id"])
 
     async def read_batch_outcomes(
         self, output_dir: str, hook_name: str

@@ -115,7 +115,7 @@ class K8sHookRunner(HookRunner):
         job_name_to_watch = None
 
         try:
-            existing = await self._check_existing_job(namespace, hook.name, inputs.run_id)
+            existing = await self._check_existing_job(namespace, hook.name.root, inputs.run_id)
 
             if existing == "succeeded":
                 logger.info(
@@ -276,7 +276,7 @@ class K8sHookRunner(HookRunner):
             V1VolumeMount,
         )
 
-        name = job_name("hook", hook.name, run_id)
+        name = job_name("hook", hook.name.root, run_id)
         relative_work = self._relative_path(work_dir)
         input_subpath = f"{relative_work}/input"
         output_subpath = f"{relative_work}/output"
@@ -285,7 +285,7 @@ class K8sHookRunner(HookRunner):
         batch_index = run_id.split("_b", 1)[1] if "_b" in run_id else "0"
         labels = {
             "osa.io/role": "hook",
-            "osa.io/hook": hook.name,
+            "osa.io/hook": hook.name.root,
             "osa.io/ingest-run-id": ingest_run_id,
             "osa.io/ingest-run-batch": batch_index,
         }
@@ -326,7 +326,7 @@ class K8sHookRunner(HookRunner):
                 V1EnvVar(name="OSA_IN", value="/osa/in"),
                 V1EnvVar(name="OSA_OUT", value="/osa/out"),
                 V1EnvVar(name="OSA_FILES", value="/osa/files"),
-                V1EnvVar(name="OSA_HOOK_NAME", value=hook.name),
+                V1EnvVar(name="OSA_HOOK_NAME", value=hook.name.root),
             ],
             resources=V1ResourceRequirements(
                 limits={

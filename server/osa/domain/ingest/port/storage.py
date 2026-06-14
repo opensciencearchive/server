@@ -60,3 +60,12 @@ class IngestStoragePort(Port, Protocol):
     def hook_work_dir(self, ingest_run_id: str, batch_index: int, hook_name: str) -> Path:
         """Return the hook output directory for a batch."""
         ...
+
+    @abstractmethod
+    async def write_run_ref(self, work_dir: Path, run_id: str, release_id: str) -> None:
+        """Write ``{work_dir}/output/run.json`` carrying this run's provenance.
+
+        The feature-insert handler reads it back to stamp ``feature.run_id`` —
+        no DB run-id lookup (design-revisions §6). #145.
+        """
+        ...

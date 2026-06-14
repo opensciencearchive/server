@@ -14,7 +14,7 @@ from pydantic import TypeAdapter
 
 from osa.domain.record.model.aggregate import Record
 from osa.domain.shared.model.source import RecordSource
-from osa.domain.shared.model.srn import ConventionId, LocalId, RecordSRN, SchemaId, Semver
+from osa.domain.shared.model.srn import ConventionSlug, LocalId, RecordSRN, SchemaId, Semver
 
 _source_adapter = TypeAdapter(RecordSource)
 
@@ -30,7 +30,7 @@ def row_to_record(row: dict[str, Any]) -> Record:
     return Record(
         srn=RecordSRN.parse(row["srn"]),
         source=source,
-        convention_id=ConventionId.parse(row["convention_id"]),
+        convention_id=ConventionSlug.parse(row["convention_id"]),
         schema_id=SchemaId(
             id=LocalId(row["schema_id"]),
             version=Semver.from_string(row["schema_version"]),

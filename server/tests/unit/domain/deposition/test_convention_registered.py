@@ -11,14 +11,14 @@ from osa.domain.shared.event import EventId
 from osa.domain.shared.model.hook import (
     ColumnDef,
     HookIdentity,
-    OciConfig,
+    HookName,
     TableFeatureSpec,
 )
-from osa.domain.shared.model.srn import ConventionId, SchemaId
+from osa.domain.shared.model.srn import ConventionSlug, SchemaId
 
 
-def _make_conv_srn() -> ConventionId:
-    return ConventionId.parse("urn:osa:localhost:conv:test@1.0.0")
+def _make_conv_slug() -> ConventionSlug:
+    return ConventionSlug("test-conv")
 
 
 def _make_schema_id() -> SchemaId:
@@ -27,11 +27,7 @@ def _make_schema_id() -> SchemaId:
 
 def _make_hook_definition(name: str = "pocket_detect") -> HookIdentity:
     return HookIdentity(
-        name=name,
-        runtime=OciConfig(
-            image="ghcr.io/example/hook",
-            digest="sha256:abc123",
-        ),
+        name=HookName(name),
         feature=TableFeatureSpec(
             cardinality="many",
             columns=[ColumnDef(name="score", json_type="number", required=True)],
@@ -45,21 +41,21 @@ class TestConventionRegisteredWithHooks:
         hooks = [_make_hook_definition("hook_a"), _make_hook_definition("hook_b")]
         event = ConventionRegistered(
             id=EventId(uuid4()),
-            convention_id=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             schema_id=_make_schema_id(),
             schema_fields=[],
             hooks=hooks,
         )
 
         assert len(event.hooks) == 2
-        assert event.hooks[0].name == "hook_a"
-        assert event.hooks[1].name == "hook_b"
+        assert event.hooks[0].name.root == "hook_a"
+        assert event.hooks[1].name.root == "hook_b"
 
     def test_event_defaults_to_empty_hooks(self):
         """ConventionRegistered defaults to empty hooks list."""
         event = ConventionRegistered(
             id=EventId(uuid4()),
-            convention_id=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             schema_id=_make_schema_id(),
         )
 
@@ -70,7 +66,7 @@ class TestConventionRegisteredWithHooks:
         hooks = [_make_hook_definition()]
         event = ConventionRegistered(
             id=EventId(uuid4()),
-            convention_id=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             schema_id=_make_schema_id(),
             schema_fields=[],
             hooks=hooks,
@@ -80,6 +76,5 @@ class TestConventionRegisteredWithHooks:
         restored = ConventionRegistered.model_validate(data)
 
         assert len(restored.hooks) == 1
-        assert restored.hooks[0].name == "pocket_detect"
-        assert restored.hooks[0].runtime.image == "ghcr.io/example/hook"
+        assert restored.hooks[0].name.root == "pocket_detect"
         assert len(restored.hooks[0].feature.columns) == 1

@@ -77,7 +77,7 @@ async def get_validation_status(
 
     results_dto = [
         HookResultDTO(
-            hook_name=r.hook_name,
+            hook_name=r.hook_name.root,
             status=r.status,
             rejection_reason=r.rejection_reason,
             error_message=r.error_message,

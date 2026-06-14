@@ -12,13 +12,12 @@ from osa.domain.ingest.port.storage import IngestStoragePort
 from osa.domain.ingest.service.ingest import IngestService
 from osa.domain.shared.error import NotFoundError, OOMError, PermanentError
 from osa.domain.shared.event import EventHandler, EventId
-from osa.domain.shared.model.hook import HookIdentity
-from osa.domain.shared.model.srn import ConventionId
+from osa.domain.shared.model.hook import HookIdentity, HookName
+from osa.domain.shared.model.srn import ConventionSlug
 from osa.domain.shared.outbox import Outbox
 from osa.domain.validation.model import HookResult
 from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.validation.model.hook_release import HookRelease
-from osa.domain.validation.model.hook_result import HookStatus
 from osa.domain.validation.model.hook_run import HookRun, HookRunId, HookRunStatus
 from osa.domain.validation.port.hook_runner import HookInputs
 from osa.domain.validation.service.hook import HookService
@@ -26,15 +25,6 @@ from osa.domain.validation.service.hook_registry import HookRegistryService
 from osa.infrastructure.logging import get_logger
 
 log = get_logger(__name__)
-
-
-def _run_status(hook_status: HookStatus | None) -> HookRunStatus:
-    """Map a per-hook execution outcome to its append-only run status."""
-    if hook_status == HookStatus.PASSED:
-        return HookRunStatus.PASSED
-    if hook_status == HookStatus.REJECTED:
-        return HookRunStatus.FAILED
-    return HookRunStatus.ERROR
 
 
 class RunHooks(EventHandler[IngesterBatchReady]):
@@ -57,7 +47,7 @@ class RunHooks(EventHandler[IngesterBatchReady]):
             raise NotFoundError(f"Ingest run not found: {event.ingest_run_id}")
 
         convention = await self.convention_service.get_convention(
-            ConventionId.parse(ingest_run.convention_id)
+            ConventionSlug.parse(ingest_run.convention_id)
         )
 
         # Read records via storage port (filesystem or S3)
@@ -105,10 +95,10 @@ class RunHooks(EventHandler[IngesterBatchReady]):
             pairs.append((HookIdentity(name=hook.name, feature=hook.feature), release))
 
         # Build work_dirs for each hook via storage port
-        work_dirs: dict[str, Path] = {}
+        work_dirs: dict[HookName, Path] = {}
         for name in hook_names:
             work_dirs[name] = self.ingest_storage.hook_work_dir(
-                event.ingest_run_id, event.batch_index, name
+                event.ingest_run_id, event.batch_index, name.root
             )
 
         # Pre-allocate a hook_run id per hook so provenance is stable even on
@@ -159,27 +149,38 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                 ingest_run_id=event.ingest_run_id,
             )
 
-        # Record one append-only hook_run per hook (provenance anchor, #145).
+        # Record one append-only hook_run per hook (provenance anchor, #145) and
+        # write run.json into each hook's output dir so the feature-insert handler
+        # can stamp feature.run_id without a DB lookup (design-revisions §6).
         finished_at = datetime.now(UTC)
         status_by_hook = {r.hook_name: r.status for r in results}
         duration_by_hook = {r.hook_name: r.duration_seconds for r in results}
         for hook, release in pairs:
+            run_id = run_id_by_hook[hook.name]
+            result_status = status_by_hook.get(hook.name)
+            run_status = (
+                HookRunStatus.from_hook_status(result_status)
+                if result_status is not None
+                else HookRunStatus.ERROR
+            )
+            await self.ingest_storage.write_run_ref(
+                work_dirs[hook.name], str(run_id), str(release.id)
+            )
             await self.hook_registry.record_run(
                 HookRun(
-                    id=run_id_by_hook[hook.name],
+                    id=run_id,
                     release_id=release.id,
-                    ingest_run_id=event.ingest_run_id,
-                    batch_index=event.batch_index,
-                    status=_run_status(status_by_hook.get(hook.name)),
+                    status=run_status,
                     started_at=started_at,
                     finished_at=finished_at,
-                    duration_s=duration_by_hook.get(hook.name),
+                    duration_s=duration_by_hook.get(hook.name, 0.0),
+                    oom_retries=0,
                 )
             )
 
-        # Emit HookBatchCompleted. Feature provenance (run_id per hook) is
-        # reconstructed at insert time from (ingest_run_id, batch_index) via the
-        # hook_runs just recorded — no need to ride it through the event chain.
+        # Emit HookBatchCompleted. Feature provenance (run_id per hook) is carried
+        # via the run.json just written into each hook's output dir — no event-chain
+        # threading and no DB run-id lookup.
         await self.outbox.append(
             HookBatchCompleted(
                 id=EventId(uuid4()),

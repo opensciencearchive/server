@@ -1,44 +1,80 @@
-"""Unit tests for the ConventionId value object (mirrors SchemaId)."""
+"""Unit tests for the ConventionSlug value object (a bare slug, #145).
+
+Conventions became unversioned in feature #145: their identity is a bare,
+human-readable slug rather than the old ``"<slug>@<version>"`` form. This
+suite replaces the former ``ConventionId`` tests.
+"""
 
 import pytest
 
-from osa.domain.shared.model.srn import ConventionId, LocalId, Semver
+from osa.domain.shared.model.srn import ConventionSlug
 
 
-def test_parse_round_trips_render() -> None:
-    cid = ConventionId.parse("proteins@1.0.0")
-    assert cid.id == LocalId("proteins")
-    assert cid.version == Semver.from_string("1.0.0")
-    assert cid.render() == "proteins@1.0.0"
-    assert str(cid) == "proteins@1.0.0"
+def test_construct_and_read_root() -> None:
+    slug = ConventionSlug("proteins")
+    assert slug.root == "proteins"
+    assert str(slug) == "proteins"
 
 
-def test_major_is_first_semver_component() -> None:
-    assert ConventionId.parse("proteins@2.5.1").major == 2
-    assert ConventionId.parse("proteins@0.9.0").major == 0
+def test_parse_round_trips() -> None:
+    slug = ConventionSlug.parse("pdb-structure")
+    assert slug.root == "pdb-structure"
+    assert str(slug) == "pdb-structure"
 
 
-def test_construct_directly() -> None:
-    cid = ConventionId(id=LocalId("proteins"), version=Semver.from_string("3.0.0"))
-    assert cid.render() == "proteins@3.0.0"
+def test_equality_via_root() -> None:
+    assert ConventionSlug("proteins") == ConventionSlug("proteins")
+    assert ConventionSlug("proteins").root == "proteins"
+    assert ConventionSlug("proteins") != ConventionSlug("genomes")
 
 
 @pytest.mark.parametrize(
     "value",
     [
-        "proteins",  # no version
-        "proteins@",  # empty version
-        "proteins@notsemver",  # bad version
-        "@1.0.0",  # empty id
+        "proteins",
+        "pdb-structure",
+        "abc",  # minimum length (3)
+        "a1b",
+        "x" * 64,  # maximum length
+    ],
+)
+def test_valid_slugs_accepted(value: str) -> None:
+    assert ConventionSlug(value).root == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
         "",  # empty
+        "ab",  # too short (< 3)
+        "x" * 65,  # too long (> 64)
+        "1proteins",  # must start with a letter
+        "-proteins",  # must start with a letter
+        "Proteins",  # uppercase rejected
+        "proteins_1",  # underscores rejected
+        "proteins@1.0.0",  # version suffix rejected
+        "proteins ",  # whitespace rejected (no stripping)
+        "urn:osa:localhost:conv:proteins",  # URN form rejected
     ],
 )
 def test_malformed_rejected(value: str) -> None:
     with pytest.raises(ValueError):
-        ConventionId.parse(value)
+        ConventionSlug(value)
 
 
-def test_is_frozen_value_object() -> None:
-    cid = ConventionId.parse("proteins@1.0.0")
+def test_parse_rejects_version_suffix() -> None:
+    with pytest.raises(ValueError):
+        ConventionSlug.parse("proteins@1.0.0")
+
+
+def test_is_frozen() -> None:
+    slug = ConventionSlug("proteins")
     with pytest.raises(Exception):
-        cid.id = LocalId("other")  # type: ignore[misc]
+        slug.root = "other"  # type: ignore[misc]
+
+
+def test_is_hashable_and_usable_as_dict_key() -> None:
+    slug = ConventionSlug("proteins")
+    mapping = {slug: 1}
+    assert mapping[ConventionSlug("proteins")] == 1
+    assert hash(slug) == hash(ConventionSlug("proteins"))

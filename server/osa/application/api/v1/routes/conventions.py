@@ -25,7 +25,7 @@ from osa.domain.deposition.query.list_conventions import (
     ListConventionsHandler,
     ConventionList,
 )
-from osa.domain.shared.model.srn import ConventionId
+from osa.domain.shared.model.srn import ConventionSlug
 
 router = APIRouter(prefix="/conventions", tags=["Conventions"], route_class=DishkaRoute)
 
@@ -43,7 +43,7 @@ async def download_convention_template(
     srn: str,
     handler: FromDishka[DownloadTemplateHandler],
 ) -> StreamingResponse:
-    result = await handler.run(DownloadTemplate(convention_id=ConventionId.parse(srn)))
+    result = await handler.run(DownloadTemplate(convention_id=ConventionSlug.parse(srn)))
     return StreamingResponse(
         iter([result.content]),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -58,7 +58,7 @@ async def get_convention(
     srn: str,
     handler: FromDishka[GetConventionHandler],
 ) -> ConventionDetail:
-    return await handler.run(GetConvention(id=ConventionId.parse(srn)))
+    return await handler.run(GetConvention(id=ConventionSlug.parse(srn)))
 
 
 @router.get("", response_model=ConventionList)

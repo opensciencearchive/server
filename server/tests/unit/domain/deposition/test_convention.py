@@ -4,11 +4,11 @@ from datetime import UTC, datetime
 
 from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.value import FileRequirements
-from osa.domain.shared.model.srn import ConventionId, SchemaId
+from osa.domain.shared.model.srn import ConventionSlug, SchemaId
 
 
-def _make_conv_srn(id: str = "test-conv", version: str = "1.0.0") -> ConventionId:
-    return ConventionId.parse(f"urn:osa:localhost:conv:{id}@{version}")
+def _make_conv_slug(slug: str = "test-conv") -> ConventionSlug:
+    return ConventionSlug(slug)
 
 
 def _make_schema_id(id: str = "test-schema", version: str = "1.0.0") -> SchemaId:
@@ -27,7 +27,7 @@ def _make_file_reqs() -> FileRequirements:
 class TestConventionCreation:
     def test_create_with_required_fields(self):
         conv = Convention(
-            srn=_make_conv_srn(),
+            id=_make_conv_slug(),
             title="scRNA-seq Submission",
             schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
@@ -39,7 +39,7 @@ class TestConventionCreation:
 
     def test_create_with_description(self):
         conv = Convention(
-            srn=_make_conv_srn(),
+            id=_make_conv_slug(),
             title="Test",
             description="A test convention",
             schema_id=_make_schema_id(),
@@ -50,7 +50,7 @@ class TestConventionCreation:
 
     def test_create_with_empty_hooks(self):
         conv = Convention(
-            srn=_make_conv_srn(),
+            id=_make_conv_slug(),
             title="Test",
             schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
@@ -60,13 +60,14 @@ class TestConventionCreation:
         assert conv.hooks == []
 
 
-class TestConventionImmutability:
-    def test_srn_is_versioned(self):
+class TestConventionIdentity:
+    def test_id_is_bare_slug(self):
+        # #145: conventions are unversioned; identity is a bare slug, not a URN.
         conv = Convention(
-            srn=_make_conv_srn("my-conv", "2.0.0"),
+            id=_make_conv_slug("my-conv"),
             title="Test",
             schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
             created_at=datetime.now(UTC),
         )
-        assert str(conv.srn) == "urn:osa:localhost:conv:my-conv@2.0.0"
+        assert conv.id.root == "my-conv"

@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.shared.authorization.gate import public
-from osa.domain.shared.model.srn import ConventionId, SchemaId
+from osa.domain.shared.model.srn import ConventionSlug, SchemaId
 from osa.domain.shared.query import Query, QueryHandler, Result
 
 
@@ -13,7 +13,7 @@ class ListConventions(Query):
 
 
 class ConventionSummary(BaseModel):
-    id: ConventionId
+    id: ConventionSlug
     title: str
     description: str | None
     schema_id: SchemaId

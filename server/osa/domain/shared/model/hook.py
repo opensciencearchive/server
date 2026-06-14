@@ -6,9 +6,9 @@ produces (FeatureSpec).  Both use discriminated unions so new variants
 """
 
 import re
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
-from pydantic import Field
+from pydantic import ConfigDict, Field, RootModel, field_validator
 
 from osa.domain.shared.model.value import ValueObject
 
@@ -16,13 +16,67 @@ from osa.domain.shared.model.value import ValueObject
 # Safe for use as PG identifiers, file path components, and env var values.
 PgIdentifier = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,62}$")]
 
-# Hook names compose into PG identifiers alongside fixed prefixes/suffixes —
-# notably the per-hook FK constraint ``fk_features_{name}_record_srn`` (23
-# chars of overhead). PG's identifier limit is 63 chars, so cap hook names at
-# 40 to keep every derived identifier inside the limit without surprise
-# truncation. Column names use plain ``PgIdentifier`` because they don't get
-# composed into longer names.
-HookName = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,39}$")]
+
+class HookName(RootModel[str]):
+    """A hook's stable name — a frozen ``RootModel`` (#145).
+
+    Promoted from a bare ``Annotated[str, …]`` to a nominal type so the type
+    checker can distinguish a hook name from any other string and the regex is
+    enforced at construction. Frozen, so it is hashable and usable as a dict key
+    (``dict[HookName, …]``). Use ``.root`` where a plain ``str`` is required
+    (PG identifiers built without interpolation, dict keys handed to infra).
+
+    Hook names compose into PG identifiers alongside fixed prefixes/suffixes —
+    notably the per-hook FK constraint ``fk_features_{name}_record_srn`` (23
+    chars of overhead). PG's identifier limit is 63 chars, so cap hook names at
+    40 to keep every derived identifier inside the limit without surprise
+    truncation. Column names use plain :data:`PgIdentifier` because they don't
+    get composed into longer names.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    _re: ClassVar[re.Pattern] = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+
+    @field_validator("root")
+    @classmethod
+    def _validate(cls, v: str) -> str:
+        if not cls._re.match(v):
+            raise ValueError("invalid hook name: 1–40 chars of [a-z0-9_], starting with a letter")
+        return v
+
+    def __str__(self) -> str:
+        return self.root
+
+
+class FeatureName(RootModel[str]):
+    """Identity of a feature table on the read surface (#145).
+
+    A hook produces exactly one feature table, addressed at
+    ``/data/{schema}/{feature}``; its name equals the producing hook's name but
+    is a **distinct nominal type** so the read/feature side never traffics in
+    "hook". Same PG-identifier rules as :class:`HookName` (≤40 chars). Convert a
+    producing hook's name once at the hook→feature boundary
+    (``FeatureName(hook.name.root)``); reserved-slot names are already rejected
+    upstream on the hook identity.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    _re: ClassVar[re.Pattern] = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+
+    @field_validator("root")
+    @classmethod
+    def _validate(cls, v: str) -> str:
+        if not cls._re.match(v):
+            raise ValueError(
+                "invalid feature name: 1–40 chars of [a-z0-9_], starting with a letter"
+            )
+        return v
+
+    def __str__(self) -> str:
+        return self.root
+
 
 _MEMORY_RE = re.compile(r"^(\d+(?:\.\d+)?)(g|m|k)?i?$")
 
@@ -141,18 +195,5 @@ class HookIdentity(ValueObject):
         from osa.domain.shared.error import ReservedNameError
         from osa.domain.shared.model.reserved import RESERVED_NAMES
 
-        if self.name in RESERVED_NAMES:
-            raise ReservedNameError(self.name, "hook")
-
-
-class HookDeploySpec(ValueObject):
-    """One hook in a bundled deploy: its identity + the release to mint.
-
-    Pairs the fixed :class:`HookIdentity` (name + feature contract) with the
-    release runtime (image/digest/config/limits) and the build ``source_ref``.
-    The deploy fan-out upserts the identity and creates the release from this.
-    """
-
-    identity: HookIdentity
-    runtime: Annotated[OciConfig, Field(discriminator="type")]
-    source_ref: str
+        if self.name.root in RESERVED_NAMES:
+            raise ReservedNameError(self.name.root, "hook")

@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from osa.domain.deposition.event.submitted import DepositionSubmittedEvent
 from osa.domain.shared.event import EventHandler, EventId
+from osa.domain.shared.model.hook import FeatureName
 from osa.domain.shared.outbox import Outbox
 from osa.domain.validation.event.validation_completed import ValidationCompleted
 from osa.domain.validation.event.validation_failed import ValidationFailed
@@ -51,8 +52,9 @@ class ValidateDeposition(EventHandler[DepositionSubmittedEvent]):
             await self.outbox.append(failed)
             logger.info(f"Validation failed for: {event.deposition_id}")
         else:
-            # event.hooks are already hook names (the feature-table slots).
-            expected_features = list(event.hooks)
+            # Each hook produces one feature table named after it: convert the
+            # producing hook names to feature names at this boundary (#145).
+            expected_features = [FeatureName(h.root) for h in event.hooks]
             completed = ValidationCompleted(
                 id=EventId(uuid4()),
                 validation_run_srn=run.srn,

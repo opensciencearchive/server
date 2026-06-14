@@ -2,7 +2,7 @@ from typing import Any
 
 from osa.domain.shared.event import Event, EventId
 from osa.domain.shared.model.hook import HookName
-from osa.domain.shared.model.srn import ConventionId, DepositionSRN
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
 
 
 class DepositionSubmittedEvent(Event):
@@ -17,5 +17,5 @@ class DepositionSubmittedEvent(Event):
     id: EventId
     deposition_id: DepositionSRN
     metadata: dict[str, Any]
-    convention_id: ConventionId
+    convention_id: ConventionSlug
     hooks: list[HookName] = []

@@ -6,15 +6,14 @@ from osa.domain.shared.error import ReservedNameError
 from osa.domain.shared.model.hook import (
     ColumnDef,
     HookIdentity,
-    OciConfig,
+    HookName,
     TableFeatureSpec,
 )
 
 
 def _hook(name: str) -> HookIdentity:
     return HookIdentity(
-        name=name,
-        runtime=OciConfig(image="ghcr.io/example/hook", digest="sha256:abc123"),
+        name=HookName(name),
         feature=TableFeatureSpec(
             cardinality="one",
             columns=[ColumnDef(name="score", json_type="number", required=True)],
@@ -33,4 +32,4 @@ def test_hook_rejects_reserved_name(reserved: str) -> None:
 
 def test_hook_allows_non_reserved_name() -> None:
     hook = _hook("chemical_features")
-    assert hook.name == "chemical_features"
+    assert hook.name.root == "chemical_features"

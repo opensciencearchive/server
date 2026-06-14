@@ -15,7 +15,7 @@ from osa.domain.record.port.repository import RecordRepository
 from osa.domain.record.service.record import RecordService
 from osa.domain.shared.model.source import DepositionSource, IngestSource
 from osa.domain.shared.model.srn import (
-    ConventionId,
+    ConventionSlug,
     DepositionSRN,
     Domain,
     LocalId,
@@ -24,8 +24,8 @@ from osa.domain.shared.model.srn import (
 from osa.domain.shared.outbox import Outbox
 
 
-def _make_conv_srn() -> ConventionId:
-    return ConventionId.parse("urn:osa:localhost:conv:test@1.0.0")
+def _make_conv_slug() -> ConventionSlug:
+    return ConventionSlug("test")
 
 
 def _make_schema_id() -> SchemaId:
@@ -34,7 +34,7 @@ def _make_schema_id() -> SchemaId:
 
 def _make_convention() -> Convention:
     return Convention(
-        srn=_make_conv_srn(),
+        id=_make_conv_slug(),
         title="Test Convention",
         description=None,
         schema_id=_make_schema_id(),
@@ -76,7 +76,7 @@ def sample_draft(node_domain: Domain) -> RecordDraft:
     return RecordDraft(
         source=DepositionSource(id=str(dep_srn)),
         metadata={"title": "Test Record", "organism": "human", "platform": "GPL570"},
-        convention_id=_make_conv_srn(),
+        convention_id=_make_conv_slug(),
         expected_features=["pocket_detect"],
     )
 
@@ -173,7 +173,7 @@ class TestRecordServiceIngestSource:
                 upstream_source="pdb",
             ),
             metadata={"title": "Ingested Protein"},
-            convention_id=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             expected_features=["pocket_detect"],
         )
 
@@ -183,10 +183,10 @@ class TestRecordServiceIngestSource:
 
         assert record.source.type == "ingest"
         assert record.source.upstream_source == "pdb"
-        assert record.convention_id == _make_conv_srn()
+        assert record.convention_id == _make_conv_slug()
         mock_record_repo.save.assert_called_once()
 
         event = mock_outbox.append.call_args[0][0]
         assert isinstance(event, RecordPublished)
         assert event.source.type == "ingest"
-        assert event.expected_features == ["pocket_detect"]
+        assert [f.root for f in event.expected_features] == ["pocket_detect"]

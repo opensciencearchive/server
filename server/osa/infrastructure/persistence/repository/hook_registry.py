@@ -77,7 +77,7 @@ class PostgresHookRegistry(HookRegistry):
 
         await self.session.execute(
             insert(hooks_table).values(
-                name=name,
+                name=name.root,
                 feature_spec=feature.model_dump(),
                 live_release_id=None,
                 created_at=datetime.now(UTC),
@@ -98,7 +98,7 @@ class PostgresHookRegistry(HookRegistry):
         # Row-lock the hook so concurrent releases serialize (R7). Also asserts
         # the hook exists.
         locked = await self.session.execute(
-            select(hooks_table).where(hooks_table.c.name == name).with_for_update()
+            select(hooks_table).where(hooks_table.c.name == name.root).with_for_update()
         )
         hook_row = locked.mappings().first()
         if hook_row is None:
@@ -109,7 +109,7 @@ class PostgresHookRegistry(HookRegistry):
         dup = await self.session.execute(
             select(hook_releases_table).where(
                 and_(
-                    hook_releases_table.c.hook_name == name,
+                    hook_releases_table.c.hook_name == name.root,
                     hook_releases_table.c.digest == runtime.digest,
                 )
             )
@@ -120,7 +120,7 @@ class PostgresHookRegistry(HookRegistry):
 
         max_version = await self.session.scalar(
             select(func.coalesce(func.max(hook_releases_table.c.version), 0)).where(
-                hook_releases_table.c.hook_name == name
+                hook_releases_table.c.hook_name == name.root
             )
         )
         next_version = int(max_version or 0) + 1
@@ -129,7 +129,7 @@ class PostgresHookRegistry(HookRegistry):
         await self.session.execute(
             insert(hook_releases_table).values(
                 id=release_id,
-                hook_name=name,
+                hook_name=name.root,
                 version=next_version,
                 image=runtime.image,
                 digest=runtime.digest,
@@ -142,7 +142,9 @@ class PostgresHookRegistry(HookRegistry):
         )
         # Advance the live pointer.
         await self.session.execute(
-            update(hooks_table).where(hooks_table.c.name == name).values(live_release_id=release_id)
+            update(hooks_table)
+            .where(hooks_table.c.name == name.root)
+            .values(live_release_id=release_id)
         )
         await self.session.flush()
 
@@ -152,7 +154,7 @@ class PostgresHookRegistry(HookRegistry):
 
     async def set_live(self, name: HookName, version: int) -> Hook:
         locked = await self.session.execute(
-            select(hooks_table).where(hooks_table.c.name == name).with_for_update()
+            select(hooks_table).where(hooks_table.c.name == name.root).with_for_update()
         )
         if locked.mappings().first() is None:
             raise NotFoundError(f"Hook not found: {name}")
@@ -162,7 +164,9 @@ class PostgresHookRegistry(HookRegistry):
             raise NotFoundError(f"Release not found: {name}@v{version}")
 
         await self.session.execute(
-            update(hooks_table).where(hooks_table.c.name == name).values(live_release_id=target.id)
+            update(hooks_table)
+            .where(hooks_table.c.name == name.root)
+            .values(live_release_id=target.id)
         )
         await self.session.flush()
         row = await self._get_hook_row(name)
@@ -180,7 +184,7 @@ class PostgresHookRegistry(HookRegistry):
     async def list_releases(self, name: HookName) -> list[HookRelease]:
         result = await self.session.execute(
             select(hook_releases_table)
-            .where(hook_releases_table.c.hook_name == name)
+            .where(hook_releases_table.c.hook_name == name.root)
             .order_by(hook_releases_table.c.version.desc())
         )
         return [self._to_release(dict(r)) for r in result.mappings().all()]
@@ -189,7 +193,7 @@ class PostgresHookRegistry(HookRegistry):
         result = await self.session.execute(
             select(hook_releases_table).where(
                 and_(
-                    hook_releases_table.c.hook_name == name,
+                    hook_releases_table.c.hook_name == name.root,
                     hook_releases_table.c.version == version,
                 )
             )
@@ -210,9 +214,6 @@ class PostgresHookRegistry(HookRegistry):
             insert(hook_runs_table).values(
                 id=run.id,
                 release_id=run.release_id,
-                ingest_run_id=run.ingest_run_id,
-                deposition_id=str(run.deposition_id) if run.deposition_id else None,
-                batch_index=run.batch_index,
                 status=run.status.value,
                 started_at=run.started_at,
                 finished_at=run.finished_at,
@@ -222,36 +223,6 @@ class PostgresHookRegistry(HookRegistry):
             )
         )
         await self.session.flush()
-
-    async def run_ids_for_batch(
-        self, ingest_run_id: str, batch_index: int
-    ) -> dict[HookName, str]:
-        return await self._run_ids(
-            and_(
-                hook_runs_table.c.ingest_run_id == ingest_run_id,
-                hook_runs_table.c.batch_index == batch_index,
-            )
-        )
-
-    async def run_ids_for_deposition(self, deposition_id: str) -> dict[HookName, str]:
-        return await self._run_ids(hook_runs_table.c.deposition_id == deposition_id)
-
-    async def _run_ids(self, where: Any) -> dict[HookName, str]:
-        # One indexed join per batch/deposition (not per row). started_at ASC →
-        # later runs overwrite earlier, so a re-run resolves to its latest run.
-        stmt = (
-            select(hook_releases_table.c.hook_name, hook_runs_table.c.id)
-            .select_from(
-                hook_runs_table.join(
-                    hook_releases_table,
-                    hook_runs_table.c.release_id == hook_releases_table.c.id,
-                )
-            )
-            .where(where)
-            .order_by(hook_runs_table.c.started_at)
-        )
-        result = await self.session.execute(stmt)
-        return {row.hook_name: str(row.id) for row in result.all()}
 
     async def resolve_live(self, names: list[HookName]) -> dict[HookName, HookRelease]:
         if not names:
@@ -264,12 +235,17 @@ class PostgresHookRegistry(HookRegistry):
                     hooks_table.c.live_release_id == hook_releases_table.c.id,
                 )
             )
-            .where(hooks_table.c.name.in_(names))
+            .where(hooks_table.c.name.in_([n.root for n in names]))
         )
         result = await self.session.execute(stmt)
-        return {row["hook_name"]: self._to_release(dict(row)) for row in result.mappings().all()}
+        return {
+            HookName(row["hook_name"]): self._to_release(dict(row))
+            for row in result.mappings().all()
+        }
 
     async def _get_hook_row(self, name: HookName) -> dict[str, Any] | None:
-        result = await self.session.execute(select(hooks_table).where(hooks_table.c.name == name))
+        result = await self.session.execute(
+            select(hooks_table).where(hooks_table.c.name == name.root)
+        )
         row = result.mappings().first()
         return dict(row) if row else None

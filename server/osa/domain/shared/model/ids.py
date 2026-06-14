@@ -1,10 +1,13 @@
 """Central semantic ID types used across the ``/data/`` read surface.
 
 Per OSA's type-safety convention, semantic identifiers cross module
-boundaries as ``NewType`` aliases rather than bare ``str``. ``HookName`` is
+boundaries as nominal types rather than bare ``str``. ``FeatureName`` (the
+identity of a feature table addressed at ``/data/{schema}/{feature}``) is
 re-exported from :mod:`osa.domain.shared.model.hook` (its source of truth,
 where the PG-identifier pattern validation lives) so callers have a single
-import location for the IDs this surface deals in.
+import location for the IDs this surface deals in. The read surface speaks of
+*features*, not *hooks* — a hook is the producer; the table it produces is the
+feature.
 """
 
 from __future__ import annotations
@@ -12,7 +15,7 @@ from __future__ import annotations
 from typing import NewType
 
 from osa.domain.shared.error import ValidationError
-from osa.domain.shared.model.hook import HookName
+from osa.domain.shared.model.hook import FeatureName
 from osa.domain.shared.model.value import ValueObject
 
 # Bare internal record identifier (UUIDv7 / ULID). Validation of the exact
@@ -52,4 +55,4 @@ class RecordRef(ValueObject):
         return self.render()
 
 
-__all__ = ["RecordId", "RecordRef", "HookName"]
+__all__ = ["RecordId", "RecordRef", "FeatureName"]

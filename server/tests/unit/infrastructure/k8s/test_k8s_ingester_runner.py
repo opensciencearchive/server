@@ -9,11 +9,11 @@ import pytest
 from osa.config import K8sConfig
 from osa.domain.shared.error import OOMError, TransientError
 from osa.domain.shared.model.source import IngesterDefinition, IngesterLimits
-from osa.domain.shared.model.srn import ConventionId
+from osa.domain.shared.model.srn import ConventionSlug
 from osa.domain.shared.port.ingester_runner import IngesterInputs
 from osa.infrastructure.k8s.ingester_runner import K8sIngesterRunner
 
-_CONV_SRN = ConventionId.parse("urn:osa:localhost:conv:test@1.0.0")
+_CONV_SLUG = ConventionSlug("test")
 
 
 def _make_ingester(
@@ -228,7 +228,7 @@ class TestSourceJobSpec:
             ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
-            inputs=IngesterInputs(convention_id=_CONV_SRN, limit=100, offset=50),
+            inputs=IngesterInputs(convention_id=_CONV_SLUG, limit=100, offset=50),
         )
         env = spec.spec.template.spec.containers[0].env
         env_dict = {e.name: e.value for e in env}
@@ -248,7 +248,7 @@ class TestSourceJobSpec:
             ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
-            inputs=IngesterInputs(convention_id=_CONV_SRN, since=since),
+            inputs=IngesterInputs(convention_id=_CONV_SLUG, since=since),
         )
         env = spec.spec.template.spec.containers[0].env
         env_dict = {e.name: e.value for e in env}
@@ -272,7 +272,7 @@ class TestSourceJobSpec:
             ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
-            convention_id=ConventionId.parse("urn:osa:localhost:conv:conv1@1.0.0"),
+            convention_id=ConventionSlug("conv1"),
         )
         name = spec.metadata.name
         assert name.startswith("osa-ingester-")
@@ -285,10 +285,10 @@ class TestSourceJobSpec:
             ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
-            convention_id=ConventionId.parse("urn:osa:localhost:conv:conv1@1.0.0"),
+            convention_id=ConventionSlug("conv1"),
         )
         labels = spec.spec.template.metadata.labels
-        assert labels["osa.io/convention"] == "localhost.conv.conv1.1.0.0"
+        assert labels["osa.io/convention"] == "conv1"
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +350,7 @@ class TestSourceLifecycle:
 
         runner._s3.get_object.side_effect = s3_get
 
-        inputs = IngesterInputs(convention_id=_CONV_SRN)
+        inputs = IngesterInputs(convention_id=_CONV_SLUG)
         result = await runner._run_job(ingester, inputs, work_dir, files_dir)
 
         assert len(result.records) == 2
@@ -396,7 +396,7 @@ class TestSourceLifecycle:
         work_dir.mkdir(parents=True)
         files_dir = work_dir / "files"
         files_dir.mkdir(parents=True)
-        inputs = IngesterInputs(convention_id=_CONV_SRN)
+        inputs = IngesterInputs(convention_id=_CONV_SLUG)
 
         with pytest.raises(TransientError, match="[Tt]imed out|[Dd]eadline"):
             await runner._run_job(ingester, inputs, work_dir, files_dir)
@@ -451,7 +451,7 @@ class TestSourceLifecycle:
         work_dir.mkdir(parents=True)
         files_dir = work_dir / "files"
         files_dir.mkdir(parents=True)
-        inputs = IngesterInputs(convention_id=_CONV_SRN)
+        inputs = IngesterInputs(convention_id=_CONV_SLUG)
 
         with pytest.raises(OOMError, match="[Oo]OM"):
             await runner._run_job(ingester, inputs, work_dir, files_dir)
@@ -503,9 +503,7 @@ class TestConventionSrnFromInputs:
         files_dir = work_dir / "files"
         files_dir.mkdir(parents=True)
 
-        inputs = IngesterInputs(
-            convention_id=ConventionId.parse("urn:osa:localhost:conv:my-conv@1.0.0")
-        )
+        inputs = IngesterInputs(convention_id=ConventionSlug("my-conv"))
 
         await runner.run(ingester, inputs, files_dir, work_dir)
 
@@ -513,4 +511,4 @@ class TestConventionSrnFromInputs:
         call_args = batch_api.create_namespaced_job.call_args
         spec = call_args[0][1]
         labels = spec.metadata.labels
-        assert labels["osa.io/convention"] == "localhost.conv.my-conv.1.0.0"
+        assert labels["osa.io/convention"] == "my-conv"

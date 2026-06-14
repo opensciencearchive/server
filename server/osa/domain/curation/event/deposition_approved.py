@@ -3,7 +3,8 @@
 from typing import Any
 
 from osa.domain.shared.event import Event, EventId
-from osa.domain.shared.model.srn import ConventionId, DepositionSRN
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
+from osa.domain.shared.model.hook import FeatureName
 
 
 class DepositionApproved(Event):
@@ -16,5 +17,5 @@ class DepositionApproved(Event):
     id: EventId
     deposition_srn: DepositionSRN
     metadata: dict[str, Any]
-    convention_id: ConventionId
-    expected_features: list[str] = []
+    convention_id: ConventionSlug
+    expected_features: list[FeatureName] = []

@@ -9,21 +9,21 @@ from osa.domain.auth.model.value import UserId
 from osa.domain.deposition.model.aggregate import Deposition
 from osa.domain.deposition.model.value import DepositionFile, DepositionStatus
 from osa.domain.shared.error import InvalidStateError
-from osa.domain.shared.model.srn import ConventionId, DepositionSRN
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
 
 
 def _make_dep_srn(id: str = "test-dep") -> DepositionSRN:
     return DepositionSRN.parse(f"urn:osa:localhost:dep:{id}")
 
 
-def _make_conv_srn(id: str = "test-conv", version: str = "1.0.0") -> ConventionId:
-    return ConventionId.parse(f"urn:osa:localhost:conv:{id}@{version}")
+def _make_conv_slug(slug: str = "test-conv") -> ConventionSlug:
+    return ConventionSlug(slug)
 
 
 def _make_deposition(**overrides) -> Deposition:
     defaults = dict(
         srn=_make_dep_srn(),
-        convention_id=_make_conv_srn(),
+        convention_id=_make_conv_slug(),
         owner_id=UserId(uuid4()),
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -44,7 +44,7 @@ def _make_file(name: str = "data.csv", size: int = 1000) -> DepositionFile:
 class TestDepositionCreation:
     def test_create_with_convention_id(self):
         dep = _make_deposition()
-        assert dep.convention_id == _make_conv_srn()
+        assert dep.convention_id == _make_conv_slug()
         assert dep.status == DepositionStatus.DRAFT
 
     def test_create_with_empty_metadata(self):

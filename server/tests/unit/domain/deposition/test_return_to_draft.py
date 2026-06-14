@@ -8,7 +8,7 @@ import pytest
 from osa.domain.deposition.handler.return_to_draft import ReturnToDraft
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.srn import ConventionId, DepositionSRN
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
 from osa.domain.validation.event.validation_failed import ValidationFailed
 from osa.domain.validation.model import RunStatus
 
@@ -17,8 +17,8 @@ def _make_dep_srn(id: str = "test-dep") -> DepositionSRN:
     return DepositionSRN.parse(f"urn:osa:localhost:dep:{id}")
 
 
-def _make_conv_srn() -> ConventionId:
-    return ConventionId.parse("urn:osa:localhost:conv:test@1.0.0")
+def _make_conv_slug() -> ConventionSlug:
+    return ConventionSlug("test-conv")
 
 
 class TestReturnToDraft:
@@ -30,7 +30,7 @@ class TestReturnToDraft:
         event = ValidationFailed(
             id=EventId(uuid4()),
             deposition_srn=_make_dep_srn(),
-            convention_id=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             status=RunStatus.FAILED,
             reasons=["Missing required field"],
         )
@@ -47,7 +47,7 @@ class TestReturnToDraft:
         event = ValidationFailed(
             id=EventId(uuid4()),
             deposition_srn=_make_dep_srn(),
-            convention_id=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             status=RunStatus.FAILED,
             reasons=["error"],
         )

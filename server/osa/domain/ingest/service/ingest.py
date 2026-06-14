@@ -9,7 +9,7 @@ from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId, IngestSta
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.shared.error import ConflictError, NotFoundError
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.srn import ConventionId, Domain
+from osa.domain.shared.model.srn import ConventionSlug, Domain
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
 from osa.infrastructure.logging import get_logger
@@ -38,7 +38,7 @@ class IngestService(Service):
         - Convention has an ingester configured
         - No ingest is already running for this convention
         """
-        parsed_srn = ConventionId.parse(convention_id)
+        parsed_srn = ConventionSlug.parse(convention_id)
         convention = await self.convention_service.get_convention(parsed_srn)
 
         if convention.ingester is None:

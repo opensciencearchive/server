@@ -23,6 +23,15 @@ class HookStoragePort(Port, Protocol):
         ...
 
     @abstractmethod
+    async def write_run_ref(self, work_dir: Path, run_id: str, release_id: str) -> None:
+        """Write ``{work_dir}/output/run.json`` carrying this run's provenance.
+
+        The feature-insert handler reads it back to stamp ``feature.run_id`` —
+        no DB run-id lookup (design-revisions §6). #145.
+        """
+        ...
+
+    @abstractmethod
     async def write_checkpoint(
         self, work_dir: Path, outcomes: dict[HookRecordId, BatchRecordOutcome]
     ) -> None:

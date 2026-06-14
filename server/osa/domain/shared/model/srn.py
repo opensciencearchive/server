@@ -6,6 +6,7 @@ from string import Template
 from typing import Any, ClassVar, Generic, Self, Type, TypeVar, Union
 
 from pydantic import (
+    ConfigDict,
     Field,
     RootModel,
     field_validator,
@@ -280,11 +281,6 @@ class OntologySRN(SRN):
     version: Semver
 
 
-class ConventionSRN(SRN):
-    type: ResourceType = Field(default=ResourceType.conv, frozen=True)
-    version: Semver
-
-
 class DepositionSRN(SRN):
     type: ResourceType = Field(default=ResourceType.dep, frozen=True)
     version: None = None
@@ -357,52 +353,42 @@ class SchemaId(ValueObject):
         return SchemaSRN(domain=domain, id=self.id, version=self.version)
 
 
-# ---------- Convention identity (short form — internal primitive) ----------
+# ---------- Convention identity (slug — internal primitive) ----------
 
 
-class ConventionId(ValueObject):
-    """Short-form convention identity — the internal primitive handle.
+class ConventionSlug(RootModel[str]):
+    """A convention's identity — a frozen, human-readable slug (#145).
 
-    Mirrors :class:`SchemaId`: a convention is unambiguously identified by
-    ``(id, version)`` within a single OSA node. The caller supplies a
-    human-readable slug at deploy time (e.g. ``"proteins"``) which combines
-    with the version into ``"<slug>@<semver>"``.
+    Conventions are **unversioned** (design-revisions §3): a convention is a thin
+    wrapper that delegates versioning to its parts — it pins a versioned
+    :class:`SchemaId` and references hooks by name (each resolving to a versioned
+    live release). It therefore has no meaningful version of its own, so its
+    identity is a bare slug rather than the old ``"<slug>@<version>"``
+    ``ConventionSlug``.
 
-    Replaces the opaque, server-generated :class:`ConventionSRN` as the primary
-    handle for all non-federation code paths. Use :class:`ConventionSRN` only at
-    federation edges where the publishing node's domain becomes meaningful.
-
-    Wire form: ``"<id>@<semver>"`` (e.g., ``"proteins@1.0.0"``).
+    Mirrors :class:`SchemaIdentifier`'s charset (starts with a letter, 3–64 chars
+    of ``[a-z0-9-]``) so it is safe as a URL segment and a PG identifier. Frozen,
+    so it is hashable and usable as a dict key. Use ``.root`` where a plain
+    ``str`` is required.
     """
 
-    id: LocalId
-    version: Semver
+    model_config = ConfigDict(frozen=True)
 
-    @property
-    def major(self) -> int:
-        """Major version component."""
-        return int(self.version.root.split(".")[0])
+    _re: ClassVar[re.Pattern] = re.compile(r"^[a-z][a-z0-9\-]{2,63}$")
 
-    def render(self) -> str:
-        return f"{self.id.root}@{self.version.root}"
+    @field_validator("root")
+    @classmethod
+    def _validate(cls, v: str) -> str:
+        if not cls._re.match(v):
+            raise ValueError(
+                "invalid convention slug: must be 3–64 chars of [a-z0-9-] and start with a letter"
+            )
+        return v
+
+    @classmethod
+    def parse(cls, value: str) -> "ConventionSlug":
+        """Parse/validate a bare slug. Raises ``ValueError`` on malformed input."""
+        return cls(value)
 
     def __str__(self) -> str:
-        return self.render()
-
-    @classmethod
-    def parse(cls, value: str) -> "ConventionId":
-        """Parse wire form ``"<id>@<semver>"``.
-
-        Raises ``ValueError`` on malformed input.
-        """
-        if not isinstance(value, str) or "@" not in value:
-            raise ValueError(f"ConventionId must be '<id>@<semver>', got {value!r}")
-        id_part, version_part = value.split("@", 1)
-        return cls(id=LocalId(id_part), version=Semver.from_string(version_part))
-
-    @classmethod
-    def from_srn(cls, srn: "ConventionSRN") -> "ConventionId":
-        return cls(id=srn.id, version=srn.version)
-
-    def to_srn(self, domain: Domain) -> "ConventionSRN":
-        return ConventionSRN(domain=domain, id=self.id, version=self.version)
+        return self.root

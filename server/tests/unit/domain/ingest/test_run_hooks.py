@@ -1,5 +1,7 @@
 """Tests for RunHooks — OOM exhaustion should still emit HookBatchCompleted."""
 
+from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -10,18 +12,37 @@ from osa.domain.ingest.handler.run_hooks import RunHooks
 from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId, IngestStatus
 from osa.domain.shared.error import OOMError, PermanentError
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.hook import HookIdentity, OciConfig, OciLimits, TableFeatureSpec
+from osa.domain.shared.model.hook import (
+    HookName,
+    OciConfig,
+    OciLimits,
+    TableFeatureSpec,
+)
+from osa.domain.validation.model.hook import Hook
+from osa.domain.validation.model.hook_release import HookRelease, HookReleaseId
 
 
-def _make_hook(name: str = "pockets") -> HookIdentity:
-    return HookIdentity(
-        name=name,
+def _make_release(name: str = "pockets", memory: str = "1g") -> HookRelease:
+    return HookRelease(
+        id=HookReleaseId(uuid4()),
+        hook_name=HookName(name),
+        version=1,
         runtime=OciConfig(
             image="ghcr.io/test/pockets:v1",
             digest="sha256:abc123",
-            limits=OciLimits(memory="1g"),
+            limits=OciLimits(memory=memory),
         ),
+        source_ref="git:abc123",
+        built_at=datetime.now(UTC),
+    )
+
+
+def _make_hook(name: str = "pockets") -> Hook:
+    return Hook(
+        name=HookName(name),
         feature=TableFeatureSpec(cardinality="one", columns=[]),
+        live_release_id=HookReleaseId(uuid4()),
+        created_at=datetime.now(UTC),
     )
 
 
@@ -38,19 +59,30 @@ def _make_event(
 
 
 def _make_convention():
+    # Conventions now reference hooks by name (#145), not embedded identities.
     conv = AsyncMock()
-    conv.hooks = [_make_hook()]
+    conv.hooks = [HookName("pockets")]
     return conv
+
+
+def _make_hook_registry() -> AsyncMock:
+    """Fake HookRegistryService resolving the single 'pockets' hook + release."""
+    registry = AsyncMock()
+    release = _make_release()
+    registry.resolve_live.return_value = {HookName("pockets"): release}
+    registry.get_hook.return_value = _make_hook()
+    return registry
 
 
 def _make_handler(*, hook_service_side_effect=None) -> RunHooks:
     ingest_repo = AsyncMock()
     ingest_repo.get.return_value = IngestRun(
         id=IngestRunId("run-1"),
-        convention_id="urn:osa:localhost:conv:test@1.0.0",
+        # Conventions are identified by a bare slug now (#145).
+        convention_id="test-conv",
         status=IngestStatus.RUNNING,
         batch_size=100,
-        started_at=__import__("datetime").datetime.now(__import__("datetime").UTC),
+        started_at=datetime.now(UTC),
     )
 
     convention_service = AsyncMock()
@@ -60,8 +92,8 @@ def _make_handler(*, hook_service_side_effect=None) -> RunHooks:
     ingest_storage.read_records.return_value = [
         {"source_id": "rec-1", "metadata": {}, "files": []},
     ]
-    ingest_storage.batch_files_dir.return_value = __import__("pathlib").Path("/tmp/files")
-    ingest_storage.hook_work_dir.return_value = __import__("pathlib").Path("/tmp/work")
+    ingest_storage.batch_files_dir.return_value = Path("/tmp/files")
+    ingest_storage.hook_work_dir.return_value = Path("/tmp/work")
 
     hook_service = AsyncMock()
     if hook_service_side_effect:
@@ -72,6 +104,7 @@ def _make_handler(*, hook_service_side_effect=None) -> RunHooks:
         ingest_service=AsyncMock(),
         convention_service=convention_service,
         hook_service=hook_service,
+        hook_registry=_make_hook_registry(),
         outbox=AsyncMock(),
         ingest_storage=ingest_storage,
     )

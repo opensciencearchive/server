@@ -12,14 +12,14 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from osa.domain.shared.model.source import IngesterDefinition
-from osa.domain.shared.model.srn import ConventionId
+from osa.domain.shared.model.srn import ConventionSlug
 
 
 @dataclass(frozen=True)
 class IngesterInputs:
     """Inputs for an ingester container run."""
 
-    convention_id: ConventionId
+    convention_id: ConventionSlug
     ingest_run_id: str = ""
     batch_index: int = 0
     config: dict[str, Any] | None = None

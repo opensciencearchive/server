@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from osa.domain.shared.error import OOMError
-from osa.domain.shared.model.hook import HookIdentity
+from osa.domain.shared.model.hook import HookIdentity, HookName
 from osa.domain.shared.service import Service
 from osa.domain.validation.model.hook_release import HookRelease
 from osa.domain.validation.model.batch_outcome import (
@@ -159,7 +159,7 @@ class HookService(Service):
         self,
         hook_releases: list[tuple[HookIdentity, HookRelease]],
         inputs: HookInputs,
-        work_dirs: dict[str, Path],
+        work_dirs: dict[HookName, Path],
     ) -> list[HookResult]:
         """Run multiple hooks sequentially for a batch of records.
 

@@ -4,6 +4,7 @@ from enum import StrEnum
 
 from pydantic import Field
 
+from osa.domain.shared.model.hook import HookName
 from osa.domain.shared.model.value import ValueObject
 
 
@@ -23,7 +24,7 @@ class ProgressEntry(ValueObject):
 class HookResult(ValueObject):
     """Result of executing a single hook."""
 
-    hook_name: str
+    hook_name: HookName
     status: HookStatus
     rejection_reason: str | None = None
     error_message: str | None = None

@@ -1,7 +1,7 @@
 from abc import abstractmethod
 from typing import TYPE_CHECKING, List, Protocol
 
-from osa.domain.shared.model.srn import ConventionId
+from osa.domain.shared.model.srn import ConventionSlug
 from osa.domain.shared.port import Port
 
 if TYPE_CHECKING:
@@ -13,7 +13,7 @@ class ConventionRepository(Port, Protocol):
     async def save(self, convention: "Convention") -> None: ...
 
     @abstractmethod
-    async def get(self, id: ConventionId) -> "Convention | None": ...
+    async def get(self, id: ConventionSlug) -> "Convention | None": ...
 
     @abstractmethod
     async def list(
@@ -21,7 +21,7 @@ class ConventionRepository(Port, Protocol):
     ) -> "List[Convention]": ...
 
     @abstractmethod
-    async def exists(self, id: ConventionId) -> bool: ...
+    async def exists(self, id: ConventionSlug) -> bool: ...
 
     @abstractmethod
     async def list_with_source(self) -> "List[Convention]":

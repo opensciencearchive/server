@@ -15,7 +15,7 @@ from osa.domain.deposition.port.repository import DepositionRepository
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.error import NotFoundError, ValidationError
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.srn import ConventionId, DepositionSRN, Domain, LocalId
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN, Domain, LocalId
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
 
@@ -29,7 +29,7 @@ class DepositionService(Service):
 
     async def create(
         self,
-        convention_id: ConventionId,
+        convention_id: ConventionSlug,
         owner_id: UserId,
     ) -> Deposition:
         convention = await self.convention_repo.get(convention_id)

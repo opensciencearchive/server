@@ -3,8 +3,9 @@
 from typing import Any
 
 from osa.domain.shared.model.source import RecordSource
-from osa.domain.shared.model.srn import ConventionId
+from osa.domain.shared.model.srn import ConventionSlug
 from osa.domain.shared.model.value import ValueObject
+from osa.domain.shared.model.hook import FeatureName
 
 
 class RecordDraft(ValueObject):
@@ -17,5 +18,5 @@ class RecordDraft(ValueObject):
 
     source: RecordSource
     metadata: dict[str, Any]
-    convention_id: ConventionId
-    expected_features: list[str] = []
+    convention_id: ConventionSlug
+    expected_features: list[FeatureName] = []

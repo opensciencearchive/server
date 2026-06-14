@@ -12,6 +12,7 @@ import pytest
 from osa.domain.feature.service.feature import FeatureService
 from osa.domain.shared.model.hook import (
     ColumnDef,
+    FeatureName,
     HookIdentity,
     OciConfig,
     TableFeatureSpec,
@@ -77,7 +78,7 @@ class TestDecoupledFeatureService:
         await service.insert_features_for_record(
             hook_output_dir="/fake/output/dir",
             record_srn="urn:osa:localhost:rec:test@1",
-            expected_features=["pocketeer"],
+            expected_features=[FeatureName("pocketeer")],
         )
 
         feature_storage.hook_features_exist.assert_called_once_with("/fake/output/dir", "pocketeer")

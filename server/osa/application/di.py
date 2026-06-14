@@ -37,7 +37,7 @@ def create_container(
             the core handlers. They will be included in the subscription
             registry, WorkerPool, and DI resolution automatically.
     """
-    config = Config()  # type: ignore[call-arg]
+    config = Config()
     paths = OSAPaths()
 
     return make_async_container(

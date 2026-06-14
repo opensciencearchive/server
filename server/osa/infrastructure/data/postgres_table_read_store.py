@@ -250,12 +250,13 @@ class PostgresTableReadStore:
     async def _stream_features(self, plan: QueryPlan) -> AsyncIterator[Mapping[str, Any]]:
         if plan.feature_name is None:  # guarded by QueryPlan, narrowed for the type checker
             raise ValidationError("feature_name is required for a FEATURE plan", field="feature")
-        ft, _ = await self._resolve_feature_table(plan.schema_id, plan.feature_name)
+        feature = plan.feature_name.root
+        ft, _ = await self._resolve_feature_table(plan.schema_id, feature)
 
         conditions: list[Any] = []
         if plan.filter is not None:
             conditions.append(
-                self._compile_feature_filter(plan.filter, ft=ft, feature_name=plan.feature_name)
+                self._compile_feature_filter(plan.filter, ft=ft, feature_name=feature)
             )
 
         order_keys, cursor_after = self._features_sort(plan, ft)

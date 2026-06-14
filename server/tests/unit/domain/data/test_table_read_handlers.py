@@ -119,6 +119,9 @@ async def test_feature_handler_resolves_feature_and_builds_feature_plan() -> Non
         catalog_service=catalog, query_service=query, config=FakeConfig()
     )
     result = await handler.run(ReadFeatureTable(schema="compound@1.0.0", feature="chem_features"))
-    assert catalog.resolved_with == ("compound@1.0.0", TableKind.FEATURE, "chem_features")
+    schema, table_kind, feature_name = catalog.resolved_with
+    assert (schema, table_kind) == ("compound@1.0.0", TableKind.FEATURE)
+    # feature_name is now a HookName (frozen RootModel), not a bare str.
+    assert feature_name.root == "chem_features"
     assert result.plan.table_kind == TableKind.FEATURE
-    assert result.plan.feature_name == "chem_features"
+    assert result.plan.feature_name.root == "chem_features"

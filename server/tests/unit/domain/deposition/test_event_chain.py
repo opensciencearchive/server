@@ -15,15 +15,10 @@ from osa.domain.feature.handler.insert_record_features import InsertRecordFeatur
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.record.handler.convert_deposition_to_record import ConvertDepositionToRecord
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.hook import (
-    ColumnDef,
-    HookIdentity,
-    OciConfig,
-    TableFeatureSpec,
-)
+from osa.domain.shared.model.hook import FeatureName, HookName
 from osa.domain.shared.model.source import DepositionSource
 from osa.domain.shared.model.srn import (
-    ConventionId,
+    ConventionSlug,
     DepositionSRN,
     RecordSRN,
     SchemaId,
@@ -42,8 +37,8 @@ def _make_dep_srn() -> DepositionSRN:
     return DepositionSRN.parse("urn:osa:localhost:dep:test-dep")
 
 
-def _make_conv_srn() -> ConventionId:
-    return ConventionId.parse("urn:osa:localhost:conv:test@1.0.0")
+def _make_conv_slug() -> ConventionSlug:
+    return ConventionSlug("test-conv")
 
 
 def _make_record_srn() -> RecordSRN:
@@ -53,7 +48,7 @@ def _make_record_srn() -> RecordSRN:
 def _make_deposition() -> Deposition:
     return Deposition(
         srn=_make_dep_srn(),
-        convention_id=_make_conv_srn(),
+        convention_id=_make_conv_slug(),
         status=DepositionStatus.IN_VALIDATION,
         owner_id=UserId(uuid4()),
         created_at=datetime.now(UTC),
@@ -61,29 +56,21 @@ def _make_deposition() -> Deposition:
     )
 
 
-def _make_hook_definition(name: str = "pocket_detect") -> HookIdentity:
-    return HookIdentity(
-        name=name,
-        runtime=OciConfig(
-            image="ghcr.io/example/hook",
-            digest="sha256:abc123",
-        ),
-        feature=TableFeatureSpec(
-            cardinality="many",
-            columns=[ColumnDef(name="score", json_type="number", required=True)],
-        ),
-    )
+def _make_hook_name(name: str = "pocket_detect") -> HookName:
+    # #145: the submitted event carries hook **names** (the feature-table slots);
+    # the validation handler resolves each name's live release at run start.
+    return HookName(name)
 
 
 def _make_submitted_event(
     dep_srn: DepositionSRN | None = None,
-    hooks: list[HookIdentity] | None = None,
+    hooks: list[HookName] | None = None,
 ) -> DepositionSubmittedEvent:
     return DepositionSubmittedEvent(
         id=EventId(uuid4()),
         deposition_id=dep_srn or _make_dep_srn(),
         metadata={"title": "Test"},
-        convention_id=_make_conv_srn(),
+        convention_id=_make_conv_slug(),
         hooks=hooks or [],
     )
 
@@ -132,13 +119,15 @@ class TestValidateDepositionPassesEventData:
         )
 
         dep = _make_deposition()
-        hooks = [_make_hook_definition()]
+        # #145: the submitted event carries hook NAMES (HookName), matching
+        # DepositionSubmittedEvent.hooks: list[HookName].
+        hooks = [_make_hook_name()]
         event = _make_submitted_event(dep_srn=dep.srn, hooks=hooks)
         await handler.handle(event)
 
         validation_service.validate_deposition.assert_called_once_with(
             deposition_srn=dep.srn,
-            convention_id=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             metadata={"title": "Test"},
             hooks=hooks,
         )
@@ -193,7 +182,7 @@ class TestAutoApproveCurationEmitsApproved:
             id=EventId(uuid4()),
             validation_run_srn=ValidationRunSRN.parse("urn:osa:localhost:val:run1"),
             deposition_srn=_make_dep_srn(),
-            convention_id=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             status=RunStatus.COMPLETED,
             hook_results=[],
             metadata={"title": "Test"},
@@ -211,7 +200,7 @@ class TestAutoApproveCurationEmitsApproved:
             id=EventId(uuid4()),
             validation_run_srn=ValidationRunSRN.parse("urn:osa:localhost:val:run1"),
             deposition_srn=_make_dep_srn(),
-            convention_id=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             status=RunStatus.FAILED,
             hook_results=[],
             metadata={"title": "Test"},
@@ -234,7 +223,7 @@ class TestConvertDepositionToRecord:
             id=EventId(uuid4()),
             deposition_srn=_make_dep_srn(),
             metadata={"title": "Test"},
-            convention_id=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             expected_features=["pocket_detect"],
         )
         await handler.handle(event)
@@ -244,8 +233,8 @@ class TestConvertDepositionToRecord:
         assert isinstance(draft, RecordDraft)
         assert isinstance(draft.source, DepositionSource)
         assert draft.source.id == str(_make_dep_srn())
-        assert draft.convention_id == _make_conv_srn()
-        assert draft.expected_features == ["pocket_detect"]
+        assert draft.convention_id == _make_conv_slug()
+        assert [f.root for f in draft.expected_features] == ["pocket_detect"]
         assert draft.metadata == {"title": "Test"}
 
 
@@ -267,7 +256,7 @@ class TestInsertRecordFeatures:
             record_srn=_make_record_srn(),
             source=DepositionSource(id=str(_make_dep_srn())),
             metadata={"title": "Test"},
-            convention_id=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             schema_id=_make_schema_id(),
             expected_features=["pocket_detect"],
         )
@@ -279,5 +268,5 @@ class TestInsertRecordFeatures:
         feature_service.insert_features_for_record.assert_called_once_with(
             hook_output_dir="/fake/output/dir",
             record_srn=str(_make_record_srn()),
-            expected_features=["pocket_detect"],
+            expected_features=[FeatureName("pocket_detect")],
         )

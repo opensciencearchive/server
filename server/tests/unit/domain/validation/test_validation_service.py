@@ -1,37 +1,69 @@
 """Unit tests for ValidationService — hook execution orchestration."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookIdentity,
+    HookName,
     OciConfig,
     TableFeatureSpec,
 )
 from osa.domain.shared.model.srn import DepositionSRN, Domain
 from osa.domain.validation.model import RunStatus
 from osa.domain.shared.error import OOMError, PermanentError
+from osa.domain.validation.model.hook import Hook
+from osa.domain.validation.model.hook_release import HookRelease, HookReleaseId
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.validation.port.hook_runner import HookInputs
 from osa.domain.validation.service.validation import ValidationService
 
 
-def _make_hook_definition(name: str = "pocket_detect") -> HookIdentity:
-    return HookIdentity(
-        name=name,
-        runtime=OciConfig(
-            image="ghcr.io/example/hook",
-            digest="sha256:abc123",
-        ),
+def _make_hook(name: str = "pocket_detect") -> Hook:
+    # #145: a hook's identity is name + feature; runtime lives on its release.
+    return Hook(
+        name=HookName(name),
         feature=TableFeatureSpec(
             cardinality="many",
             columns=[ColumnDef(name="score", json_type="number", required=True)],
         ),
+        live_release_id=HookReleaseId(uuid4()),
+        created_at=datetime.now(UTC),
     )
+
+
+def _make_release(name: str = "pocket_detect") -> HookRelease:
+    return HookRelease(
+        id=HookReleaseId(uuid4()),
+        hook_name=HookName(name),
+        version=1,
+        runtime=OciConfig(
+            image="ghcr.io/example/hook",
+            digest="sha256:abc123",
+        ),
+        source_ref="git:abc123",
+        built_at=datetime.now(UTC),
+    )
+
+
+def _make_registry(names: list[str]) -> AsyncMock:
+    """Fake HookRegistryService resolving each name to a Hook + live HookRelease."""
+    hooks = {HookName(n): _make_hook(n) for n in names}
+    releases = {HookName(n): _make_release(n) for n in names}
+
+    registry = AsyncMock()
+    registry.resolve_live.return_value = releases
+
+    async def get_hook(name: HookName) -> Hook | None:
+        return hooks.get(name)
+
+    registry.get_hook.side_effect = get_hook
+    return registry
 
 
 def _make_hook_result(
@@ -49,19 +81,22 @@ def _make_service(
     run_repo: AsyncMock | None = None,
     hook_runner: AsyncMock | None = None,
     hook_storage: MagicMock | None = None,
+    hook_registry: AsyncMock | None = None,
 ) -> ValidationService:
     hs = hook_storage or MagicMock()
     if not hasattr(hs, "get_hook_output_dir") or not callable(hs.get_hook_output_dir):
         hs.get_hook_output_dir = MagicMock(return_value=Path("/tmp/hooks/test"))
     if not hasattr(hs, "get_files_dir") or not callable(hs.get_files_dir):
         hs.get_files_dir = MagicMock(return_value=Path("/tmp/files/test"))
-    # write_checkpoint and write_batch_outcomes are async
+    # write_checkpoint / write_batch_outcomes / write_run_ref are async
     hs.write_checkpoint = AsyncMock()
     hs.write_batch_outcomes = AsyncMock()
+    hs.write_run_ref = AsyncMock()
     return ValidationService(
         run_repo=run_repo or AsyncMock(),
         hook_runner=hook_runner or AsyncMock(),
         hook_storage=hs,
+        hook_registry=hook_registry or _make_registry(["pocket_detect"]),
         node_domain=Domain("localhost"),
     )
 
@@ -100,12 +135,11 @@ class TestValidationServiceRunHooks:
         service = _make_service(run_repo, hook_runner)
         run = await service.create_run(inputs=_make_inputs())
 
-        hook = _make_hook_definition()
         run, results = await service.run_hooks(
             run=run,
             deposition_srn=_make_dep_srn(),
             inputs=_make_inputs(),
-            hooks=[hook],
+            hook_names=[HookName("pocket_detect")],
         )
 
         assert run.status == RunStatus.COMPLETED
@@ -118,15 +152,15 @@ class TestValidationServiceRunHooks:
         hook_runner.run.return_value = _make_hook_result(
             status=HookStatus.REJECTED,
         )
-        service = _make_service(hook_runner=hook_runner)
+        registry = _make_registry(["hook1", "hook2"])
+        service = _make_service(hook_runner=hook_runner, hook_registry=registry)
         run = await service.create_run(inputs=_make_inputs())
 
-        hooks = [_make_hook_definition("hook1"), _make_hook_definition("hook2")]
         run, results = await service.run_hooks(
             run=run,
             deposition_srn=_make_dep_srn(),
             inputs=_make_inputs(),
-            hooks=hooks,
+            hook_names=[HookName("hook1"), HookName("hook2")],
         )
 
         assert run.status == RunStatus.REJECTED
@@ -143,7 +177,7 @@ class TestValidationServiceRunHooks:
             run=run,
             deposition_srn=_make_dep_srn(),
             inputs=_make_inputs(),
-            hooks=[_make_hook_definition()],
+            hook_names=[HookName("pocket_detect")],
         )
 
         assert run.status == RunStatus.FAILED
@@ -165,35 +199,35 @@ class TestValidationServiceRunHooks:
             run=run,
             deposition_srn=dep_srn,
             inputs=_make_inputs(),
-            hooks=[_make_hook_definition()],
+            hook_names=[HookName("pocket_detect")],
         )
 
         hook_storage.get_hook_output_dir.assert_called_once_with(dep_srn, "pocket_detect")
-        # Runner receives the cold storage output_dir
+        # Runner receives (hook, release, inputs, output_dir) — output_dir is the cold path.
         call_args = hook_runner.run.call_args
-        assert call_args[0][2] == Path("/cold/hooks/pocket_detect")
+        assert call_args[0][3] == Path("/cold/hooks/pocket_detect")
 
     @pytest.mark.asyncio
     async def test_sequential_execution_order(self):
         """Hooks run in order; first pass before second starts."""
         call_order = []
 
-        async def run_hook(hook, inputs, output_dir):
-            call_order.append(hook.name)
-            return _make_hook_result(name=hook.name)
+        async def run_hook(hook, release, inputs, output_dir):
+            call_order.append(hook.name.root)
+            return _make_hook_result(name=hook.name.root)
 
         hook_runner = AsyncMock()
         hook_runner.run.side_effect = run_hook
 
-        service = _make_service(hook_runner=hook_runner)
+        registry = _make_registry(["hook_a", "hook_b"])
+        service = _make_service(hook_runner=hook_runner, hook_registry=registry)
         run = await service.create_run(inputs=_make_inputs())
 
-        hooks = [_make_hook_definition("hook_a"), _make_hook_definition("hook_b")]
         run, results = await service.run_hooks(
             run=run,
             deposition_srn=_make_dep_srn(),
             inputs=_make_inputs(),
-            hooks=hooks,
+            hook_names=[HookName("hook_a"), HookName("hook_b")],
         )
 
         assert call_order == ["hook_a", "hook_b"]
@@ -211,7 +245,7 @@ class TestValidationServiceRunHooks:
             run=run,
             deposition_srn=_make_dep_srn(),
             inputs=_make_inputs(),
-            hooks=[_make_hook_definition()],
+            hook_names=[HookName("pocket_detect")],
         )
 
         assert run.status == RunStatus.FAILED
@@ -221,13 +255,13 @@ class TestValidationServiceRunHooks:
         """OOM should be retried via HookService; PASSED on retry → COMPLETED."""
         call_count = 0
 
-        async def run_hook(hook, inputs, output_dir):
+        async def run_hook(hook, release, inputs, output_dir):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
                 raise OOMError("Hook killed by OOM")
             return HookResult(
-                hook_name=hook.name,
+                hook_name=hook.name.root,
                 status=HookStatus.PASSED,
                 duration_seconds=5.0,
             )
@@ -241,7 +275,7 @@ class TestValidationServiceRunHooks:
             run=run,
             deposition_srn=_make_dep_srn(),
             inputs=_make_inputs(),
-            hooks=[_make_hook_definition()],
+            hook_names=[HookName("pocket_detect")],
         )
 
         assert run.status == RunStatus.COMPLETED

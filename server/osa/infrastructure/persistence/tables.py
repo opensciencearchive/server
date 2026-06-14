@@ -2,7 +2,6 @@
 
 from sqlalchemy import (
     Boolean,
-    CheckConstraint,
     Column,
     DateTime,
     Float,
@@ -277,7 +276,7 @@ Index("idx_schemas_id", schemas_table.c.id)
 conventions_table = Table(
     "conventions",
     metadata,
-    # Caller-supplied ConventionId ("<slug>@<version>") — feature #145.
+    # Caller-supplied ConventionSlug ("<slug>@<version>") — feature #145.
     Column("id", String, primary_key=True),
     Column("title", String(255), nullable=False),
     Column("description", Text, nullable=True),
@@ -435,28 +434,22 @@ Index(
 )
 
 
-# Append-only execution record + per-row provenance anchor. Exactly one of
-# ingest_run_id / deposition_id is set (CHECK).
+# Append-only PURE execution record + per-row provenance anchor (design-revisions
+# §6). No execution-context columns: a feature row reaches its data origin via the
+# other arm of the join (record_srn → records.source); this is only "what code ran,
+# when, and where the logs are". Recorded as a single insert at completion, so
+# finished_at / duration_s / oom_retries are always known.
 hook_runs_table = Table(
     "hook_runs",
     metadata,
     Column("id", PGUUID(as_uuid=True), primary_key=True),  # HookRunId; stamped on feature rows
     Column("release_id", PGUUID(as_uuid=True), ForeignKey("hook_releases.id"), nullable=False),
-    Column("ingest_run_id", String, ForeignKey("ingest_runs.id"), nullable=True),
-    Column("deposition_id", String, nullable=True),
-    Column("batch_index", Integer, nullable=True),
     Column("status", String(16), nullable=False),  # HookRunStatus
     Column("started_at", DateTime(timezone=True), nullable=False),
-    Column("finished_at", DateTime(timezone=True), nullable=True),
-    Column("duration_s", Float, nullable=True),
+    Column("finished_at", DateTime(timezone=True), nullable=False),
+    Column("duration_s", Float, nullable=False),
     Column("oom_retries", Integer, nullable=False, server_default=text("0")),
     Column("log_ref", Text, nullable=True),
-    CheckConstraint(
-        "(ingest_run_id IS NOT NULL) <> (deposition_id IS NOT NULL)",
-        name="ck_hook_runs_one_context",
-    ),
 )
 
-Index("idx_hook_runs_ingest_run", hook_runs_table.c.ingest_run_id)
-Index("idx_hook_runs_deposition", hook_runs_table.c.deposition_id)
 Index("idx_hook_runs_release", hook_runs_table.c.release_id)  # recall: rows from a release

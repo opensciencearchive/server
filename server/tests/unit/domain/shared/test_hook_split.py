@@ -21,7 +21,7 @@ def _feature() -> TableFeatureSpec:
 
 def test_identity_holds_name_and_feature_only() -> None:
     ident = HookIdentity(name="pocket_detect", feature=_feature())
-    assert ident.name == "pocket_detect"
+    assert ident.name.root == "pocket_detect"
     assert ident.feature.cardinality == "many"
     # Runtime no longer lives on the identity — it moved to HookRelease.
     assert not hasattr(ident, "runtime")

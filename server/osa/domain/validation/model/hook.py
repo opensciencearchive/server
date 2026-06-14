@@ -34,8 +34,8 @@ class Hook(Aggregate):
         from osa.domain.shared.error import ReservedNameError
         from osa.domain.shared.model.reserved import RESERVED_NAMES
 
-        if self.name in RESERVED_NAMES:
-            raise ReservedNameError(self.name, "hook")
+        if self.name.root in RESERVED_NAMES:
+            raise ReservedNameError(self.name.root, "hook")
 
     def with_live_release(self, release_id: HookReleaseId) -> "Hook":
         """Return a copy whose live pointer references *release_id*."""

@@ -43,8 +43,8 @@ class PostgresFeatureStore(FeatureStore):
         self._engine = engine
         self._session = session
 
-    async def create_table(self, hook_name: str, columns: list[ColumnDef]) -> None:
-        _validate_pg_identifier(hook_name)
+    async def create_table(self, feature: str, columns: list[ColumnDef]) -> None:
+        _validate_pg_identifier(feature)
 
         async with self._engine.begin() as conn:
             # Ensure the features schema exists
@@ -53,22 +53,22 @@ class PostgresFeatureStore(FeatureStore):
             # Check for existing table in catalog — duplicate is a hard error
             existing = await conn.execute(
                 select(feature_tables_table.c.hook_name).where(
-                    feature_tables_table.c.hook_name == hook_name
+                    feature_tables_table.c.hook_name == feature
                 )
             )
             if existing.first() is not None:
-                raise ConflictError(f"Feature table already exists: {hook_name}")
+                raise ConflictError(f"Feature table already exists: {feature}")
 
             # Build dynamic table
             schema = FeatureSchema(columns=columns)
-            table = build_feature_table(hook_name, schema)
+            table = build_feature_table(feature, schema)
 
             # Create table (FK to records.srn is declared inline on the column)
             await conn.run_sync(table.metadata.create_all, checkfirst=False)
             await conn.execute(
                 feature_tables_table.insert().values(
-                    hook_name=hook_name,
-                    pg_table=feature_pg_table(hook_name),
+                    hook_name=feature,
+                    pg_table=feature_pg_table(feature),
                     feature_schema=schema.model_dump(),
                     schema_version=1,
                     created_at=datetime.now(UTC),
@@ -77,7 +77,7 @@ class PostgresFeatureStore(FeatureStore):
 
     async def insert_features(
         self,
-        hook_name: str,
+        feature: str,
         record_srn: str,
         rows: list[dict[str, Any]],
         run_id: str,
@@ -85,7 +85,7 @@ class PostgresFeatureStore(FeatureStore):
         if not rows:
             return 0
 
-        _validate_pg_identifier(hook_name)
+        _validate_pg_identifier(feature)
 
         now = datetime.now(UTC)
         enriched_rows = [
@@ -102,7 +102,7 @@ class PostgresFeatureStore(FeatureStore):
         chunk_size = 1000
         total = 0
         pg_schema = feature_pg_schema()
-        pg_table = feature_pg_table(hook_name)
+        pg_table = feature_pg_table(feature)
         async with self._engine.begin() as conn:
             # Reflect the actual table to get correct column types for casts
             metadata = sa.MetaData(schema=pg_schema)

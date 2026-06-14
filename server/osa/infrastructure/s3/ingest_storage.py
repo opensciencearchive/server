@@ -87,3 +87,9 @@ class S3IngestStorage:
 
     def hook_work_dir(self, ingest_run_id: str, batch_index: int, hook_name: str) -> Path:
         return self._layout.ingest_batch_hook_dir(ingest_run_id, batch_index, hook_name)
+
+    async def write_run_ref(self, work_dir: Path, run_id: str, release_id: str) -> None:
+        """Write run.json alongside a hook's features (per-row provenance, #145)."""
+        prefix = relative_path(work_dir, self._data_mount_path)
+        key = f"{prefix}/output/run.json"
+        await self._s3.put_object(key, json.dumps({"run_id": run_id, "release_id": release_id}))

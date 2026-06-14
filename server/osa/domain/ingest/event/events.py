@@ -2,6 +2,7 @@
 
 from osa.domain.ingest.model.ingest_run import IngestRunId
 from osa.domain.shared.event import Event, EventId
+from osa.domain.shared.model.hook import FeatureName
 
 
 class IngestRunStarted(Event):
@@ -62,7 +63,7 @@ class IngestBatchPublished(Event):
     batch_index: int
     published_srns: list[str]
     published_count: int
-    expected_features: list[str]
+    expected_features: list[FeatureName]
     upstream_to_record_srn: dict[str, str]  # upstream source ID → published record SRN
 
 

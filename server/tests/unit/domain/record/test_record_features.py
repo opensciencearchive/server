@@ -9,7 +9,7 @@ from osa.domain.record.model.aggregate import Record
 from osa.domain.record.query.get_record import GetRecord, GetRecordHandler, RecordDetail
 from osa.domain.record.service.record import RecordService
 from osa.domain.shared.model.source import DepositionSource
-from osa.domain.shared.model.srn import ConventionId, Domain, RecordSRN, SchemaId
+from osa.domain.shared.model.srn import ConventionSlug, Domain, RecordSRN, SchemaId
 from osa.infrastructure.persistence.adapter.feature_reader import PostgresFeatureReader
 
 
@@ -176,7 +176,7 @@ def _make_record() -> Record:
     return Record(
         srn=RecordSRN.parse("urn:osa:localhost:rec:abc@1"),
         source=DepositionSource(id="urn:osa:localhost:dep:dep1"),
-        convention_id=ConventionId.parse("urn:osa:localhost:conv:test@1.0.0"),
+        convention_id=ConventionSlug("test"),
         schema_id=SchemaId.parse("test@1.0.0"),
         metadata={"title": "Test"},
         published_at=datetime.now(UTC),

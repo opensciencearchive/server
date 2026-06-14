@@ -12,7 +12,8 @@ from typing import Any
 from osa.domain.deposition.model.value import DepositionFile
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.error import InfrastructureError
-from osa.domain.shared.model.srn import ConventionId, DepositionSRN
+from osa.domain.shared.model.provenance import RunRef
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
 from osa.domain.validation.model.batch_outcome import (
     BatchRecordOutcome,
     HookRecordId,
@@ -84,6 +85,21 @@ class FilesystemStorageAdapter(FileStoragePort):
     async def hook_features_exist(self, hook_output_dir: str, feature_name: str) -> bool:
         features_file = Path(hook_output_dir) / "hooks" / feature_name / "output" / "features.json"
         return features_file.exists()
+
+    async def write_run_ref(self, work_dir: Path, run_id: str, release_id: str) -> None:
+        """Write run.json alongside a hook's features (per-row provenance, #145)."""
+        output_dir = Path(work_dir) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "run.json").write_text(
+            json.dumps({"run_id": run_id, "release_id": release_id})
+        )
+
+    async def read_run_ref(self, output_dir: str, hook_name: str) -> RunRef | None:
+        run_file = Path(output_dir) / "hooks" / hook_name / "output" / "run.json"
+        if not run_file.exists():
+            return None
+        data = json.loads(run_file.read_text())
+        return RunRef(run_id=data["run_id"], release_id=data["release_id"])
 
     async def save_file(
         self,
@@ -160,15 +176,15 @@ class FilesystemStorageAdapter(FileStoragePort):
         if dep_dir.exists():
             shutil.rmtree(dep_dir)
 
-    def _conv_id(self, convention_id: ConventionId) -> str:
-        return f"{convention_id.id.root}_{convention_id.version.root}"
+    def _conv_id(self, convention_id: ConventionSlug) -> str:
+        return convention_id.root
 
-    def get_source_staging_dir(self, convention_id: ConventionId, run_id: str) -> Path:
+    def get_source_staging_dir(self, convention_id: ConventionSlug, run_id: str) -> Path:
         staging = self.base_path / "sources" / self._conv_id(convention_id) / "staging" / run_id
         staging.mkdir(parents=True, exist_ok=True)
         return staging
 
-    def get_source_output_dir(self, convention_id: ConventionId, run_id: str) -> Path:
+    def get_source_output_dir(self, convention_id: ConventionSlug, run_id: str) -> Path:
         output = self.base_path / "sources" / self._conv_id(convention_id) / "runs" / run_id
         output.mkdir(parents=True, exist_ok=True)
         return output

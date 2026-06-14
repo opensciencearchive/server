@@ -22,7 +22,7 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 from osa.domain.data.model.filter import FilterExpr
-from osa.domain.shared.model.ids import HookName
+from osa.domain.shared.model.ids import FeatureName
 from osa.domain.shared.model.srn import SchemaId
 
 
@@ -118,7 +118,7 @@ _DEFAULT_SORTS: dict[TableKind, list[SortSpec]] = {
 class QueryPlan(BaseModel):
     schema_id: SchemaId
     table_kind: TableKind
-    feature_name: HookName | None = None
+    feature_name: FeatureName | None = None
     filter: FilterExpr | None = None
     pagination: PaginationParams = Field(default_factory=PaginationParams)
     sort: list[SortSpec] = Field(default_factory=list)

@@ -5,16 +5,16 @@ from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.shared.authorization.gate import public
 from osa.domain.shared.model.hook import HookName
 from osa.domain.shared.model.source import IngesterDefinition
-from osa.domain.shared.model.srn import ConventionId, SchemaId
+from osa.domain.shared.model.srn import ConventionSlug, SchemaId
 from osa.domain.shared.query import Query, QueryHandler, Result
 
 
 class GetConvention(Query):
-    id: ConventionId
+    id: ConventionSlug
 
 
 class ConventionDetail(Result):
-    id: ConventionId
+    id: ConventionSlug
     title: str
     description: str | None
     schema_id: SchemaId

@@ -48,7 +48,7 @@ def test_hook_result_passed():
         status=HookStatus.PASSED,
         duration_seconds=12.5,
     )
-    assert result.hook_name == "detect_pockets"
+    assert result.hook_name.root == "detect_pockets"
     assert result.status == HookStatus.PASSED
     assert result.rejection_reason is None
     assert result.error_message is None

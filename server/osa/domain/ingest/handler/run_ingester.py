@@ -11,7 +11,7 @@ from osa.domain.ingest.port.storage import IngestStoragePort
 from osa.domain.ingest.service.ingest import IngestService
 from osa.domain.shared.error import NotFoundError, PermanentError
 from osa.domain.shared.event import EventHandler, EventId
-from osa.domain.shared.model.srn import ConventionId
+from osa.domain.shared.model.srn import ConventionSlug
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.ingester_runner import IngesterInputs, IngesterRunner
 from osa.infrastructure.logging import get_logger
@@ -63,7 +63,7 @@ class RunIngester(EventHandler[NextBatchRequested]):
             await self.ingest_repo.save(ingest_run)
 
         convention = await self.convention_service.get_convention(
-            ConventionId.parse(event.convention_id)
+            ConventionSlug.parse(event.convention_id)
         )
         if convention.ingester is None:
             raise NotFoundError(f"No ingester for convention {event.convention_id}")

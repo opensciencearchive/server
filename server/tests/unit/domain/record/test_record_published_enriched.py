@@ -8,7 +8,7 @@ from uuid import uuid4
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.source import DepositionSource
-from osa.domain.shared.model.srn import ConventionId, RecordSRN, SchemaId
+from osa.domain.shared.model.srn import ConventionSlug, RecordSRN, SchemaId
 
 
 SCHEMA = SchemaId.parse("test@1.0.0")
@@ -22,7 +22,7 @@ class TestRecordPublishedEnriched:
             record_srn=RecordSRN.parse("urn:osa:localhost:rec:test@1"),
             source=source,
             metadata={"title": "Test"},
-            convention_id=ConventionId.parse("urn:osa:localhost:conv:test@1.0.0"),
+            convention_id=ConventionSlug("test"),
             schema_id=SCHEMA,
             expected_features=["pocketeer"],
         )
@@ -35,11 +35,11 @@ class TestRecordPublishedEnriched:
             record_srn=RecordSRN.parse("urn:osa:localhost:rec:test@1"),
             source=DepositionSource(id="urn:osa:localhost:dep:test"),
             metadata={"title": "Test"},
-            convention_id=ConventionId.parse("urn:osa:localhost:conv:test@1.0.0"),
+            convention_id=ConventionSlug("test"),
             schema_id=SCHEMA,
             expected_features=[],
         )
-        assert event.convention_id == ConventionId.parse("urn:osa:localhost:conv:test@1.0.0")
+        assert event.convention_id == ConventionSlug("test")
 
     def test_carries_expected_features(self):
         event = RecordPublished(
@@ -47,8 +47,8 @@ class TestRecordPublishedEnriched:
             record_srn=RecordSRN.parse("urn:osa:localhost:rec:test@1"),
             source=DepositionSource(id="urn:osa:localhost:dep:test"),
             metadata={"title": "Test"},
-            convention_id=ConventionId.parse("urn:osa:localhost:conv:test@1.0.0"),
+            convention_id=ConventionSlug("test"),
             schema_id=SCHEMA,
             expected_features=["pocketeer", "qc_check"],
         )
-        assert event.expected_features == ["pocketeer", "qc_check"]
+        assert [f.root for f in event.expected_features] == ["pocketeer", "qc_check"]

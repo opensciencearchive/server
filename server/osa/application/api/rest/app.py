@@ -125,7 +125,7 @@ def create_app(
             registration, and DI resolution.
     """
     # Pydantic Settings populates from env vars at runtime
-    config = Config()  # type: ignore[call-arg]
+    config = Config()
 
     # Refuse to boot if the dev JWT secret is misconfigured for the deploy.
     _check_dev_secret_safety(config)

@@ -6,7 +6,7 @@ from osa.domain.auth.model.role import Role
 from osa.domain.deposition.model.value import DepositionFile, DepositionStatus
 from osa.domain.deposition.service.deposition import DepositionService
 from osa.domain.shared.authorization.gate import at_least
-from osa.domain.shared.model.srn import ConventionId, DepositionSRN, RecordSRN
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN, RecordSRN
 from osa.domain.shared.query import Query, QueryHandler, Result
 
 
@@ -16,7 +16,7 @@ class GetDeposition(Query):
 
 class DepositionDetail(Result):
     srn: DepositionSRN
-    convention_id: ConventionId
+    convention_id: ConventionSlug
     status: DepositionStatus
     metadata: dict[str, Any]
     files: list[DepositionFile]

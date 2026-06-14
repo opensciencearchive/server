@@ -16,7 +16,7 @@ from osa.domain.record.port.repository import RecordRepository
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.srn import (
-    ConventionId,
+    ConventionSlug,
     Domain,
     LocalId,
     RecordSRN,
@@ -59,7 +59,7 @@ class RecordService(Service):
         """Total published records on this node."""
         return await self.record_repo.count()
 
-    async def _resolve_schema_id(self, convention_id: ConventionId) -> SchemaId:
+    async def _resolve_schema_id(self, convention_id: ConventionSlug) -> SchemaId:
         """Resolve a convention to its schema id at publication time."""
         convention = await self.convention_repo.get(convention_id)
         if convention is None:

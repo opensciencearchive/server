@@ -1,7 +1,9 @@
 """Unit tests for OciHookRunner — container lifecycle, parsing, and bind-mount config."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
@@ -13,6 +15,7 @@ from osa.domain.shared.model.hook import (
     OciLimits,
     TableFeatureSpec,
 )
+from osa.domain.validation.model.hook_release import HookRelease, HookReleaseId
 from osa.domain.validation.model.hook_result import HookStatus, ProgressEntry
 from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.validation.port.hook_runner import HookInputs
@@ -25,27 +28,39 @@ from osa.infrastructure.runner_utils import (
 )
 
 
-def _make_hook(
-    name: str = "pocket_detect",
-    timeout: int = 300,
-    memory: str = "2g",
-    cpu: str = "2.0",
-    config: dict | None = None,
-) -> HookIdentity:
+def _make_hook(name: str = "pocket_detect") -> HookIdentity:
+    """Build a HookIdentity (#145: name + feature only, no runtime)."""
     return HookIdentity(
         name=name,
-        runtime=OciConfig(
-            image="ghcr.io/example/hook:v1",
-            digest="sha256:abc123",
-            config=config or {},
-            limits=OciLimits(timeout_seconds=timeout, memory=memory, cpu=cpu),
-        ),
         feature=TableFeatureSpec(
             cardinality="many",
             columns=[
                 ColumnDef(name="score", json_type="number", required=True),
             ],
         ),
+    )
+
+
+def _make_release(
+    name: str = "pocket_detect",
+    timeout: int = 300,
+    memory: str = "2g",
+    cpu: str = "2.0",
+    config: dict | None = None,
+) -> HookRelease:
+    """Build a HookRelease carrying the OCI runtime (#145)."""
+    return HookRelease(
+        id=HookReleaseId(uuid4()),
+        hook_name=name,
+        version=1,
+        runtime=OciConfig(
+            image="ghcr.io/example/hook:v1",
+            digest="sha256:abc123",
+            config=config or {},
+            limits=OciLimits(timeout_seconds=timeout, memory=memory, cpu=cpu),
+        ),
+        source_ref="git+https://example.com/hook@abc",
+        built_at=datetime.now(UTC),
     )
 
 
@@ -200,6 +215,7 @@ class TestContainerLifecycle:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
+        release = _make_release()
         inputs = HookInputs(
             records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
@@ -208,10 +224,10 @@ class TestContainerLifecycle:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        result = await runner.run(hook, inputs, output_dir)
+        result = await runner.run(hook, release, inputs, output_dir)
 
         assert result.status == HookStatus.PASSED
-        assert result.hook_name == "pocket_detect"
+        assert result.hook_name.root == "pocket_detect"
         assert result.duration_seconds > 0
         container.delete.assert_called_once_with(force=True)
 
@@ -226,6 +242,7 @@ class TestContainerLifecycle:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
+        release = _make_release()
         inputs = HookInputs(
             records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
@@ -235,7 +252,7 @@ class TestContainerLifecycle:
         output_dir.mkdir()
 
         with pytest.raises(PermanentError, match="[Ee]xit"):
-            await runner.run(hook, inputs, output_dir)
+            await runner.run(hook, release, inputs, output_dir)
 
     @pytest.mark.asyncio
     async def test_oom_killed_raises_oom_error(self, tmp_path: Path):
@@ -247,6 +264,7 @@ class TestContainerLifecycle:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
+        release = _make_release()
         inputs = HookInputs(
             records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
@@ -256,7 +274,7 @@ class TestContainerLifecycle:
         output_dir.mkdir()
 
         with pytest.raises(OOMError, match="[Oo][Oo][Mm]"):
-            await runner.run(hook, inputs, output_dir)
+            await runner.run(hook, release, inputs, output_dir)
 
     @pytest.mark.asyncio
     async def test_timeout_raises_infrastructure_error(self, tmp_path: Path):
@@ -274,7 +292,8 @@ class TestContainerLifecycle:
         container.wait.side_effect = hang
 
         runner = OciHookRunner(docker=docker)
-        hook = _make_hook(timeout=1)  # 1 second timeout
+        hook = _make_hook()
+        release = _make_release(timeout=1)  # 1 second timeout
         inputs = HookInputs(
             records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
@@ -284,7 +303,7 @@ class TestContainerLifecycle:
         output_dir.mkdir()
 
         with pytest.raises(TransientError, match="[Tt]imed out"):
-            await runner.run(hook, inputs, output_dir)
+            await runner.run(hook, release, inputs, output_dir)
 
     @pytest.mark.asyncio
     async def test_rejection_via_progress(self, tmp_path: Path):
@@ -296,6 +315,7 @@ class TestContainerLifecycle:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
+        release = _make_release()
 
         work_dir = tmp_path / "hook_work"
         work_dir.mkdir()
@@ -312,7 +332,7 @@ class TestContainerLifecycle:
             '{"step":"Validate","status":"rejected","message":"Missing atoms"}\n'
         )
 
-        result = await runner.run(hook, inputs, work_dir)
+        result = await runner.run(hook, release, inputs, work_dir)
 
         assert result.status == HookStatus.REJECTED
         assert result.rejection_reason == "Missing atoms"
@@ -329,7 +349,8 @@ class TestContainerConfig:
         container.show.return_value = {"State": {"OOMKilled": False}}
 
         runner = OciHookRunner(docker=docker)
-        hook = _make_hook(memory="4g", cpu="4.0")
+        hook = _make_hook()
+        release = _make_release(memory="4g", cpu="4.0")
         inputs = HookInputs(
             records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
@@ -338,7 +359,7 @@ class TestContainerConfig:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        await runner.run(hook, inputs, output_dir)
+        await runner.run(hook, release, inputs, output_dir)
 
         # Inspect the config passed to containers.create
         call_args = docker.containers.create.call_args
@@ -364,6 +385,7 @@ class TestContainerConfig:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
+        release = _make_release()
         inputs = HookInputs(
             records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
@@ -372,7 +394,7 @@ class TestContainerConfig:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        await runner.run(hook, inputs, output_dir)
+        await runner.run(hook, release, inputs, output_dir)
 
         call_args = docker.containers.create.call_args
         config = call_args[0][0] if call_args[0] else call_args[1].get("config", {})
@@ -392,6 +414,7 @@ class TestContainerConfig:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
+        release = _make_release()
         files_dir = tmp_path / "files"
         files_dir.mkdir()
         inputs = HookInputs(
@@ -403,7 +426,7 @@ class TestContainerConfig:
         work_dir = tmp_path / "hook_work"
         work_dir.mkdir()
 
-        await runner.run(hook, inputs, work_dir)
+        await runner.run(hook, release, inputs, work_dir)
 
         call_args = docker.containers.create.call_args
         config = call_args[0][0] if call_args[0] else call_args[1].get("config", {})
@@ -430,6 +453,7 @@ class TestContainerConfig:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
+        release = _make_release()
         inputs = HookInputs(
             records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
@@ -438,7 +462,7 @@ class TestContainerConfig:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        await runner.run(hook, inputs, output_dir)
+        await runner.run(hook, release, inputs, output_dir)
 
         call_args = docker.containers.create.call_args
         config = call_args[0][0] if call_args[0] else call_args[1].get("config", {})
@@ -461,6 +485,7 @@ class TestContainerConfig:
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
+        release = _make_release()
         inputs = HookInputs(
             records=[HookRecord(id="test", metadata={})],
             run_id="test-run",
@@ -470,4 +495,4 @@ class TestContainerConfig:
         output_dir.mkdir()
 
         with pytest.raises(TransientError, match="Docker error"):
-            await runner.run(hook, inputs, output_dir)
+            await runner.run(hook, release, inputs, output_dir)
