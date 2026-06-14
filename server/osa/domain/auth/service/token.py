@@ -97,14 +97,16 @@ class TokenService(Service):
             jwt.InvalidTokenError: If token is invalid or expired
         """
         if self._extra_issuer is not None:
-            # Read `iss` without verifying — routing only; the chosen branch
-            # below performs the real signature + audience verification.
+            # Read `iss` without verifying — routing only; the branch below
+            # performs the real signature + audience verification. The algorithm
+            # is pinned to EdDSA (Ed25519): the token header's `alg` is never
+            # trusted, so a token can't downgrade to `none`/HS256.
             unverified = jwt.decode(token, options={"verify_signature": False})
             if unverified.get("iss") == self._extra_issuer.issuer:
                 return jwt.decode(
                     token,
                     self._extra_issuer.public_key,
-                    algorithms=[self._extra_issuer.algorithm],
+                    algorithms=["EdDSA"],
                     audience=self._extra_issuer.audience,
                     issuer=self._extra_issuer.issuer,
                 )

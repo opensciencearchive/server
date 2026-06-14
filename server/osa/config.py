@@ -230,13 +230,16 @@ class ExtraIssuerConfig(BaseModel):
 
     When absent, token validation is byte-identical to the single-HS256-secret
     path (SC-007). When present, tokens whose ``iss`` matches ``issuer`` are
-    verified against ``public_key`` (asymmetric, verify-only) and authorized by
-    the scopes parsed from ``scope_claim`` rather than DB roles.
+    verified against ``public_key`` (Ed25519, verify-only) and authorized by the
+    scopes parsed from ``scope_claim`` rather than DB roles.
+
+    The signature algorithm is fixed to **EdDSA (Ed25519)** — not configurable.
+    Pinning a single asymmetric algorithm removes a whole class of misconfig /
+    downgrade footguns (no ``none``, no HS256-treats-the-PEM-as-a-shared-secret).
     """
 
     issuer: str  # expected `iss` claim
-    public_key: str  # PEM, verify-only (RS256 / EdDSA)
-    algorithm: str = "RS256"  # RS256 | EdDSA
+    public_key: str  # Ed25519 public key, PEM (verify-only)
     audience: str  # expected `aud`
     scope_claim: str = "scope"  # "scope" (space-delimited) or "scp" (array)
 
