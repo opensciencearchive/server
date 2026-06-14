@@ -399,16 +399,26 @@ Index(
 # ============================================================================
 # A hook's stable identity + fixed output contract + live-release pointer.
 # The circular hooks.live_release_id ↔ hook_releases.hook_name dependency is
-# broken by using a NOT-VALID-at-create deferred ordering: the release is
-# inserted first, then the pointer is set in the same transaction.
+# broken with a DEFERRABLE, use_alter FK: SQLAlchemy/Alembic emit it as a
+# separate ALTER after both tables exist, and the release is inserted before the
+# pointer is set within one transaction.
 hooks_table = Table(
     "hooks",
     metadata,
     Column("name", String(40), primary_key=True),  # HookName, globally unique
     Column("feature_spec", JSONB, nullable=False),  # serialized TableFeatureSpec
     Column(
-        "live_release_id", PGUUID(as_uuid=True), nullable=True
-    ),  # FK added in migration (deferrable)
+        "live_release_id",
+        PGUUID(as_uuid=True),
+        ForeignKey(
+            "hook_releases.id",
+            name="fk_hooks_live_release_id",
+            use_alter=True,
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        nullable=True,
+    ),
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 

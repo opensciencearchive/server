@@ -19,7 +19,7 @@ from osa.domain.shared.authorization.gate import Public
 from osa.domain.shared.error import AuthorizationError, NotFoundError
 from osa.domain.shared.model.hook import ColumnDef, HookName, OciConfig, OciLimits, TableFeatureSpec
 from osa.domain.validation.model.hook import Hook
-from osa.domain.validation.model.hook_release import HookRelease, HookReleaseId
+from osa.domain.validation.model.hook_release import HookRelease, HookReleaseId, ReleaseOutcome
 
 NAME = HookName("pocket_detect")
 
@@ -65,8 +65,7 @@ class TestCreateReleaseHandler:
 
         new = _release(2, "sha256:new")
         service = AsyncMock()
-        service.list_releases.return_value = [_release(1, "sha256:old")]
-        service.create_release.return_value = new
+        service.create_release.return_value = ReleaseOutcome(release=new, created=True)
         service.get_hook.return_value = _hook(live=new.id)
 
         handler = CreateReleaseHandler(principal=_principal(), service=service)
@@ -87,8 +86,7 @@ class TestCreateReleaseHandler:
 
         existing = _release(1, "sha256:old")
         service = AsyncMock()
-        service.list_releases.return_value = [existing]
-        service.create_release.return_value = existing
+        service.create_release.return_value = ReleaseOutcome(release=existing, created=False)
         service.get_hook.return_value = _hook(live=existing.id)
 
         handler = CreateReleaseHandler(principal=_principal(), service=service)

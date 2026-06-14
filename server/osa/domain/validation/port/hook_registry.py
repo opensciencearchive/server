@@ -14,7 +14,7 @@ from typing import Protocol
 from osa.domain.shared.model.hook import HookName, OciConfig, TableFeatureSpec
 from osa.domain.shared.port import Port
 from osa.domain.validation.model.hook import Hook
-from osa.domain.validation.model.hook_release import HookRelease
+from osa.domain.validation.model.hook_release import HookRelease, ReleaseOutcome
 from osa.domain.validation.model.hook_run import HookRun
 
 
@@ -35,13 +35,15 @@ class HookRegistry(Port, Protocol):
         runtime: OciConfig,
         source_ref: str,
         built_by: str | None,
-    ) -> HookRelease:
+    ) -> ReleaseOutcome:
         """Mint the next release for an existing hook and advance the live pointer.
 
         Idempotent on ``(name, digest)``: re-submitting an existing digest returns
         the existing release without minting a new version or moving the pointer
-        (FR-006/R5). Version assignment + pointer advance happen under a row lock
-        on the ``hooks`` row so concurrent submitters serialize (FR-009/R7).
+        (FR-006/R5), with ``ReleaseOutcome.created == False``. Version assignment +
+        pointer advance happen under a row lock on the ``hooks`` row so concurrent
+        submitters serialize (FR-009/R7); ``created`` is decided under that same
+        lock so it is race-free.
         """
         ...
 

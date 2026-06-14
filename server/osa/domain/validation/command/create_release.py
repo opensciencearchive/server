@@ -66,13 +66,13 @@ class CreateReleaseHandler(CommandHandler[CreateRelease, ReleaseCreated]):
     async def run(self, cmd: CreateRelease) -> ReleaseCreated:
         built_by = str(self.principal.user_id) if self.principal.user_id else None
 
-        # Whether this is a brand-new version (201) or an idempotent no-op (200)
-        # for a digest already present. Read before minting; the adapter's row
-        # lock still guarantees gap-free versions regardless of this hint.
-        seen_digests = {r.runtime.digest for r in await self.service.list_releases(cmd.name)}
-        release = await self.service.create_release(
+        # `created` (201 new version vs 200 idempotent no-op) is decided inside
+        # the registry's row lock, so it is correct under concurrent identical
+        # submissions — no racy pre-read here.
+        outcome = await self.service.create_release(
             cmd.name, cmd.to_runtime(), cmd.source_ref, built_by
         )
+        release = outcome.release
         hook = await self.service.get_hook(cmd.name)
         is_live = hook is not None and hook.live_release_id == release.id
 
@@ -84,5 +84,5 @@ class CreateReleaseHandler(CommandHandler[CreateRelease, ReleaseCreated]):
             source_ref=release.source_ref,
             built_at=release.built_at,
             live=is_live,
-            created=cmd.digest not in seen_digests,
+            created=outcome.created,
         )

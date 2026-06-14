@@ -9,6 +9,7 @@ aggregate selects which release is currently active.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, NewType
 from uuid import UUID
@@ -54,3 +55,17 @@ class HookRelease(Entity):
         """Return an in-memory copy with 2x the current memory limit."""
         doubled = format_memory(parse_memory(self.runtime.limits.memory) * 2)
         return self.with_memory(doubled)
+
+
+@dataclass(frozen=True)
+class ReleaseOutcome:
+    """Result of minting a release.
+
+    ``created`` is ``True`` when a new version was minted, ``False`` for an
+    idempotent no-op (the digest already existed). It is decided *inside* the
+    registry's row lock, so it is correct under concurrent identical submissions
+    — the caller (router) maps it to HTTP 201 vs 200 without a racy pre-check.
+    """
+
+    release: HookRelease
+    created: bool

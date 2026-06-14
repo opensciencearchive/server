@@ -99,13 +99,13 @@ async def seed_hook_run(
 
         registry = PostgresHookRegistry(session)
         await registry.upsert_identity(HookName(feature_name), feature)
-        release = await registry.create_release(
+        outcome = await registry.create_release(
             HookName(feature_name), runtime, source_ref="abc1234", built_by=None
         )
         now = datetime.now(UTC)
         run = HookRun(
             id=HookRunId(uuid4()),
-            release_id=release.id,
+            release_id=outcome.release.id,
             status=HookRunStatus.PASSED,
             started_at=now,
             finished_at=now,

@@ -23,7 +23,7 @@ from osa.domain.shared.model.hook import (
     TableFeatureSpec,
 )
 from osa.domain.validation.model.hook import Hook
-from osa.domain.validation.model.hook_release import HookRelease, HookReleaseId
+from osa.domain.validation.model.hook_release import HookRelease, HookReleaseId, ReleaseOutcome
 from osa.domain.validation.model.hook_run import HookRun
 from osa.domain.validation.port.hook_registry import HookRegistry
 from osa.infrastructure.persistence.tables import (
@@ -94,7 +94,7 @@ class PostgresHookRegistry(HookRegistry):
         runtime: OciConfig,
         source_ref: str,
         built_by: str | None,
-    ) -> HookRelease:
+    ) -> ReleaseOutcome:
         # Row-lock the hook so concurrent releases serialize (R7). Also asserts
         # the hook exists.
         locked = await self.session.execute(
@@ -105,7 +105,8 @@ class PostgresHookRegistry(HookRegistry):
             raise NotFoundError(f"Hook not found: {name}")
 
         # Idempotency on (hook_name, digest): return the existing release, no
-        # new version, pointer unchanged (R5).
+        # new version, pointer unchanged (R5). Decided under the row lock, so
+        # `created` is race-free under concurrent identical submissions.
         dup = await self.session.execute(
             select(hook_releases_table).where(
                 and_(
@@ -116,7 +117,7 @@ class PostgresHookRegistry(HookRegistry):
         )
         dup_row = dup.mappings().first()
         if dup_row is not None:
-            return self._to_release(dict(dup_row))
+            return ReleaseOutcome(release=self._to_release(dict(dup_row)), created=False)
 
         max_version = await self.session.scalar(
             select(func.coalesce(func.max(hook_releases_table.c.version), 0)).where(
@@ -150,7 +151,7 @@ class PostgresHookRegistry(HookRegistry):
 
         created = await self.get_release(name, next_version)
         assert created is not None
-        return created
+        return ReleaseOutcome(release=created, created=True)
 
     async def set_live(self, name: HookName, version: int) -> Hook:
         locked = await self.session.execute(

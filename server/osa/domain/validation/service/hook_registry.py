@@ -11,7 +11,7 @@ from __future__ import annotations
 from osa.domain.shared.model.hook import HookName, OciConfig, TableFeatureSpec
 from osa.domain.shared.service import Service
 from osa.domain.validation.model.hook import Hook
-from osa.domain.validation.model.hook_release import HookRelease
+from osa.domain.validation.model.hook_release import HookRelease, ReleaseOutcome
 from osa.domain.validation.model.hook_run import HookRun
 from osa.domain.validation.port.hook_registry import HookRegistry
 
@@ -29,8 +29,13 @@ class HookRegistryService(Service):
         runtime: OciConfig,
         source_ref: str,
         built_by: str | None = None,
-    ) -> HookRelease:
-        """Mint vN+1 for an existing hook (idempotent on digest); advance live."""
+    ) -> ReleaseOutcome:
+        """Mint vN+1 for an existing hook (idempotent on digest); advance live.
+
+        Returns a :class:`ReleaseOutcome` whose ``created`` flag (decided under
+        the registry's row lock) distinguishes a new version from an idempotent
+        no-op.
+        """
         return await self.registry.create_release(name, runtime, source_ref, built_by)
 
     async def set_live(self, name: HookName, version: int) -> Hook:
