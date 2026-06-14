@@ -70,7 +70,10 @@ class AuthProvider(Provider):
     @provide(scope=Scope.APP)
     def get_token_service(self, config: Config) -> TokenService:
         """Provide TokenService (stateless, only needs config)."""
-        return TokenService(_config=config.auth.jwt)
+        return TokenService(
+            _config=config.auth.jwt,
+            _extra_issuer=config.auth.extra_issuer,
+        )
 
     @provide(scope=Scope.UOW)
     def get_auth_service(

@@ -12,7 +12,7 @@ from typing import Any
 
 import jwt
 
-from osa.config import JwtConfig
+from osa.config import ExtraIssuerConfig, JwtConfig
 from osa.domain.auth.model.value import OAuthStateData, ProviderIdentity, UserId
 from osa.domain.shared.service import Service
 
@@ -31,6 +31,14 @@ class TokenService(Service):
     """
 
     _config: JwtConfig
+    # Optional second issuer for M2M tokens (#145, US5). None → single-issuer
+    # behaviour, byte-identical to before.
+    _extra_issuer: ExtraIssuerConfig | None = None
+
+    @property
+    def extra_issuer(self) -> ExtraIssuerConfig | None:
+        """The configured M2M issuer, if any (read by identity resolution)."""
+        return self._extra_issuer
 
     def create_access_token(
         self,
@@ -73,6 +81,12 @@ class TokenService(Service):
     def validate_access_token(self, token: str) -> dict[str, Any]:
         """Validate and decode a JWT access token.
 
+        Routes on the ``iss`` claim (#145, US5): when a second issuer is
+        configured and the token's ``iss`` matches it, verify against that
+        issuer's public key (asymmetric, verify-only) and audience. Otherwise —
+        and always when no second issuer is configured — verify with the primary
+        HS256 secret, byte-identical to the single-issuer path (SC-007).
+
         Args:
             token: The JWT string to validate
 
@@ -82,6 +96,19 @@ class TokenService(Service):
         Raises:
             jwt.InvalidTokenError: If token is invalid or expired
         """
+        if self._extra_issuer is not None:
+            # Read `iss` without verifying — routing only; the chosen branch
+            # below performs the real signature + audience verification.
+            unverified = jwt.decode(token, options={"verify_signature": False})
+            if unverified.get("iss") == self._extra_issuer.issuer:
+                return jwt.decode(
+                    token,
+                    self._extra_issuer.public_key,
+                    algorithms=[self._extra_issuer.algorithm],
+                    audience=self._extra_issuer.audience,
+                    issuer=self._extra_issuer.issuer,
+                )
+
         return jwt.decode(
             token,
             self._config.secret,

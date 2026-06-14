@@ -3,12 +3,11 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from osa.domain.auth.model.principal import Principal
-from osa.domain.auth.model.role import Role
 from osa.domain.deposition.model.deploy import HookDeploy
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.semantics.model.value import FieldDefinition
-from osa.domain.shared.authorization.gate import at_least
+from osa.domain.shared.authorization.gate import requires_scope
 from osa.domain.shared.command import Command, CommandHandler, Result
 from osa.domain.shared.model.hook import (
     HookIdentity,
@@ -92,8 +91,9 @@ class ConventionCreated(Result):
 
 class DeployConventionHandler(CommandHandler[DeployConvention, ConventionCreated]):
     # Conventions are curated registry artifacts; deploy is an admin/automation
-    # operation. US5 narrows this from admin-only to the ``conventions:write`` scope.
-    __auth__ = at_least(Role.ADMIN)
+    # operation. Authorized by the ``conventions:write`` M2M scope OR an ADMIN
+    # role (#145, US5).
+    __auth__ = requires_scope("conventions:write")
     principal: Principal
     convention_service: ConventionService
 

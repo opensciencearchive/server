@@ -2,7 +2,7 @@
 
 import logging
 from typing import Any
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import jwt
 from sqlalchemy import select
@@ -22,6 +22,21 @@ from osa.infrastructure.persistence.tables import role_assignments_table
 from osa.util.di.scope import Scope as OSAScope
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_scopes(payload: dict[str, Any], scope_claim: str) -> frozenset[str]:
+    """Parse OAuth scopes from an M2M token (#145, US5).
+
+    Tolerant of the two common encodings: a single space-delimited string
+    (``"scope": "conventions:write hooks:write"``) or an array
+    (``"scp": ["conventions:write"]``).
+    """
+    raw = payload.get(scope_claim)
+    if isinstance(raw, str):
+        return frozenset(raw.split())
+    if isinstance(raw, (list, tuple)):
+        return frozenset(str(s) for s in raw)
+    return frozenset()
 
 
 async def resolve_identity(
@@ -60,6 +75,22 @@ async def resolve_identity(
         # We log only the exception class, never its message or the token.
         logger.warning("auth: rejected invalid token (%s)", type(e).__name__)
         return Anonymous()
+
+    # M2M path (#145, US5): a token from the configured second issuer is
+    # authorized by scopes, not DB roles. Its `sub` is a client identifier, not
+    # an internal user UUID, so derive a stable synthetic UserId from issuer+sub
+    # for provenance (`built_by`) and keep roles empty.
+    extra_issuer = token_service.extra_issuer
+    if extra_issuer is not None and payload.get("iss") == extra_issuer.issuer:
+        client = str(payload.get("sub", ""))
+        scopes = _parse_scopes(payload, extra_issuer.scope_claim)
+        logger.debug("auth: M2M credential (client=%s, scopes=%s)", client, sorted(scopes))
+        return Principal(
+            user_id=UserId(uuid5(NAMESPACE_URL, f"{extra_issuer.issuer}#{client}")),
+            provider_identity=ProviderIdentity(provider="m2m", external_id=client),
+            roles=frozenset(),
+            scopes=scopes,
+        )
 
     user_id = UserId(UUID(payload["sub"]))
 
