@@ -30,7 +30,7 @@ from osa.infrastructure.persistence.repository.schema import (
 )
 from osa.infrastructure.persistence.tables import conventions_table
 
-from tests.integration.conftest import seed_record
+from tests.integration.conftest import seed_hook_run, seed_record
 
 # create_app() reads Config() at import/call time; localhost domain needs a base URL.
 os.environ.setdefault("OSA_BASE_URL", "http://localhost:8000")
@@ -85,33 +85,38 @@ HOOK = "chem_features"
 async def _seed_feature(
     engine: AsyncEngine, session: AsyncSession, record_srn: RecordSRN, n: int
 ) -> None:
-    """Register a hook on the schema and populate ``features.chem_features``."""
+    """Register a hook on the schema and populate ``features.chem_features``.
+
+    Feature #145: the convention's ``hooks`` column is a JSON list of plain hook
+    **name strings** (registry refs), and every feature row carries a NOT NULL
+    ``run_id`` FK to ``hook_runs.id`` — so the provenance chain is seeded first.
+    """
+    columns = [
+        ColumnDef(name="score", json_type="number", required=True),
+        ColumnDef(name="label", json_type="string", required=False),
+    ]
     await session.execute(
         conventions_table.insert().values(
-            srn=f"urn:osa:localhost:conv:{HOOK}@1.0.0",
+            id=f"{HOOK}-conv",
             title="compound conv",
             description=None,
             schema_id=SCHEMA.id.root,
             schema_version=SCHEMA.version.root,
             file_requirements={},
-            hooks=[{"name": HOOK}],
+            hooks=[HOOK],
             source=None,
             created_at=datetime.now(UTC),
         )
     )
     await session.commit()
+    run_id = await seed_hook_run(engine, feature_name=HOOK, columns=columns)
     feature_store = PostgresFeatureStore(engine, session)
-    await feature_store.create_table(
-        HOOK,
-        [
-            ColumnDef(name="score", json_type="number", required=True),
-            ColumnDef(name="label", json_type="string", required=False),
-        ],
-    )
+    await feature_store.create_table(HOOK, columns)
     await feature_store.insert_features(
         HOOK,
         str(record_srn),
         [{"score": float(i), "label": f"l{i}"} for i in range(n)],
+        run_id,
     )
 
 

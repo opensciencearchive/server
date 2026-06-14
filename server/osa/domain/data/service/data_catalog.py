@@ -83,7 +83,12 @@ class DataCatalogService(Service):
         """
         schema_id = await self.resolve_schema(schema)
         manifest = await self.get_schema_manifest(schema_id)
-        name = "records" if table_kind == TableKind.RECORDS else feature_name
+        # TableResource.name is a plain str ("records" or a feature-table name).
+        name = (
+            "records"
+            if table_kind == TableKind.RECORDS
+            else (feature_name.root if feature_name is not None else None)
+        )
         resource = next(
             (tr for tr in manifest.table_resources if tr.name == name and tr.kind == table_kind),
             None,

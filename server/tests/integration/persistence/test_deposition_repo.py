@@ -10,7 +10,7 @@ from osa.domain.auth.model.identity import System
 from osa.domain.auth.model.value import SYSTEM_USER_ID, UserId
 from osa.domain.deposition.model.aggregate import Deposition
 from osa.domain.deposition.model.value import DepositionFile, DepositionStatus
-from osa.domain.shared.model.srn import ConventionId, DepositionSRN
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
 from osa.infrastructure.persistence.repository.deposition import (
     PostgresDepositionRepository,
 )
@@ -27,7 +27,7 @@ def _make_deposition(
     now = datetime.now(UTC)
     return Deposition(
         srn=DepositionSRN.parse(dep_id),
-        convention_id=ConventionId.parse("urn:osa:localhost:conv:test-conv@1.0.0"),
+        convention_id=ConventionSlug.parse("test-conv"),
         status=status,
         metadata=metadata or {"title": "Test Deposition"},
         files=[],

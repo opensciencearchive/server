@@ -4,6 +4,7 @@ import json
 import os
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -14,6 +15,13 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from osa.domain.shared.model.hook import (
+    ColumnDef,
+    OciConfig,
+    TableFeatureSpec,
+)
+from osa.domain.validation.model.hook_run import HookRun, HookRunId, HookRunStatus
+from osa.infrastructure.persistence.repository.hook_registry import PostgresHookRegistry
 from osa.infrastructure.persistence.seed import ensure_system_user
 
 
@@ -63,6 +71,53 @@ async def seed_record(
         )
 
 
+async def seed_hook_run(
+    engine: AsyncEngine,
+    *,
+    feature_name: str,
+    columns: list[ColumnDef] | None = None,
+) -> str:
+    """Seed the per-row provenance chain for a feature table and return a real
+    ``hook_runs.id`` (as a string) usable as a feature row's ``run_id``.
+
+    Feature #145 made every ``features.*`` row carry a NOT NULL ``run_id`` that
+    is a FK to ``hook_runs.id``. To insert feature rows in a test the chain
+    ``hook identity → release → run`` must exist first. Built via the registry
+    adapter so the FK is satisfied with real ids.
+    """
+    if columns is None:
+        columns = [
+            ColumnDef(name="score", json_type="number", required=True),
+            ColumnDef(name="label", json_type="string", required=False),
+        ]
+    feature = TableFeatureSpec(cardinality="many", columns=columns)
+    runtime = OciConfig(image="ghcr.io/example/hook:latest", digest=f"sha256:{uuid4().hex}")
+
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        from osa.domain.shared.model.hook import HookName
+
+        registry = PostgresHookRegistry(session)
+        await registry.upsert_identity(HookName(feature_name), feature)
+        release = await registry.create_release(
+            HookName(feature_name), runtime, source_ref="abc1234", built_by=None
+        )
+        now = datetime.now(UTC)
+        run = HookRun(
+            id=HookRunId(uuid4()),
+            release_id=release.id,
+            status=HookRunStatus.PASSED,
+            started_at=now,
+            finished_at=now,
+            duration_s=0.1,
+            oom_retries=0,
+            log_ref=None,
+        )
+        await registry.record_run(run)
+        await session.commit()
+        return str(run.id)
+
+
 @pytest_asyncio.fixture
 async def pg_engine():
     """Per-test async engine pointing at osa_test."""
@@ -90,7 +145,8 @@ async def pg_session(pg_engine: AsyncEngine):
             text(
                 "TRUNCATE TABLE depositions, conventions, schemas, ontologies, "
                 "ontology_terms, events, deliveries, records, validation_runs, "
-                "feature_tables, metadata_tables, users, identities, refresh_tokens, "
+                "feature_tables, metadata_tables, hooks, hook_releases, hook_runs, "
+                "users, identities, refresh_tokens, "
                 "role_assignments CASCADE"
             )
         )
