@@ -117,6 +117,8 @@ class ValidationService(Service):
                         started_at=started_at,
                         finished_at=finished_at,
                         duration_s=(finished_at - started_at).total_seconds(),
+                        # The run raised (no HookResult), so the retry count isn't
+                        # available on this failure path; diagnose via log_ref.
                         oom_retries=0,
                     )
                 )
@@ -134,7 +136,7 @@ class ValidationService(Service):
                     started_at=started_at,
                     finished_at=finished_at,
                     duration_s=result.duration_seconds,
-                    oom_retries=0,
+                    oom_retries=result.oom_retries,
                 )
             )
             hook_results.append(result)

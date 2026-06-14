@@ -30,3 +30,7 @@ class HookResult(ValueObject):
     error_message: str | None = None
     progress: list[ProgressEntry] = Field(default_factory=list)
     duration_seconds: float
+    oom_retries: int = 0
+    """Number of times the run was retried with doubled memory after an OOM
+    eviction (#145). 0 for a clean single-attempt run. Surfaced into the
+    ``hook_runs`` provenance record."""

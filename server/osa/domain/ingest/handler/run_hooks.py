@@ -153,14 +153,16 @@ class RunHooks(EventHandler[IngesterBatchReady]):
         # write run.json into each hook's output dir so the feature-insert handler
         # can stamp feature.run_id without a DB lookup (design-revisions §6).
         finished_at = datetime.now(UTC)
-        status_by_hook = {r.hook_name: r.status for r in results}
-        duration_by_hook = {r.hook_name: r.duration_seconds for r in results}
+        result_by_hook = {r.hook_name: r for r in results}
         for hook, release in pairs:
             run_id = run_id_by_hook[hook.name]
-            result_status = status_by_hook.get(hook.name)
+            # Absent result → the hook produced nothing this batch (e.g. an
+            # OOM-exhausted batch that raised); record an ERROR run. The per-hook
+            # retry count isn't surfaced through that failure path, so it stays 0.
+            result = result_by_hook.get(hook.name)
             run_status = (
-                HookRunStatus.from_hook_status(result_status)
-                if result_status is not None
+                HookRunStatus.from_hook_status(result.status)
+                if result is not None
                 else HookRunStatus.ERROR
             )
             await self.ingest_storage.write_run_ref(
@@ -173,8 +175,8 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                     status=run_status,
                     started_at=started_at,
                     finished_at=finished_at,
-                    duration_s=duration_by_hook.get(hook.name, 0.0),
-                    oom_retries=0,
+                    duration_s=result.duration_seconds if result is not None else 0.0,
+                    oom_retries=result.oom_retries if result is not None else 0,
                 )
             )
 

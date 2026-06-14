@@ -268,7 +268,8 @@ class TestValidationServiceRunHooks:
 
         hook_runner = AsyncMock()
         hook_runner.run.side_effect = run_hook
-        service = _make_service(hook_runner=hook_runner)
+        registry = _make_registry(["pocket_detect"])
+        service = _make_service(hook_runner=hook_runner, hook_registry=registry)
         run = await service.create_run(inputs=_make_inputs())
 
         run, results = await service.run_hooks(
@@ -280,3 +281,7 @@ class TestValidationServiceRunHooks:
 
         assert run.status == RunStatus.COMPLETED
         assert call_count == 2
+        # The one OOM retry is threaded into the provenance record (#145, fix #3).
+        registry.record_run.assert_awaited_once()
+        recorded_run = registry.record_run.await_args.args[0]
+        assert recorded_run.oom_retries == 1

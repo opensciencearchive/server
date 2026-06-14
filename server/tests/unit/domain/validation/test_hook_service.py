@@ -136,6 +136,7 @@ class TestHookServiceNoOOM:
         result = await service.run_hook(hook, release, _inputs(records), work_dir)
 
         assert result.status == HookStatus.PASSED
+        assert result.oom_retries == 0  # clean run records no retries (#145)
         runner.run.assert_called_once()
 
 
@@ -184,10 +185,52 @@ class TestHookServiceOOMRetry:
         result = await service.run_hook(hook, release, _inputs(records), work_dir)
 
         assert result.status == HookStatus.PASSED
+        assert result.oom_retries == 1  # one OOM retry surfaced into provenance (#145)
         assert runner.run.call_count == 2
         # Second call should have doubled memory — escalation lives on the release (#145).
         second_call_release = runner.run.call_args_list[1][0][1]
         assert second_call_release.runtime.limits.memory == "2g"
+
+    @pytest.mark.asyncio
+    async def test_oom_retries_counted_across_multiple_retries(self, tmp_path: Path):
+        """Two OOMs then success → oom_retries == 2, memory doubled twice."""
+        from osa.domain.validation.service.hook import HookService
+
+        hook = _make_hook()
+        release = _make_release(memory="1g")
+        records = _make_records(1)
+        work_dir = tmp_path / "hook_out"
+        work_dir.mkdir()
+        output_dir = work_dir / "output"
+        output_dir.mkdir(parents=True)
+
+        import json
+
+        call_count = 0
+
+        async def mock_run(h, rel, inputs, wd):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 2:
+                raise _oom_error()
+            features_file = output_dir / "features.jsonl"
+            features_file.write_text(
+                json.dumps({"id": records[0].id, "features": [{"score": 0.8}]}) + "\n"
+            )
+            return _passed_result()
+
+        runner = AsyncMock()
+        runner.run.side_effect = mock_run
+        storage = FakeHookStorage()
+
+        service = HookService(hook_runner=runner, hook_storage=storage)
+        result = await service.run_hook(hook, release, _inputs(records), work_dir)
+
+        assert result.status == HookStatus.PASSED
+        assert result.oom_retries == 2
+        assert runner.run.call_count == 3  # 1 initial + 2 retries
+        # Memory doubled twice: 1g → 2g → 4g.
+        assert runner.run.call_args_list[2][0][1].runtime.limits.memory == "4g"
 
 
 class TestHookServiceOOMExhaustion:

@@ -75,6 +75,7 @@ class HookService(Service):
 
         current_release = release
         total_duration = 0.0
+        oom_retries = 0
 
         for attempt in range(1 + MAX_OOM_RETRIES):
             attempt_inputs = HookInputs(
@@ -102,6 +103,7 @@ class HookService(Service):
 
                 if attempt < MAX_OOM_RETRIES:
                     current_release = current_release.with_doubled_memory()
+                    oom_retries += 1
                     log.info(
                         "OOM retry {attempt}/{max_retries} for hook={hook_name}, memory={memory}, remaining={remaining} records",
                         attempt=attempt + 1,
@@ -140,6 +142,7 @@ class HookService(Service):
                     status=HookStatus.REJECTED,
                     rejection_reason=result.rejection_reason,
                     duration_seconds=total_duration,
+                    oom_retries=oom_retries,
                 )
             else:
                 # Success (PASSED)
@@ -153,6 +156,7 @@ class HookService(Service):
             hook_name=hook.name,
             status=HookStatus.PASSED,
             duration_seconds=total_duration,
+            oom_retries=oom_retries,
         )
 
     async def run_hooks_for_batch(
