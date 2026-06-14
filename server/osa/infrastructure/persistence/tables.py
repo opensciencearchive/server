@@ -77,10 +77,14 @@ records_table = Table(
 
 Index("idx_records_convention_id", records_table.c.convention_id)
 Index("idx_records_schema_id", records_table.c.schema_id)
+# Expression must be the raw ``->>`` text accessor (NOT .as_string(), which adds a
+# redundant CAST) so it matches the bulk-publish ON CONFLICT ((source->>'type'),
+# (source->>'id')) — Postgres matches ON CONFLICT to a unique index by exact
+# expression.
 Index(
     "uq_records_source",
-    records_table.c.source["type"].as_string(),
-    records_table.c.source["id"].as_string(),
+    records_table.c.source["type"].astext,
+    records_table.c.source["id"].astext,
     unique=True,
 )
 Index("idx_records_published_at", records_table.c.published_at)
