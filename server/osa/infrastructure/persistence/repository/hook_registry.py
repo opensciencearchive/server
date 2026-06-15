@@ -13,9 +13,10 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import and_, func, insert, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from osa.domain.shared.error import ConflictError, NotFoundError
+from osa.domain.shared.error import ConflictError, InfrastructureError, NotFoundError
 from osa.domain.shared.model.hook import (
     HookName,
     OciConfig,
@@ -65,27 +66,32 @@ class PostgresHookRegistry(HookRegistry):
         )
 
     async def upsert_identity(self, name: HookName, feature: TableFeatureSpec) -> Hook:
-        existing = await self._get_hook_row(name)
-        if existing is not None:
-            current = TableFeatureSpec.model_validate(existing["feature_spec"])
-            if current != feature:
-                raise ConflictError(
-                    f"Hook {name!r} already exists with a different feature contract; "
-                    "the output contract is fixed across releases"
-                )
-            return self._to_hook(existing)
-
+        # Race-safe create-if-absent: two concurrent identical deploys can't
+        # cause a primary-key violation. ON CONFLICT DO NOTHING serializes on
+        # PG's internal lock (blocking on a concurrent uncommitted insert until
+        # it resolves), so the loser no-ops instead of erroring. We then read the
+        # winning row back and enforce the fixed feature contract (FR-002/FR-016).
         await self.session.execute(
-            insert(hooks_table).values(
+            pg_insert(hooks_table)
+            .values(
                 name=name.root,
                 feature_spec=feature.model_dump(),
                 live_release_id=None,
                 created_at=datetime.now(UTC),
             )
+            .on_conflict_do_nothing(index_elements=["name"])
         )
         await self.session.flush()
+
         row = await self._get_hook_row(name)
-        assert row is not None
+        if row is None:  # pragma: no cover — the upsert above guarantees the row exists
+            raise InfrastructureError(f"hook {name!r} missing immediately after upsert")
+        current = TableFeatureSpec.model_validate(row["feature_spec"])
+        if current != feature:
+            raise ConflictError(
+                f"Hook {name!r} already exists with a different feature contract; "
+                "the output contract is fixed across releases"
+            )
         return self._to_hook(row)
 
     async def create_release(
