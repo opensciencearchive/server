@@ -1,5 +1,6 @@
 """Validation domain models for hook execution results."""
 
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import Field
@@ -34,3 +35,17 @@ class HookResult(ValueObject):
     """Number of times the run was retried with doubled memory after an OOM
     eviction (#145). 0 for a clean single-attempt run. Surfaced into the
     ``hook_runs`` provenance record."""
+
+
+class HookExecution(ValueObject):
+    """A hook's batch-run result paired with its own wall-clock window (#145).
+
+    ``run_hooks_for_batch`` runs hooks **sequentially**, so each hook's
+    ``started_at``/``finished_at`` must bracket *its own* run — a single
+    batch-level window would make ``finished_at − started_at`` wrong for every
+    hook after the first, corrupting the append-only ``hook_runs`` provenance.
+    """
+
+    result: HookResult
+    started_at: datetime
+    finished_at: datetime

@@ -15,7 +15,7 @@ from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.model.hook import HookIdentity, HookName
 from osa.domain.shared.model.srn import ConventionSlug
 from osa.domain.shared.outbox import Outbox
-from osa.domain.validation.model import HookResult
+from osa.domain.validation.model.hook_result import HookExecution
 from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.validation.model.hook_release import HookRelease
 from osa.domain.validation.model.hook_run import HookRun, HookRunId, HookRunStatus
@@ -104,12 +104,14 @@ class RunHooks(EventHandler[IngesterBatchReady]):
         # Pre-allocate a hook_run id per hook so provenance is stable even on
         # partial (OOM) outcomes; rows produced this batch reference these ids.
         run_id_by_hook = {name: HookRunId(uuid4()) for name in hook_names}
-        started_at = datetime.now(UTC)
+        batch_started_at = datetime.now(UTC)
 
-        # Run all hooks via HookService
-        results: list[HookResult] = []
+        # Run all hooks via HookService. Each result carries its own wall-clock
+        # window, so provenance timestamps stay accurate even though the hooks
+        # run sequentially within the batch.
+        executions: list[HookExecution] = []
         try:
-            results = await self.hook_service.run_hooks_for_batch(
+            executions = await self.hook_service.run_hooks_for_batch(
                 hook_releases=pairs,
                 inputs=inputs,
                 work_dirs=work_dirs,
@@ -138,7 +140,8 @@ class RunHooks(EventHandler[IngesterBatchReady]):
             return
 
         short_id = event.ingest_run_id[:8]
-        for result in results:
+        for execution in executions:
+            result = execution.result
             log.info(
                 "[{short_id}] batch {batch_index} hook={hook_name}: {status} in {duration:.1f}s",
                 short_id=short_id,
@@ -152,14 +155,15 @@ class RunHooks(EventHandler[IngesterBatchReady]):
         # Record one append-only hook_run per hook (provenance anchor, #145) and
         # write run.json into each hook's output dir so the feature-insert handler
         # can stamp feature.run_id without a DB lookup (design-revisions §6).
-        finished_at = datetime.now(UTC)
-        result_by_hook = {r.hook_name: r for r in results}
+        batch_finished_at = datetime.now(UTC)
+        execution_by_hook = {e.result.hook_name: e for e in executions}
         for hook, release in pairs:
             run_id = run_id_by_hook[hook.name]
-            # Absent result → the hook produced nothing this batch (e.g. an
-            # OOM-exhausted batch that raised); record an ERROR run. The per-hook
-            # retry count isn't surfaced through that failure path, so it stays 0.
-            result = result_by_hook.get(hook.name)
+            # Absent execution → the hook produced nothing this batch (e.g. an
+            # OOM-exhausted batch that raised); record an ERROR run with the
+            # batch window as the only available timing, and 0 retries.
+            execution = execution_by_hook.get(hook.name)
+            result = execution.result if execution is not None else None
             run_status = (
                 HookRunStatus.from_hook_status(result.status)
                 if result is not None
@@ -173,8 +177,10 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                     id=run_id,
                     release_id=release.id,
                     status=run_status,
-                    started_at=started_at,
-                    finished_at=finished_at,
+                    started_at=execution.started_at if execution is not None else batch_started_at,
+                    finished_at=execution.finished_at
+                    if execution is not None
+                    else batch_finished_at,
                     duration_s=result.duration_seconds if result is not None else 0.0,
                     oom_retries=result.oom_retries if result is not None else 0,
                 )

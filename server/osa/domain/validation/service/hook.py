@@ -11,6 +11,7 @@ maximizes checkpoint progress before a potential OOM on a large record.
 
 import json
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
 
 from osa.domain.shared.error import OOMError
@@ -23,7 +24,7 @@ from osa.domain.validation.model.batch_outcome import (
     OutcomeStatus,
 )
 from osa.domain.validation.model.hook_input import HookRecord
-from osa.domain.validation.model.hook_result import HookResult, HookStatus
+from osa.domain.validation.model.hook_result import HookExecution, HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.domain.validation.port.storage import HookStoragePort
 from osa.infrastructure.logging import get_logger
@@ -164,18 +165,26 @@ class HookService(Service):
         hook_releases: list[tuple[HookIdentity, HookRelease]],
         inputs: HookInputs,
         work_dirs: dict[HookName, Path],
-    ) -> list[HookResult]:
+    ) -> list[HookExecution]:
         """Run multiple hooks sequentially for a batch of records.
 
         *hook_releases* pairs each hook identity with the release resolved for
         this run (snapshot, R8). work_dirs maps hook_name → output directory.
+
+        Each result is wrapped with *its own* ``started_at``/``finished_at`` —
+        the hooks run one after another, so a shared batch-level window would
+        misdate every hook's provenance after the first.
         """
-        results: list[HookResult] = []
+        executions: list[HookExecution] = []
         for hook, release in hook_releases:
             work_dir = work_dirs[hook.name]
+            started_at = datetime.now(UTC)
             result = await self.run_hook(hook, release, inputs, work_dir)
-            results.append(result)
-        return results
+            finished_at = datetime.now(UTC)
+            executions.append(
+                HookExecution(result=result, started_at=started_at, finished_at=finished_at)
+            )
+        return executions
 
 
 def _sort_by_size(records: Iterable[HookRecord]) -> list[HookRecord]:

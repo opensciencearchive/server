@@ -140,6 +140,55 @@ class TestHookServiceNoOOM:
         runner.run.assert_called_once()
 
 
+class TestHookServiceBatchTimestamps:
+    """run_hooks_for_batch must give each hook its own wall-clock window (#145).
+
+    Regression: started_at/finished_at used to be sampled once around the whole
+    batch, so finished_at − started_at was wrong for every hook after the first.
+    """
+
+    @pytest.mark.asyncio
+    async def test_per_hook_windows_are_distinct_and_sequential(self, tmp_path: Path):
+        import asyncio
+        import json
+
+        from osa.domain.validation.service.hook import HookService
+
+        hook1 = _make_hook("hook_one")
+        hook2 = _make_hook("hook_two")
+        rel1 = _make_release("hook_one")
+        rel2 = _make_release("hook_two")
+        records = _make_records(1)
+
+        wd1 = tmp_path / "hook_one"
+        (wd1 / "output").mkdir(parents=True)
+        wd2 = tmp_path / "hook_two"
+        (wd2 / "output").mkdir(parents=True)
+
+        async def mock_run(h, rel, inputs, wd):
+            await asyncio.sleep(0.01)  # make the two windows measurably distinct
+            (wd / "output" / "features.jsonl").write_text(
+                json.dumps({"id": records[0].id, "features": [{"score": 0.9}]}) + "\n"
+            )
+            return _passed_result(hook_name=h.name.root)
+
+        runner = AsyncMock()
+        runner.run.side_effect = mock_run
+        service = HookService(hook_runner=runner, hook_storage=FakeHookStorage())
+
+        executions = await service.run_hooks_for_batch(
+            [(hook1, rel1), (hook2, rel2)],
+            _inputs(records),
+            {hook1.name: wd1, hook2.name: wd2},
+        )
+
+        assert [e.result.hook_name.root for e in executions] == ["hook_one", "hook_two"]
+        for e in executions:
+            assert e.started_at <= e.finished_at
+        # Sequential, non-overlapping per-hook windows — not one shared batch span.
+        assert executions[1].started_at >= executions[0].finished_at
+
+
 class TestHookServiceOOMRetry:
     """T016: OOM retry doubles memory."""
 
