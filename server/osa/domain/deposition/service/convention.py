@@ -42,9 +42,9 @@ class ConventionService(Service):
         schema_slug: SchemaIdentifier,
         schema_version: str,
         schema_fields: list[FieldDefinition],
+        description: str,
         hooks: list[HookDeploy] | None = None,
         ingester: IngesterDefinition | None = None,
-        description: str | None = None,
         built_by: str | None = None,
     ) -> Convention:
         """Bundled deploy: schema + hooks (+ releases) + convention in one

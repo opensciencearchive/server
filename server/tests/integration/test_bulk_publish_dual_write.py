@@ -86,6 +86,7 @@ async def _register_convention(
     await convention_service.deploy(
         slug=ConventionSlug.parse(slug),
         title="Dual Write Sample",
+        description="Dual write sample convention",
         file_requirements=FileRequirements(accepted_types=[], max_count=0, max_file_size=0),
         schema_slug=SchemaIdentifier(slug),
         schema_version="1.0.0",

@@ -108,6 +108,7 @@ async def _deploy(service: ConventionService, **overrides):
     kwargs = dict(
         slug=_make_conv_slug(),
         title="PDB Structures",
+        description="Protein structures from the PDB",
         file_requirements=_make_file_reqs(),
         schema_slug=SchemaIdentifier("test-schema"),
         schema_version="1.0.0",

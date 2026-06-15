@@ -18,7 +18,7 @@ class Convention(Aggregate):
 
     id: ConventionSlug
     title: str
-    description: str | None = None
+    description: str
     schema_id: SchemaId
     file_requirements: FileRequirements
     hooks: list[HookName] = []

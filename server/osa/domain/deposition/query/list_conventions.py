@@ -15,7 +15,7 @@ class ListConventions(Query):
 class ConventionSummary(BaseModel):
     id: ConventionSlug
     title: str
-    description: str | None
+    description: str
     schema_id: SchemaId
     created_at: datetime
 

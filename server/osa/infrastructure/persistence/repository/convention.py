@@ -31,7 +31,7 @@ def _row_to_convention(row: dict[str, Any]) -> Convention:
     return Convention(
         id=ConventionSlug.parse(row["id"]),
         title=row["title"],
-        description=row.get("description"),
+        description=row["description"],
         schema_id=SchemaId(
             id=LocalId(row["schema_id"]),
             version=Semver.from_string(row["schema_version"]),

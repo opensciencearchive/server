@@ -97,6 +97,7 @@ async def _deploy(service: ConventionService, **overrides) -> Convention:
     kwargs = dict(
         slug=_make_conv_slug(),
         title="Test Convention",
+        description="A test convention",
         file_requirements=_make_file_reqs(),
         schema_slug=SchemaIdentifier("test-schema"),
         schema_version="1.0.0",
@@ -175,6 +176,7 @@ class TestConventionServiceGet:
         conv = Convention(
             id=_make_conv_slug(),
             title="Test",
+            description="A test convention",
             schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
             created_at=datetime.now(UTC),
@@ -202,6 +204,7 @@ class TestConventionServiceList:
         conv = Convention(
             id=_make_conv_slug(),
             title="Test",
+            description="A test convention",
             schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
             created_at=datetime.now(UTC),

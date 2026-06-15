@@ -94,7 +94,7 @@ async def _register_hook(
         conventions_table.insert().values(
             id=f"{schema.id.root}-{hook_name}",
             title=f"{schema.id.root} conv",
-            description=None,
+            description=f"{schema.id.root} convention",
             schema_id=schema.id.root,
             schema_version=schema.version.root,
             file_requirements={},

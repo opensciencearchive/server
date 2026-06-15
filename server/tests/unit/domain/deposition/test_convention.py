@@ -29,6 +29,7 @@ class TestConventionCreation:
         conv = Convention(
             id=_make_conv_slug(),
             title="scRNA-seq Submission",
+            description="A test convention",
             schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
             created_at=datetime.now(UTC),
@@ -52,6 +53,7 @@ class TestConventionCreation:
         conv = Convention(
             id=_make_conv_slug(),
             title="Test",
+            description="A test convention",
             schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
             hooks=[],
@@ -66,6 +68,7 @@ class TestConventionIdentity:
         conv = Convention(
             id=_make_conv_slug("my-conv"),
             title="Test",
+            description="A test convention",
             schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
             created_at=datetime.now(UTC),

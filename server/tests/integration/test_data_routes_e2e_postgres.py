@@ -99,7 +99,7 @@ async def _seed_feature(
         conventions_table.insert().values(
             id=f"{HOOK}-conv",
             title="compound conv",
-            description=None,
+            description="compound convention",
             schema_id=SCHEMA.id.root,
             schema_version=SCHEMA.version.root,
             file_requirements={},

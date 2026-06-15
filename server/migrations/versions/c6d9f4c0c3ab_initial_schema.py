@@ -29,7 +29,7 @@ def upgrade() -> None:
         "conventions",
         sa.Column("id", sa.String(), nullable=False),
         sa.Column("title", sa.String(length=255), nullable=False),
-        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("description", sa.Text(), nullable=False),
         sa.Column("schema_id", sa.String(), nullable=False),
         sa.Column("schema_version", sa.String(), nullable=False),
         sa.Column("file_requirements", sa.JSON(), nullable=False),

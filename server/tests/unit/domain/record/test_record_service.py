@@ -36,7 +36,7 @@ def _make_convention() -> Convention:
     return Convention(
         id=_make_conv_slug(),
         title="Test Convention",
-        description=None,
+        description="A test convention",
         schema_id=_make_schema_id(),
         file_requirements=FileRequirements(accepted_types=[], max_count=0, max_file_size=0),
         hooks=[],

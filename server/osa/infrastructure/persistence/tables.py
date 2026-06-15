@@ -283,7 +283,7 @@ conventions_table = Table(
     # Caller-supplied ConventionSlug ("<slug>@<version>") — feature #145.
     Column("id", String, primary_key=True),
     Column("title", String(255), nullable=False),
-    Column("description", Text, nullable=True),
+    Column("description", Text, nullable=False),
     Column("schema_id", String, nullable=False),
     Column("schema_version", String, nullable=False),
     Column("file_requirements", JSON, nullable=False),  # FileRequirements as dict

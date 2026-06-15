@@ -73,7 +73,7 @@ class DeployConvention(Command):
     """The convention's identity — a bare, unversioned slug."""
 
     title: str
-    description: str | None = None
+    description: str = Field(min_length=1)  # required — every convention must describe itself
     file_requirements: FileRequirements
     schema_block: DeployConventionSchema = Field(alias="schema")
     hooks: list[DeployConventionHook] = []
@@ -83,7 +83,7 @@ class DeployConvention(Command):
 class ConventionCreated(Result):
     slug: ConventionSlug
     title: str
-    description: str | None
+    description: str
     schema_id: SchemaId
     hooks: list[str]
     created_at: datetime

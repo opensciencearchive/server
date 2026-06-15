@@ -16,7 +16,7 @@ class GetConvention(Query):
 class ConventionDetail(Result):
     id: ConventionSlug
     title: str
-    description: str | None
+    description: str
     schema_id: SchemaId
     file_requirements: FileRequirements
     hooks: list[HookName]

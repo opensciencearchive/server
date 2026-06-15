@@ -51,6 +51,7 @@ def _make_convention(**overrides) -> Convention:
     defaults = dict(
         id=_make_conv_slug(),
         title="Test Convention",
+        description="A test convention",
         schema_id=_make_schema_id(),
         file_requirements=_make_file_reqs(),
         created_at=datetime.now(UTC),
