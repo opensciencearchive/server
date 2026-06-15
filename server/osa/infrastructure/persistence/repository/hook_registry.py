@@ -217,8 +217,13 @@ class PostgresHookRegistry(HookRegistry):
         return self._to_release(dict(row)) if row else None
 
     async def record_run(self, run: HookRun) -> None:
+        # Idempotent on the (deterministic) run id: a worker retry or duplicate
+        # delivery of the same batch re-records the same hook_run without
+        # inserting a duplicate row (#145). Append-only in spirit — insert-once,
+        # never updated.
         await self.session.execute(
-            insert(hook_runs_table).values(
+            pg_insert(hook_runs_table)
+            .values(
                 id=run.id,
                 release_id=run.release_id,
                 status=run.status.value,
@@ -228,6 +233,7 @@ class PostgresHookRegistry(HookRegistry):
                 oom_retries=run.oom_retries,
                 log_ref=run.log_ref,
             )
+            .on_conflict_do_nothing(index_elements=["id"])
         )
         await self.session.flush()
 

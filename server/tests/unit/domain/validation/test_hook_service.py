@@ -182,11 +182,101 @@ class TestHookServiceBatchTimestamps:
             {hook1.name: wd1, hook2.name: wd2},
         )
 
-        assert [e.result.hook_name.root for e in executions] == ["hook_one", "hook_two"]
+        assert [e.hook_name.root for e in executions] == ["hook_one", "hook_two"]
         for e in executions:
             assert e.started_at <= e.finished_at
+            assert e.is_terminal
         # Sequential, non-overlapping per-hook windows — not one shared batch span.
         assert executions[1].started_at >= executions[0].finished_at
+
+
+class TestHookServiceBatchErrorsAsValues:
+    """run_hooks_for_batch surfaces every hook's outcome as a value (#145).
+
+    A failing hook is a failed HookExecution, not an exception that aborts the
+    batch and erases sibling hooks' results.
+    """
+
+    @pytest.mark.asyncio
+    async def test_continue_on_error_surfaces_passed_and_failed(self, tmp_path: Path):
+        import json
+
+        from osa.domain.shared.error import PermanentError
+        from osa.domain.validation.model.hook_result import FailureKind, HookStatus
+        from osa.domain.validation.service.hook import HookService
+
+        hook1, hook2 = _make_hook("hook_one"), _make_hook("hook_two")
+        rel1, rel2 = _make_release("hook_one"), _make_release("hook_two")
+        records = _make_records(1)
+        wd1, wd2 = tmp_path / "hook_one", tmp_path / "hook_two"
+        (wd1 / "output").mkdir(parents=True)
+        (wd2 / "output").mkdir(parents=True)
+
+        async def mock_run(h, rel, inputs, wd):
+            if h.name.root == "hook_two":
+                raise PermanentError("image pull failed")
+            (wd / "output" / "features.jsonl").write_text(
+                json.dumps({"id": records[0].id, "features": [{"score": 0.9}]}) + "\n"
+            )
+            return _passed_result(hook_name=h.name.root)
+
+        runner = AsyncMock()
+        runner.run.side_effect = mock_run
+        service = HookService(hook_runner=runner, hook_storage=FakeHookStorage())
+
+        execs = await service.run_hooks_for_batch(
+            [(hook1, rel1), (hook2, rel2)], _inputs(records), {hook1.name: wd1, hook2.name: wd2}
+        )
+
+        assert len(execs) == 2  # hook 2's failure did NOT discard hook 1
+        assert execs[0].hook_name.root == "hook_one"
+        assert execs[0].status == HookStatus.PASSED and execs[0].failure is None
+        assert execs[0].is_terminal
+        assert execs[1].hook_name.root == "hook_two"
+        assert execs[1].status is None and execs[1].failure == FailureKind.PERMANENT
+        assert execs[1].is_terminal
+        # Each keeps its own window.
+        assert execs[1].started_at >= execs[0].finished_at
+
+    @pytest.mark.asyncio
+    async def test_transient_failure_is_not_terminal(self, tmp_path: Path):
+        from osa.domain.shared.error import TransientError
+        from osa.domain.validation.model.hook_result import FailureKind
+        from osa.domain.validation.service.hook import HookService
+
+        hook, rel = _make_hook(), _make_release()
+        records = _make_records(1)
+        wd = tmp_path / "h"
+        (wd / "output").mkdir(parents=True)
+
+        runner = AsyncMock()
+        runner.run.side_effect = TransientError("registry timeout")
+        service = HookService(hook_runner=runner, hook_storage=FakeHookStorage())
+
+        execs = await service.run_hooks_for_batch([(hook, rel)], _inputs(records), {hook.name: wd})
+
+        assert execs[0].failure == FailureKind.TRANSIENT
+        assert execs[0].is_terminal is False
+
+    @pytest.mark.asyncio
+    async def test_oom_exhaustion_is_terminal_with_retry_count(self, tmp_path: Path):
+        from osa.domain.validation.model.hook_result import FailureKind
+        from osa.domain.validation.service.hook import HookService, MAX_OOM_RETRIES
+
+        hook, rel = _make_hook(), _make_release()
+        records = _make_records(1)
+        wd = tmp_path / "h"
+        (wd / "output").mkdir(parents=True)
+
+        runner = AsyncMock()
+        runner.run.side_effect = _oom_error()  # OOM on every attempt → exhaustion
+        service = HookService(hook_runner=runner, hook_storage=FakeHookStorage())
+
+        execs = await service.run_hooks_for_batch([(hook, rel)], _inputs(records), {hook.name: wd})
+
+        assert execs[0].failure == FailureKind.OOM_EXHAUSTED
+        assert execs[0].is_terminal
+        assert execs[0].oom_retries == MAX_OOM_RETRIES
 
 
 class TestHookServiceOOMRetry:

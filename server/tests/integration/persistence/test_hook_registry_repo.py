@@ -75,3 +75,63 @@ async def test_upsert_identity_rejects_differing_contract(
     async with factory() as session:
         with pytest.raises(ConflictError):
             await PostgresHookRegistry(session).upsert_identity(name, other)
+
+
+@pytest.mark.asyncio
+async def test_record_run_is_idempotent_on_id(
+    pg_engine: AsyncEngine,
+    pg_session: AsyncSession,
+) -> None:
+    """record_run with the same (deterministic) id twice → one row, not a duplicate.
+
+    This is the DB half of idempotent batch retry (#145): the handler derives a
+    deterministic hook_run id from (ingest_run_id, batch_index, hook_name), so a
+    worker retry / duplicate delivery re-records the same id; ON CONFLICT DO
+    NOTHING keeps provenance append-once.
+    """
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from osa.domain.shared.model.hook import OciConfig, OciLimits
+    from osa.domain.validation.model.hook_run import HookRun, HookRunId, HookRunStatus
+    from osa.infrastructure.persistence.tables import hook_runs_table
+
+    factory = async_sessionmaker(pg_engine, expire_on_commit=False)
+    name = HookName("idem_run_hook")
+    async with factory() as session:
+        reg = PostgresHookRegistry(session)
+        await reg.upsert_identity(name, _feature())
+        outcome = await reg.create_release(
+            name,
+            OciConfig(image="reg/x:1", digest="sha256:idem", limits=OciLimits()),
+            source_ref="git:1",
+            built_by=None,
+        )
+        await session.commit()
+        release_id = outcome.release.id
+
+    run_id = HookRunId(uuid4())
+    now = datetime.now(UTC)
+
+    def _run() -> HookRun:
+        return HookRun(
+            id=run_id,
+            release_id=release_id,
+            status=HookRunStatus.PASSED,
+            started_at=now,
+            finished_at=now,
+            duration_s=1.0,
+            oom_retries=0,
+        )
+
+    # Record the SAME id twice — second is a worker-retry / duplicate-delivery no-op.
+    for _ in range(2):
+        async with factory() as session:
+            await PostgresHookRegistry(session).record_run(_run())
+            await session.commit()
+
+    async with factory() as session:
+        count = await session.scalar(
+            select(func.count()).select_from(hook_runs_table).where(hook_runs_table.c.id == run_id)
+        )
+    assert count == 1

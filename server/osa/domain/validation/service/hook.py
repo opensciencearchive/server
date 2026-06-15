@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from osa.domain.shared.error import OOMError
+from osa.domain.shared.error import OOMError, PermanentError, TransientError
 from osa.domain.shared.model.hook import HookIdentity, HookName
 from osa.domain.shared.service import Service
 from osa.domain.validation.model.hook_release import HookRelease
@@ -123,7 +123,13 @@ class HookService(Service):
                             error=f"OOM after {MAX_OOM_RETRIES} retries (last limit: {current_release.runtime.limits.memory})",
                         )
                     await self.hook_storage.write_batch_outcomes(work_dir, outcomes)
-                    raise
+                    # Surface the real retry count so the batch wrapper can record
+                    # it on the failed execution's provenance.
+                    raise OOMError(
+                        f"OOM after {oom_retries} retries "
+                        f"(last limit: {current_release.runtime.limits.memory})",
+                        oom_retries=oom_retries,
+                    )
             # Non-OOM exceptions (TransientError, PermanentError, etc.)
             # propagate uncaught to the worker layer
 
@@ -171,19 +177,24 @@ class HookService(Service):
         *hook_releases* pairs each hook identity with the release resolved for
         this run (snapshot, R8). work_dirs maps hook_name → output directory.
 
-        Each result is wrapped with *its own* ``started_at``/``finished_at`` —
-        the hooks run one after another, so a shared batch-level window would
-        misdate every hook's provenance after the first.
+        Errors are **values, not control flow**: a hook that raises is caught and
+        recorded as a failed :class:`HookExecution` (with its FailureKind) rather
+        than aborting the batch — so a failing hook never discards its siblings'
+        outcomes. Each execution carries *its own* wall-clock window.
         """
         executions: list[HookExecution] = []
         for hook, release in hook_releases:
             work_dir = work_dirs[hook.name]
             started_at = datetime.now(UTC)
-            result = await self.run_hook(hook, release, inputs, work_dir)
-            finished_at = datetime.now(UTC)
-            executions.append(
-                HookExecution(result=result, started_at=started_at, finished_at=finished_at)
-            )
+            try:
+                result = await self.run_hook(hook, release, inputs, work_dir)
+                finished_at = datetime.now(UTC)
+                executions.append(
+                    HookExecution.completed(hook, release, result, started_at, finished_at)
+                )
+            except (OOMError, TransientError, PermanentError) as exc:
+                finished_at = datetime.now(UTC)
+                executions.append(HookExecution.failed(hook, release, exc, started_at, finished_at))
         return executions
 
 

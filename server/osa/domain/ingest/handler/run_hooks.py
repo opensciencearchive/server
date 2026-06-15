@@ -1,8 +1,7 @@
 """RunHooks — runs hook containers on an ingester batch."""
 
-from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.ingest.event.events import HookBatchCompleted, IngesterBatchReady
@@ -10,12 +9,11 @@ from osa.domain.ingest.model.ingester_record import IngesterRecord
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.ingest.port.storage import IngestStoragePort
 from osa.domain.ingest.service.ingest import IngestService
-from osa.domain.shared.error import NotFoundError, OOMError, PermanentError
+from osa.domain.shared.error import NotFoundError, TransientError
 from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.model.hook import HookIdentity, HookName
 from osa.domain.shared.model.srn import ConventionSlug
 from osa.domain.shared.outbox import Outbox
-from osa.domain.validation.model.hook_result import HookExecution
 from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.validation.model.hook_release import HookRelease
 from osa.domain.validation.model.hook_run import HookRun, HookRunId, HookRunStatus
@@ -25,6 +23,17 @@ from osa.domain.validation.service.hook_registry import HookRegistryService
 from osa.infrastructure.logging import get_logger
 
 log = get_logger(__name__)
+
+# Stable namespace for deterministic hook_run ids (#145): uuid5 over
+# (ingest_run_id, batch_index, hook_name) yields the same id across worker
+# retries and duplicate deliveries of a batch, so record_run (ON CONFLICT DO
+# NOTHING) never accumulates duplicate provenance rows.
+_HOOK_RUN_NS = uuid5(NAMESPACE_URL, "osa:hook_run")
+
+
+def _hook_run_id(ingest_run_id: str, batch_index: int, hook_name: HookName) -> HookRunId:
+    """Deterministic hook_run id for one hook in one batch — stable across retries."""
+    return HookRunId(uuid5(_HOOK_RUN_NS, f"{ingest_run_id}:{batch_index}:{hook_name.root}"))
 
 
 class RunHooks(EventHandler[IngesterBatchReady]):
@@ -101,94 +110,68 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                 event.ingest_run_id, event.batch_index, name.root
             )
 
-        # Pre-allocate a hook_run id per hook so provenance is stable even on
-        # partial (OOM) outcomes; rows produced this batch reference these ids.
-        run_id_by_hook = {name: HookRunId(uuid4()) for name in hook_names}
-        batch_started_at = datetime.now(UTC)
-
-        # Run all hooks via HookService. Each result carries its own wall-clock
-        # window, so provenance timestamps stay accurate even though the hooks
-        # run sequentially within the batch.
-        executions: list[HookExecution] = []
-        try:
-            executions = await self.hook_service.run_hooks_for_batch(
-                hook_releases=pairs,
-                inputs=inputs,
-                work_dirs=work_dirs,
-            )
-        except OOMError as e:
-            # OOM exhaustion after retries — HookService already wrote outcomes
-            # (passed + errored) to disk. Fall through to emit HookBatchCompleted
-            # so PublishBatch can publish the records that DID pass.
-            log.warn(
-                "[{short_id}] batch {batch_index} OOM exhausted, publishing partial results: {error}",
-                short_id=event.ingest_run_id[:8],
-                batch_index=event.batch_index,
-                error=str(e),
-                ingest_run_id=event.ingest_run_id,
-            )
-        except PermanentError as e:
-            log.error(
-                "[{short_id}] batch {batch_index} permanently failed: {error}",
-                short_id=event.ingest_run_id[:8],
-                batch_index=event.batch_index,
-                error=str(e),
-                container_logs=e.container_logs or "",
-                ingest_run_id=event.ingest_run_id,
-            )
-            await self._fail_batch(event)
-            return
+        # Run every hook. Failures are values (HookExecution.failed), not
+        # exceptions — one hook failing never discards another's outcome. Each
+        # execution carries its own wall-clock window + total status.
+        executions = await self.hook_service.run_hooks_for_batch(
+            hook_releases=pairs,
+            inputs=inputs,
+            work_dirs=work_dirs,
+        )
 
         short_id = event.ingest_run_id[:8]
-        for execution in executions:
-            result = execution.result
+        for e in executions:
+            label = e.status.value if e.status is not None else (e.failure or "errored")
             log.info(
                 "[{short_id}] batch {batch_index} hook={hook_name}: {status} in {duration:.1f}s",
                 short_id=short_id,
                 batch_index=event.batch_index,
-                hook_name=result.hook_name,
-                status=result.status.value,
-                duration=result.duration_seconds,
+                hook_name=e.hook_name,
+                status=label,
+                duration=e.duration_s,
                 ingest_run_id=event.ingest_run_id,
             )
 
-        # Record one append-only hook_run per hook (provenance anchor, #145) and
-        # write run.json into each hook's output dir so the feature-insert handler
-        # can stamp feature.run_id without a DB lookup (design-revisions §6).
-        batch_finished_at = datetime.now(UTC)
-        execution_by_hook = {e.result.hook_name: e for e in executions}
-        for hook, release in pairs:
-            run_id = run_id_by_hook[hook.name]
-            # Absent execution → the hook produced nothing this batch (e.g. an
-            # OOM-exhausted batch that raised); record an ERROR run with the
-            # batch window as the only available timing, and 0 retries.
-            execution = execution_by_hook.get(hook.name)
-            result = execution.result if execution is not None else None
-            run_status = (
-                HookRunStatus.from_hook_status(result.status)
-                if result is not None
-                else HookRunStatus.ERROR
+        # Any TRANSIENT failure → re-drive the whole batch. The UOW rolls back
+        # (nothing recorded this attempt), but each hook's filesystem checkpoint
+        # makes the re-run cheap — completed hooks return instantly without a
+        # container, and the deterministic id keeps the eventual insert dup-free.
+        pending = [e for e in executions if not e.is_terminal]
+        if pending:
+            names = ", ".join(e.hook_name.root for e in pending)
+            raise TransientError(
+                f"batch {event.batch_index}: {len(pending)} hook(s) pending retry: {names}"
             )
-            await self.ingest_storage.write_run_ref(
-                work_dirs[hook.name], str(run_id), str(release.id)
+
+        # All hooks terminal → record provenance from each hook's OWN execution
+        # (its real window + status; a PERMANENT/OOM failure is a terminal ERROR
+        # run, not a batch failure — hooks are independent) and write run.json so
+        # InsertBatchFeatures can stamp feature.run_id. record_run is idempotent.
+        for e in executions:
+            run_id = _hook_run_id(event.ingest_run_id, event.batch_index, e.hook_name)
+            status = (
+                HookRunStatus.from_hook_status(e.status)
+                if e.status is not None
+                else HookRunStatus.ERROR
             )
             await self.hook_registry.record_run(
                 HookRun(
                     id=run_id,
-                    release_id=release.id,
-                    status=run_status,
-                    started_at=execution.started_at if execution is not None else batch_started_at,
-                    finished_at=execution.finished_at
-                    if execution is not None
-                    else batch_finished_at,
-                    duration_s=result.duration_seconds if result is not None else 0.0,
-                    oom_retries=result.oom_retries if result is not None else 0,
+                    release_id=e.release_id,
+                    status=status,
+                    started_at=e.started_at,
+                    finished_at=e.finished_at,
+                    duration_s=e.duration_s,
+                    oom_retries=e.oom_retries,
                 )
             )
+            await self.ingest_storage.write_run_ref(
+                work_dirs[e.hook_name], str(run_id), str(e.release_id)
+            )
 
-        # Emit HookBatchCompleted. Feature provenance (run_id per hook) is carried
-        # via the run.json just written into each hook's output dir — no event-chain
-        # threading and no DB run-id lookup.
+        # Emit HookBatchCompleted (committed by the UOW on return). PublishBatch
+        # publishes records that passed every hook; a permanently-failed hook just
+        # means its records aren't complete, not that the batch failed.
         await self.outbox.append(
             HookBatchCompleted(
                 id=EventId(uuid4()),

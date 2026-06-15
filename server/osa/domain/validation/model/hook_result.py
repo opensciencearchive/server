@@ -1,12 +1,16 @@
 """Validation domain models for hook execution results."""
 
+from __future__ import annotations
+
 from datetime import datetime
 from enum import StrEnum
 
 from pydantic import Field
 
-from osa.domain.shared.model.hook import HookName
+from osa.domain.shared.error import OOMError, TransientError
+from osa.domain.shared.model.hook import HookIdentity, HookName
 from osa.domain.shared.model.value import ValueObject
+from osa.domain.validation.model.hook_release import HookRelease, HookReleaseId
 
 
 class HookStatus(StrEnum):
@@ -37,15 +41,85 @@ class HookResult(ValueObject):
     ``hook_runs`` provenance record."""
 
 
-class HookExecution(ValueObject):
-    """A hook's batch-run result paired with its own wall-clock window (#145).
+class FailureKind(StrEnum):
+    """Why a hook's batch run failed — drives the batch's retry/complete fate."""
 
-    ``run_hooks_for_batch`` runs hooks **sequentially**, so each hook's
-    ``started_at``/``finished_at`` must bracket *its own* run — a single
-    batch-level window would make ``finished_at − started_at`` wrong for every
-    hook after the first, corrupting the append-only ``hook_runs`` provenance.
+    TRANSIENT = "transient"  # re-drivable (worker retries the batch)
+    PERMANENT = "permanent"  # give up; record as a terminal ERROR
+    OOM_EXHAUSTED = "oom_exhausted"  # give up after memory retries; partial output is valid
+
+
+class HookExecution(ValueObject):
+    """One hook's **total** outcome from a batch run, with its own wall-clock window (#145).
+
+    Every hook produces exactly one of these — passed, rejected, or errored
+    (with a :class:`FailureKind`) — instead of a failure unwinding the batch loop
+    and discarding sibling hooks' results. ``started_at``/``finished_at`` bracket
+    *this* hook's run (hooks run sequentially, so a shared batch window would
+    misdate every hook after the first). A ``TRANSIENT`` failure is the only
+    non-terminal outcome: it re-drives the batch.
     """
 
-    result: HookResult
+    hook_name: HookName
+    release_id: HookReleaseId
+    status: HookStatus | None  # None when the hook errored (failure is set instead)
     started_at: datetime
     finished_at: datetime
+    duration_s: float
+    oom_retries: int = 0
+    failure: FailureKind | None = None
+    error_message: str | None = None
+
+    @property
+    def is_terminal(self) -> bool:
+        """Terminal = anything except a transient (re-drivable) failure."""
+        return self.failure is not FailureKind.TRANSIENT
+
+    @classmethod
+    def completed(
+        cls,
+        hook: HookIdentity,
+        release: HookRelease,
+        result: HookResult,
+        started_at: datetime,
+        finished_at: datetime,
+    ) -> HookExecution:
+        return cls(
+            hook_name=hook.name,
+            release_id=release.id,
+            status=result.status,
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_s=result.duration_seconds,
+            oom_retries=result.oom_retries,
+            failure=None,
+            error_message=result.error_message or result.rejection_reason,
+        )
+
+    @classmethod
+    def failed(
+        cls,
+        hook: HookIdentity,
+        release: HookRelease,
+        exc: Exception,
+        started_at: datetime,
+        finished_at: datetime,
+    ) -> HookExecution:
+        # OOMError is a subclass of PermanentError, so check it first.
+        if isinstance(exc, OOMError):
+            kind, oom_retries = FailureKind.OOM_EXHAUSTED, exc.oom_retries or 0
+        elif isinstance(exc, TransientError):
+            kind, oom_retries = FailureKind.TRANSIENT, 0
+        else:
+            kind, oom_retries = FailureKind.PERMANENT, 0
+        return cls(
+            hook_name=hook.name,
+            release_id=release.id,
+            status=None,
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_s=(finished_at - started_at).total_seconds(),
+            oom_retries=oom_retries,
+            failure=kind,
+            error_message=str(exc),
+        )

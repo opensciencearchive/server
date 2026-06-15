@@ -110,6 +110,13 @@ class PermanentError(InfrastructureError):
 class OOMError(PermanentError):
     """Container killed by out-of-memory. HookService intercepts for memory retry."""
 
+    def __init__(self, message: str, oom_retries: int | None = None) -> None:
+        super().__init__(message)
+        # Number of doubled-memory retries performed before exhaustion (set by
+        # HookService.run_hook when it gives up), so provenance records the real
+        # count even though the failure surfaces as an exception (#145).
+        self.oom_retries = oom_retries
+
 
 # =============================================================================
 # Event Processing Errors
