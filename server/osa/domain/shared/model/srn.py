@@ -390,5 +390,29 @@ class ConventionSlug(RootModel[str]):
         """Parse/validate a bare slug. Raises ``ValueError`` on malformed input."""
         return cls(value)
 
+    @classmethod
+    def from_title(cls, title: str) -> "ConventionSlug":
+        """Derive the convention's identity slug from its human title.
+
+        Lowercases, collapses each run of non-alphanumeric characters to a single
+        hyphen, trims hyphens, and caps at 64 chars. Raises a domain
+        ``ValidationError`` (→ HTTP 422) when the title can't yield a valid slug —
+        e.g. it has no letters, slugifies to fewer than 3 chars, or begins with a
+        digit (slugs must start with a letter).
+
+        Deterministic: the same title always yields the same slug, which is what
+        makes deploy a stable upsert by identity.
+        """
+        from osa.domain.shared.error import ValidationError
+
+        slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:64].strip("-")
+        if not cls._re.match(slug):
+            raise ValidationError(
+                f"cannot derive a convention slug from title {title!r}: the slugified "
+                f"form {slug!r} must be 3–64 chars of [a-z0-9-] starting with a letter",
+                field="title",
+            )
+        return cls(slug)
+
     def __str__(self) -> str:
         return self.root

@@ -7,6 +7,7 @@ suite replaces the former ``ConventionId`` tests.
 
 import pytest
 
+from osa.domain.shared.error import ValidationError
 from osa.domain.shared.model.srn import ConventionSlug
 
 
@@ -78,3 +79,40 @@ def test_is_hashable_and_usable_as_dict_key() -> None:
     mapping = {slug: 1}
     assert mapping[ConventionSlug("proteins")] == 1
     assert hash(slug) == hash(ConventionSlug("proteins"))
+
+
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        ("PDB Structures", "pdb-structures"),
+        ("  Spaces   and   tabs  ", "spaces-and-tabs"),
+        ("Punctuation! & symbols?", "punctuation-symbols"),
+        ("UPPER_snake_case", "upper-snake-case"),
+        ("trailing---hyphens---", "trailing-hyphens"),
+        ("Mix3d 123 numbers", "mix3d-123-numbers"),
+        ("x" * 100, "x" * 64),  # capped at 64
+    ],
+)
+def test_from_title_slugifies(title: str, expected: str) -> None:
+    assert ConventionSlug.from_title(title).root == expected
+
+
+def test_from_title_is_deterministic() -> None:
+    assert ConventionSlug.from_title("PDB Structures") == ConventionSlug.from_title(
+        "PDB Structures"
+    )
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "",  # nothing
+        "!!!",  # no alphanumerics → empty slug
+        "ab",  # slugifies to < 3 chars
+        "3D structures",  # slug "3d-structures" starts with a digit
+        "42",  # starts with a digit and too short
+    ],
+)
+def test_from_title_rejects_untitleable(title: str) -> None:
+    with pytest.raises(ValidationError):
+        ConventionSlug.from_title(title)

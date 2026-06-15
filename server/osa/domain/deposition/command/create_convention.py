@@ -65,12 +65,13 @@ class DeployConvention(Command):
     declarative upsert keyed by ``slug`` — re-declaring the same state is a no-op,
     a different declaration updates the convention in place. No caller-supplied
     version, no conflict path.
+
+    The identity ``slug`` is **derived server-side** from ``title`` (the API does
+    not accept a slug). Because the slug is what deploy upserts on, the title is
+    identity-bearing: a different title yields a different slug (a new convention).
     """
 
     model_config = ConfigDict(populate_by_name=True)
-
-    slug: ConventionSlug
-    """The convention's identity — a bare, unversioned slug."""
 
     title: str
     description: str = Field(min_length=1)  # required — every convention must describe itself
@@ -100,7 +101,7 @@ class DeployConventionHandler(CommandHandler[DeployConvention, ConventionCreated
     async def run(self, cmd: DeployConvention) -> ConventionCreated:
         built_by = str(self.principal.user_id) if self.principal.user_id else None
         convention = await self.convention_service.deploy(
-            slug=cmd.slug,
+            slug=ConventionSlug.from_title(cmd.title),
             title=cmd.title,
             description=cmd.description,
             file_requirements=cmd.file_requirements,
