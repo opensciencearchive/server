@@ -187,3 +187,63 @@ async def test_record_run_persists_log_ref(
             select(hook_runs_table.c.log_ref).where(hook_runs_table.c.id == run_id)
         )
     assert stored == log_ref
+
+
+@pytest.mark.asyncio
+async def test_get_run_round_trips(
+    pg_engine: AsyncEngine,
+    pg_session: AsyncSession,
+) -> None:
+    """get_run reads back a recorded run by id (provenance read surface, #147)."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from osa.domain.shared.model.hook import OciConfig, OciLimits
+    from osa.domain.validation.model.hook_run import HookRun, HookRunId, HookRunStatus
+
+    factory = async_sessionmaker(pg_engine, expire_on_commit=False)
+    name = HookName("get_run_hook")
+    async with factory() as session:
+        reg = PostgresHookRegistry(session)
+        await reg.upsert_identity(name, _feature())
+        outcome = await reg.create_release(
+            name,
+            OciConfig(image="reg/x:1", digest="sha256:getrun", limits=OciLimits()),
+            source_ref="git:1",
+            built_by=None,
+        )
+        await session.commit()
+        release_id = outcome.release.id
+
+    run_id = HookRunId(uuid4())
+    now = datetime.now(UTC)
+    log_ref = "/data/runs/xyz/hooks/get_run_hook/output/hook.log"
+    async with factory() as session:
+        await PostgresHookRegistry(session).record_run(
+            HookRun(
+                id=run_id,
+                release_id=release_id,
+                status=HookRunStatus.ERROR,
+                started_at=now,
+                finished_at=now,
+                duration_s=2.5,
+                oom_retries=1,
+                log_ref=log_ref,
+            )
+        )
+        await session.commit()
+
+    async with factory() as session:
+        run = await PostgresHookRegistry(session).get_run(run_id)
+    assert run is not None
+    assert run.id == run_id
+    assert run.release_id == release_id
+    assert run.status == HookRunStatus.ERROR
+    assert run.duration_s == 2.5
+    assert run.oom_retries == 1
+    assert run.log_ref == log_ref
+
+    # Unknown id → None, not an error.
+    async with factory() as session:
+        missing = await PostgresHookRegistry(session).get_run(HookRunId(uuid4()))
+    assert missing is None

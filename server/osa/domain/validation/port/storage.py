@@ -1,6 +1,7 @@
 """Storage port scoped to the validation domain."""
 
 from abc import abstractmethod
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Protocol
 
@@ -38,6 +39,16 @@ class HookStoragePort(Port, Protocol):
         Returns the locator stored as ``HookRun.log_ref`` (#145/#147). The logs are
         tenant-scoped — written beside the hook's other outputs, never to operator
         logs. Retrieval is served by the authenticated #147 endpoint.
+        """
+        ...
+
+    @abstractmethod
+    async def read_hook_log(self, log_ref: str) -> AsyncIterator[bytes]:
+        """Stream a captured hook log back by its stored ``log_ref`` locator (#147).
+
+        Reads the artifact written by :meth:`write_hook_log` (deposition or
+        ingestion path — the locator is self-contained). Raises ``NotFoundError``
+        if the locator is absent; rejects a locator that escapes the data root.
         """
         ...
 

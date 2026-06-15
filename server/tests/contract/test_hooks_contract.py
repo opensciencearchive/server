@@ -69,6 +69,23 @@ async def test_create_release_requires_config(client: AsyncClient):
     assert resp.status_code == 422
 
 
+@pytest.mark.asyncio
+async def test_get_hook_run_requires_auth(client: AsyncClient):
+    # ADMIN-gated read: the Principal provider raises missing_token (401) before
+    # any DB work, so this is DB-free. A valid UUID gets past path validation.
+    async with client:
+        resp = await client.get("/api/v1/hooks/runs/00000000-0000-0000-0000-000000000000")
+    assert resp.status_code == 401
+    assert resp.json()["code"] == "missing_token"
+
+
+@pytest.mark.asyncio
+async def test_get_hook_run_logs_requires_auth(client: AsyncClient):
+    async with client:
+        resp = await client.get("/api/v1/hooks/runs/00000000-0000-0000-0000-000000000000/logs")
+    assert resp.status_code == 401
+
+
 def test_hook_routes_registered():
     app = _app()
     paths = {getattr(r, "path", None) for r in app.routes}
@@ -76,3 +93,5 @@ def test_hook_routes_registered():
     assert "/api/v1/hooks/{name}/releases" in paths
     assert "/api/v1/hooks/{name}/releases/{version}" in paths
     assert "/api/v1/hooks/{name}/live" in paths
+    assert "/api/v1/hooks/runs/{run_id}" in paths
+    assert "/api/v1/hooks/runs/{run_id}/logs" in paths

@@ -25,7 +25,7 @@ from osa.domain.shared.model.hook import (
 )
 from osa.domain.validation.model.hook import Hook
 from osa.domain.validation.model.hook_release import HookRelease, HookReleaseId, ReleaseOutcome
-from osa.domain.validation.model.hook_run import HookRun
+from osa.domain.validation.model.hook_run import HookRun, HookRunId, HookRunStatus
 from osa.domain.validation.port.hook_registry import HookRegistry
 from osa.infrastructure.persistence.tables import (
     hook_releases_table,
@@ -63,6 +63,19 @@ class PostgresHookRegistry(HookRegistry):
             source_ref=row["source_ref"],
             built_by=row["built_by"],
             built_at=row["built_at"],
+        )
+
+    @staticmethod
+    def _to_run(row: dict[str, Any]) -> HookRun:
+        return HookRun(
+            id=HookRunId(row["id"]),
+            release_id=HookReleaseId(row["release_id"]),
+            status=HookRunStatus(row["status"]),
+            started_at=row["started_at"],
+            finished_at=row["finished_at"],
+            duration_s=row["duration_s"],
+            oom_retries=row["oom_retries"],
+            log_ref=row["log_ref"],
         )
 
     async def upsert_identity(self, name: HookName, feature: TableFeatureSpec) -> Hook:
@@ -236,6 +249,13 @@ class PostgresHookRegistry(HookRegistry):
             .on_conflict_do_nothing(index_elements=["id"])
         )
         await self.session.flush()
+
+    async def get_run(self, run_id: HookRunId) -> HookRun | None:
+        result = await self.session.execute(
+            select(hook_runs_table).where(hook_runs_table.c.id == run_id)
+        )
+        row = result.mappings().first()
+        return self._to_run(dict(row)) if row else None
 
     async def resolve_live(self, names: list[HookName]) -> dict[HookName, HookRelease]:
         if not names:

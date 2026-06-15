@@ -15,7 +15,7 @@ from osa.domain.shared.model.hook import HookName, OciConfig, TableFeatureSpec
 from osa.domain.shared.port import Port
 from osa.domain.validation.model.hook import Hook
 from osa.domain.validation.model.hook_release import HookRelease, ReleaseOutcome
-from osa.domain.validation.model.hook_run import HookRun
+from osa.domain.validation.model.hook_run import HookRun, HookRunId
 
 
 class HookRegistry(Port, Protocol):
@@ -72,6 +72,11 @@ class HookRegistry(Port, Protocol):
     @abstractmethod
     async def record_run(self, run: HookRun) -> None:
         """Persist a completed hook_run row (append-only provenance anchor)."""
+        ...
+
+    @abstractmethod
+    async def get_run(self, run_id: HookRunId) -> HookRun | None:
+        """Read a single hook_run by id. ``None`` if absent."""
         ...
 
     @abstractmethod

@@ -10,9 +10,11 @@ centrally in ``application/api/v1/errors.py``.
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from dishka.integrations.fastapi import DishkaRoute, FromDishka
 from fastapi import APIRouter, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from osa.domain.shared.model.hook import HookName, OciLimits
@@ -25,6 +27,16 @@ from osa.domain.validation.command.set_live import (
     LiveSet,
     SetLive,
     SetLiveHandler,
+)
+from osa.domain.validation.model.hook_run import HookRunId
+from osa.domain.validation.query.get_hook_run import (
+    GetHookRun,
+    GetHookRunHandler,
+    HookRunDetail,
+)
+from osa.domain.validation.query.get_hook_run_logs import (
+    GetHookRunLogs,
+    GetHookRunLogsHandler,
 )
 from osa.domain.validation.query.get_release import (
     GetRelease,
@@ -121,3 +133,20 @@ async def get_release(
     handler: FromDishka[GetReleaseHandler],
 ) -> ReleaseDetail:
     return await handler.run(GetRelease(name=HookName(name), version=version))
+
+
+@router.get("/runs/{run_id}", response_model=HookRunDetail)
+async def get_hook_run(
+    run_id: UUID,
+    handler: FromDishka[GetHookRunHandler],
+) -> HookRunDetail:
+    return await handler.run(GetHookRun(run_id=HookRunId(run_id)))
+
+
+@router.get("/runs/{run_id}/logs")
+async def get_hook_run_logs(
+    run_id: UUID,
+    handler: FromDishka[GetHookRunLogsHandler],
+) -> StreamingResponse:
+    result = await handler.run(GetHookRunLogs(run_id=HookRunId(run_id)))
+    return StreamingResponse(result.stream, media_type="text/plain")

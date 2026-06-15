@@ -36,6 +36,12 @@ def test_reserved_name_rejected() -> None:
         Hook(name="records", feature=_feature(), created_at=datetime.now(UTC))
 
 
+def test_runs_reserved_for_hook_run_slot() -> None:
+    # 'runs' would shadow /hooks/runs/{run_id} (#147).
+    with pytest.raises(ReservedNameError):
+        Hook(name="runs", feature=_feature(), created_at=datetime.now(UTC))
+
+
 def test_with_live_release_returns_repointed_copy() -> None:
     hook = Hook(name="pocket_detect", feature=_feature(), created_at=datetime.now(UTC))
     rid = HookReleaseId(uuid4())

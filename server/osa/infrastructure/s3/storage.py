@@ -262,6 +262,14 @@ class S3StorageAdapter(FileStoragePort):
         await self._s3.put_object(key, text)
         return key
 
+    async def read_hook_log(self, log_ref: str) -> AsyncIterator[bytes]:
+        """Stream a captured hook log back by its stored S3 key (#147)."""
+        if ".." in log_ref:
+            raise ValueError(f"Invalid log_ref: {log_ref}")
+        if not await self._s3.head_object(log_ref):
+            raise NotFoundError(f"Hook log not found: {log_ref}")
+        return self._s3.get_object_stream(log_ref)
+
     async def read_run_ref(self, output_dir: str, hook_name: str) -> RunRef | None:
         prefix = relative_path(Path(output_dir), self._data_mount_path)
         key = f"{prefix}/hooks/{hook_name}/output/run.json"

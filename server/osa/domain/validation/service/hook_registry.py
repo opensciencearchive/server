@@ -12,7 +12,7 @@ from osa.domain.shared.model.hook import HookName, OciConfig, TableFeatureSpec
 from osa.domain.shared.service import Service
 from osa.domain.validation.model.hook import Hook
 from osa.domain.validation.model.hook_release import HookRelease, ReleaseOutcome
-from osa.domain.validation.model.hook_run import HookRun
+from osa.domain.validation.model.hook_run import HookRun, HookRunId
 from osa.domain.validation.port.hook_registry import HookRegistry
 
 
@@ -61,3 +61,7 @@ class HookRegistryService(Service):
     async def record_run(self, run: HookRun) -> None:
         """Persist a completed hook_run (append-only provenance anchor)."""
         await self.registry.record_run(run)
+
+    async def get_run(self, run_id: HookRunId) -> HookRun | None:
+        """Read a single hook_run by id (provenance lookup)."""
+        return await self.registry.get_run(run_id)

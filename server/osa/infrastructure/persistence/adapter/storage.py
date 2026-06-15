@@ -102,6 +102,27 @@ class FilesystemStorageAdapter(FileStoragePort):
         log_path.write_text(text)
         return str(log_path)
 
+    async def read_hook_log(self, log_ref: str) -> AsyncIterator[bytes]:
+        """Stream a captured hook log by its absolute-path locator (#147).
+
+        Confines the read to the data root: a ``log_ref`` that resolves outside
+        ``base_path`` is rejected, so a tampered locator can't read arbitrary files.
+        """
+        from osa.domain.shared.error import NotFoundError
+
+        target = Path(log_ref).resolve()
+        if not target.is_relative_to(self.base_path.resolve()):
+            raise ValueError(f"log_ref escapes the data root: {log_ref}")
+        if not target.is_file():
+            raise NotFoundError(f"Hook log not found: {log_ref}")
+
+        async def _stream() -> AsyncIterator[bytes]:
+            with open(target, "rb") as f:
+                while chunk := f.read(8192):
+                    yield chunk
+
+        return _stream()
+
     async def read_run_ref(self, output_dir: str, hook_name: str) -> RunRef | None:
         run_file = Path(output_dir) / "hooks" / hook_name / "output" / "run.json"
         if not run_file.exists():

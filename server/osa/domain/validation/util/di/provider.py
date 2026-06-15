@@ -4,6 +4,8 @@ from osa.config import Config
 from osa.domain.shared.model.srn import Domain
 from osa.domain.validation.command.create_release import CreateReleaseHandler
 from osa.domain.validation.command.set_live import SetLiveHandler
+from osa.domain.validation.query.get_hook_run import GetHookRunHandler
+from osa.domain.validation.query.get_hook_run_logs import GetHookRunLogsHandler
 from osa.domain.validation.query.get_release import GetReleaseHandler
 from osa.domain.validation.query.list_hooks import ListHooksHandler
 from osa.domain.validation.query.list_releases import ListReleasesHandler
@@ -29,6 +31,10 @@ class ValidationProvider(Provider):
     list_hooks_handler = provide(ListHooksHandler, scope=Scope.UOW)
     list_releases_handler = provide(ListReleasesHandler, scope=Scope.UOW)
     get_release_handler = provide(GetReleaseHandler, scope=Scope.UOW)
+
+    # Hook-run provenance + logs read handlers (#147).
+    get_hook_run_handler = provide(GetHookRunHandler, scope=Scope.UOW)
+    get_hook_run_logs_handler = provide(GetHookRunLogsHandler, scope=Scope.UOW)
 
     @provide(scope=Scope.UOW)
     def get_node_domain(self, config: Config) -> Domain:
