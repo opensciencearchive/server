@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -23,23 +24,38 @@ from osa.domain.shared.model.srn import ConventionSlug, SchemaId, SchemaIdentifi
 class DeployConventionSchema(BaseModel):
     """The deploy's nested ``schema`` sub-structure (== POST /schemas body)."""
 
+    model_config = ConfigDict(extra="forbid")
+
     id: SchemaIdentifier
     version: str
     fields: list[FieldDefinition] = []
 
 
 class DeployConventionRelease(BaseModel):
-    """A hook's release block (== POST /hooks/{name}/releases body)."""
+    """A hook's release block (== POST /hooks/{name}/releases body).
+
+    ``extra="forbid"`` + a required ``config`` make a client/server payload-shape
+    mismatch fail loudly at deploy (422, naming the offending field) rather than
+    being silently swallowed into an empty config that only fails at container
+    runtime. ``limits`` keeps its defaults — omitting resource limits is a valid,
+    explicit choice; a *misnamed* limits field is still caught by ``extra``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     image: str
     digest: str
-    config: dict = Field(default_factory=dict)
+    # Opaque, image-defined JSON object forwarded verbatim to the container —
+    # OSA never reads its keys. Required (don't default a dropped config to {}).
+    config: dict[str, Any]
     limits: OciLimits = Field(default_factory=OciLimits)
     source_ref: str  # REQUIRED — reproducibility anchor (FR-005)
 
 
 class DeployConventionHook(BaseModel):
     """One hook in the bundled deploy: identity (name + fixed feature) + release."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: HookName
     feature: TableFeatureSpec
@@ -71,7 +87,7 @@ class DeployConvention(Command):
     identity-bearing: a different title yields a different slug (a new convention).
     """
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     title: str
     description: str = Field(min_length=1)  # required — every convention must describe itself

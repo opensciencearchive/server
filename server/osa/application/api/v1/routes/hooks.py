@@ -9,9 +9,11 @@ centrally in ``application/api/v1/errors.py``.
 
 from __future__ import annotations
 
+from typing import Any
+
 from dishka.integrations.fastapi import DishkaRoute, FromDishka
 from fastapi import APIRouter, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from osa.domain.shared.model.hook import HookName, OciLimits
 from osa.domain.validation.command.create_release import (
@@ -44,16 +46,26 @@ router = APIRouter(prefix="/hooks", tags=["Hooks"], route_class=DishkaRoute)
 
 
 class CreateReleaseBody(BaseModel):
-    """Release payload — byte-identical to the deploy's ``release`` block."""
+    """Release payload — byte-identical to the deploy's ``release`` block.
+
+    Strict (``extra="forbid"`` + required ``config``) so a misshaped client
+    payload 422s here rather than silently running with an empty config.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     image: str
     digest: str
-    config: dict = Field(default_factory=dict)
+    # Opaque, image-defined JSON object forwarded verbatim to the container.
+    # Required (don't default a dropped config to {}).
+    config: dict[str, Any]
     limits: OciLimits = Field(default_factory=OciLimits)
     source_ref: str
 
 
 class SetLiveBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     version: int
 
 

@@ -33,7 +33,7 @@ async def test_create_release_requires_auth(client: AsyncClient):
     async with client:
         resp = await client.post(
             "/api/v1/hooks/pocket_detect/releases",
-            json={"image": "reg/p:abc", "digest": "sha256:x", "source_ref": "git"},
+            json={"image": "reg/p:abc", "digest": "sha256:x", "config": {}, "source_ref": "git"},
         )
     assert resp.status_code == 401
     assert resp.json()["code"] == "missing_token"
@@ -44,6 +44,29 @@ async def test_set_live_requires_auth(client: AsyncClient):
     async with client:
         resp = await client.put("/api/v1/hooks/pocket_detect/live", json={"version": 1})
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_create_release_rejects_unknown_field(client: AsyncClient):
+    # Body validation runs before auth, so an unknown field 422s for any caller —
+    # a payload-shape drift (e.g. the old `runtime` key) fails loudly at deploy.
+    async with client:
+        resp = await client.post(
+            "/api/v1/hooks/pocket_detect/releases",
+            json={"image": "i", "digest": "d", "config": {}, "source_ref": "g", "runtime": {}},
+        )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_release_requires_config(client: AsyncClient):
+    # A dropped `config` is rejected, never silently defaulted to {}.
+    async with client:
+        resp = await client.post(
+            "/api/v1/hooks/pocket_detect/releases",
+            json={"image": "i", "digest": "d", "source_ref": "g"},
+        )
+    assert resp.status_code == 422
 
 
 def test_hook_routes_registered():
