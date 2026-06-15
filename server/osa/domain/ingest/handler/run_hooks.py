@@ -154,6 +154,14 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                 if e.status is not None
                 else HookRunStatus.ERROR
             )
+            # Persist a failed hook's container logs as a tenant-scoped artifact and
+            # record the locator on the provenance row, so an ERROR run is
+            # diagnosable (#145/#147). Passed hooks carry no logs → log_ref=None.
+            log_ref: str | None = None
+            if e.log_text is not None:
+                log_ref = await self.ingest_storage.write_hook_log(
+                    work_dirs[e.hook_name], e.log_text
+                )
             await self.hook_registry.record_run(
                 HookRun(
                     id=run_id,
@@ -163,6 +171,7 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                     finished_at=e.finished_at,
                     duration_s=e.duration_s,
                     oom_retries=e.oom_retries,
+                    log_ref=log_ref,
                 )
             )
             await self.ingest_storage.write_run_ref(

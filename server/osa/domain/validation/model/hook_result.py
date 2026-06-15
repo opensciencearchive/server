@@ -7,7 +7,7 @@ from enum import StrEnum
 
 from pydantic import Field
 
-from osa.domain.shared.error import OOMError, TransientError
+from osa.domain.shared.error import InfrastructureError, OOMError, TransientError
 from osa.domain.shared.model.hook import HookIdentity, HookName
 from osa.domain.shared.model.value import ValueObject
 from osa.domain.validation.model.hook_release import HookRelease, HookReleaseId
@@ -69,6 +69,11 @@ class HookExecution(ValueObject):
     oom_retries: int = 0
     failure: FailureKind | None = None
     error_message: str | None = None
+    log_text: str | None = None
+    """Captured stdout/stderr of the failed container, when the runner grabbed it
+    (#145/#147). The ingestion handler persists this to a tenant-scoped artifact
+    and records the locator as ``HookRun.log_ref``. ``None`` for passed hooks or
+    when log capture itself failed."""
 
     @property
     def is_terminal(self) -> bool:
@@ -101,10 +106,12 @@ class HookExecution(ValueObject):
         cls,
         hook: HookIdentity,
         release: HookRelease,
-        exc: Exception,
+        exc: InfrastructureError,
         started_at: datetime,
         finished_at: datetime,
     ) -> HookExecution:
+        # The batch wrapper only catches InfrastructureError subclasses, so
+        # ``container_logs`` is a typed field here — no getattr needed.
         # OOMError is a subclass of PermanentError, so check it first.
         if isinstance(exc, OOMError):
             kind, oom_retries = FailureKind.OOM_EXHAUSTED, exc.oom_retries or 0
@@ -122,4 +129,5 @@ class HookExecution(ValueObject):
             oom_retries=oom_retries,
             failure=kind,
             error_message=str(exc),
+            log_text=exc.container_logs,
         )

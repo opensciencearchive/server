@@ -251,8 +251,13 @@ class TestContainerLifecycle:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        with pytest.raises(PermanentError, match="[Ee]xit"):
+        with pytest.raises(PermanentError, match="[Ee]xit") as exc_info:
             await runner.run(hook, release, inputs, output_dir)
+
+        # Logs ride on the typed container_logs field, not embedded in the
+        # message — the message must not leak tenant output to operator logs.
+        assert exc_info.value.container_logs == "Error: something went wrong"
+        assert "something went wrong" not in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_oom_killed_raises_oom_error(self, tmp_path: Path):
@@ -261,6 +266,7 @@ class TestContainerLifecycle:
         docker.containers.create.return_value = container
         container.wait.return_value = {"StatusCode": 137}
         container.show.return_value = {"State": {"OOMKilled": True}}
+        container.log.return_value = ["killed: out of memory"]
 
         runner = OciHookRunner(docker=docker)
         hook = _make_hook()
@@ -273,8 +279,11 @@ class TestContainerLifecycle:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        with pytest.raises(OOMError, match="[Oo][Oo][Mm]"):
+        with pytest.raises(OOMError, match="[Oo][Oo][Mm]") as exc_info:
             await runner.run(hook, release, inputs, output_dir)
+
+        # OOM logs are captured to the typed field for the tenant-scoped artifact.
+        assert exc_info.value.container_logs == "killed: out of memory"
 
     @pytest.mark.asyncio
     async def test_timeout_raises_infrastructure_error(self, tmp_path: Path):

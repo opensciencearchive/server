@@ -278,6 +278,43 @@ class TestHookServiceBatchErrorsAsValues:
         assert execs[0].is_terminal
         assert execs[0].oom_retries == MAX_OOM_RETRIES
 
+    @pytest.mark.asyncio
+    async def test_failed_execution_captures_container_logs(self, tmp_path: Path):
+        """A runner failure's container_logs surface on the execution's log_text (#145/#147)."""
+        from osa.domain.shared.error import PermanentError
+        from osa.domain.validation.service.hook import HookService
+
+        hook, rel = _make_hook(), _make_release()
+        records = _make_records(1)
+        wd = tmp_path / "h"
+        (wd / "output").mkdir(parents=True)
+
+        runner = AsyncMock()
+        runner.run.side_effect = PermanentError("exit 1", container_logs="stderr: kaboom")
+        service = HookService(hook_runner=runner, hook_storage=FakeHookStorage())
+
+        execs = await service.run_hooks_for_batch([(hook, rel)], _inputs(records), {hook.name: wd})
+
+        assert execs[0].log_text == "stderr: kaboom"
+
+    @pytest.mark.asyncio
+    async def test_oom_exhaustion_preserves_container_logs(self, tmp_path: Path):
+        """The OOM-exhaustion re-raise in run_hook keeps the runner's last-attempt logs."""
+        from osa.domain.validation.service.hook import HookService
+
+        hook, rel = _make_hook(), _make_release()
+        records = _make_records(1)
+        wd = tmp_path / "h"
+        (wd / "output").mkdir(parents=True)
+
+        runner = AsyncMock()
+        runner.run.side_effect = OOMError("Hook killed by OOM", container_logs="oom tail")
+        service = HookService(hook_runner=runner, hook_storage=FakeHookStorage())
+
+        execs = await service.run_hooks_for_batch([(hook, rel)], _inputs(records), {hook.name: wd})
+
+        assert execs[0].log_text == "oom tail"
+
 
 class TestHookServiceOOMRetry:
     """T016: OOM retry doubles memory."""

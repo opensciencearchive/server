@@ -32,6 +32,16 @@ class HookStoragePort(Port, Protocol):
         ...
 
     @abstractmethod
+    async def write_hook_log(self, work_dir: Path, text: str) -> str:
+        """Write a failed hook container's logs to ``{work_dir}/output/hook.log``.
+
+        Returns the locator stored as ``HookRun.log_ref`` (#145/#147). The logs are
+        tenant-scoped — written beside the hook's other outputs, never to operator
+        logs. Retrieval is served by the authenticated #147 endpoint.
+        """
+        ...
+
+    @abstractmethod
     async def write_checkpoint(
         self, work_dir: Path, outcomes: dict[HookRecordId, BatchRecordOutcome]
     ) -> None:

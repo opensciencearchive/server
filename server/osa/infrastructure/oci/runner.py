@@ -4,7 +4,6 @@ import asyncio
 import json
 import os
 import stat
-import sys
 import time
 from pathlib import Path
 from shutil import rmtree
@@ -182,21 +181,22 @@ class OciHookRunner(HookRunner):
             oom_killed = inspect_data.get("State", {}).get("OOMKilled", False)
 
             if oom_killed:
-                # Grab tail of container logs before deletion
+                # Capture the container's logs as a tenant-scoped artifact for
+                # provenance — never echo tenant output to operator logs/stderr (#147).
                 try:
-                    tail_logs = await container.log(stdout=True, stderr=True, tail=3)
-                    tail_text = "".join(tail_logs).strip() if tail_logs else ""
+                    oom_logs = await container.log(stdout=True, stderr=True)
+                    oom_text = "".join(oom_logs) if oom_logs else None
                 except Exception:
-                    tail_text = ""
+                    oom_text = None
                 log.error(
                     "OOM: hook={hook_name} limit={memory}",
                     hook_name=hook.name,
                     memory=release.runtime.limits.memory,
                 )
-                if tail_text:
-                    for line in tail_text.splitlines():
-                        print(f"    OOM [{hook.name}] {line}", file=sys.stderr, flush=True)
-                raise OOMError(f"Hook killed by OOM (limit: {release.runtime.limits.memory})")
+                raise OOMError(
+                    f"Hook killed by OOM (limit: {release.runtime.limits.memory})",
+                    container_logs=oom_text,
+                )
 
             # Parse progress file
             progress = parse_progress_file(output_dir)
@@ -212,8 +212,11 @@ class OciHookRunner(HookRunner):
 
             if exit_code != 0:
                 logs = await container.log(stdout=True, stderr=True)
-                logs_str = "".join(logs) if logs else ""
-                raise PermanentError(f"Hook exited with code {exit_code}: {logs_str[:2000]}")
+                logs_str = "".join(logs) if logs else None
+                raise PermanentError(
+                    f"Hook exited with code {exit_code}",
+                    container_logs=logs_str,
+                )
 
             return {
                 "status": HookStatus.PASSED,

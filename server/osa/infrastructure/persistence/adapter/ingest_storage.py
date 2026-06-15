@@ -84,3 +84,11 @@ class FilesystemIngestStorage:
         (output_dir / "run.json").write_text(
             json.dumps({"run_id": run_id, "release_id": release_id})
         )
+
+    async def write_hook_log(self, work_dir: Path, text: str) -> str:
+        """Write a failed hook's container logs to output/hook.log (#145/#147)."""
+        output_dir = Path(work_dir) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        log_path = output_dir / "hook.log"
+        log_path.write_text(text)
+        return str(log_path)

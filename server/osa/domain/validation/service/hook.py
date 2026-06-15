@@ -88,7 +88,7 @@ class HookService(Service):
 
             try:
                 result = await self.hook_runner.run(hook, current_release, attempt_inputs, work_dir)
-            except OOMError:
+            except OOMError as exc:
                 # Read any partial output written before OOM
                 new_outcomes = _read_output_dir(work_dir)
                 for rid, outcome in new_outcomes.items():
@@ -129,6 +129,7 @@ class HookService(Service):
                         f"OOM after {oom_retries} retries "
                         f"(last limit: {current_release.runtime.limits.memory})",
                         oom_retries=oom_retries,
+                        container_logs=exc.container_logs,
                     )
             # Non-OOM exceptions (TransientError, PermanentError, etc.)
             # propagate uncaught to the worker layer

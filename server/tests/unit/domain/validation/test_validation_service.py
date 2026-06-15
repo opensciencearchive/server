@@ -20,6 +20,7 @@ from osa.domain.validation.model.hook import Hook
 from osa.domain.validation.model.hook_release import HookRelease, HookReleaseId
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.model.hook_input import HookRecord
+from osa.domain.validation.model.hook_run import HookRunStatus
 from osa.domain.validation.port.hook_runner import HookInputs
 from osa.domain.validation.service.validation import ValidationService
 
@@ -88,10 +89,11 @@ def _make_service(
         hs.get_hook_output_dir = MagicMock(return_value=Path("/tmp/hooks/test"))
     if not hasattr(hs, "get_files_dir") or not callable(hs.get_files_dir):
         hs.get_files_dir = MagicMock(return_value=Path("/tmp/files/test"))
-    # write_checkpoint / write_batch_outcomes / write_run_ref are async
+    # write_checkpoint / write_batch_outcomes / write_run_ref / write_hook_log are async
     hs.write_checkpoint = AsyncMock()
     hs.write_batch_outcomes = AsyncMock()
     hs.write_run_ref = AsyncMock()
+    hs.write_hook_log = AsyncMock(return_value="/tmp/hooks/test/output/hook.log")
     return ValidationService(
         run_repo=run_repo or AsyncMock(),
         hook_runner=hook_runner or AsyncMock(),
@@ -169,8 +171,11 @@ class TestValidationServiceRunHooks:
     @pytest.mark.asyncio
     async def test_hook_failed_halts_pipeline(self):
         hook_runner = AsyncMock()
-        hook_runner.run.side_effect = PermanentError("Hook exited with code 1")
-        service = _make_service(hook_runner=hook_runner)
+        hook_runner.run.side_effect = PermanentError(
+            "Hook exited with code 1", container_logs="traceback: boom"
+        )
+        registry = _make_registry(["pocket_detect"])
+        service = _make_service(hook_runner=hook_runner, hook_registry=registry)
         run = await service.create_run(inputs=_make_inputs())
 
         run, results = await service.run_hooks(
@@ -181,6 +186,13 @@ class TestValidationServiceRunHooks:
         )
 
         assert run.status == RunStatus.FAILED
+        # The failed container's logs are persisted to a tenant-scoped artifact and
+        # the locator stamped on the ERROR provenance run (#145/#147).
+        service.hook_storage.write_hook_log.assert_awaited_once()
+        assert service.hook_storage.write_hook_log.await_args.args[1] == "traceback: boom"
+        recorded_run = registry.record_run.await_args.args[0]
+        assert recorded_run.status == HookRunStatus.ERROR
+        assert recorded_run.log_ref == "/tmp/hooks/test/output/hook.log"
 
     @pytest.mark.asyncio
     async def test_output_dir_from_hook_storage(self):

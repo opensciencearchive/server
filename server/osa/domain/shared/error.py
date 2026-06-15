@@ -84,7 +84,15 @@ class AuthorizationError(DomainError):
 class InfrastructureError(OSAError):
     """Base class for infrastructure/system errors."""
 
-    container_logs: str | None = None
+    def __init__(
+        self, message: str, code: str | None = None, *, container_logs: str | None = None
+    ) -> None:
+        super().__init__(message, code)
+        # Captured stdout/stderr of the failed container, when available. A typed
+        # field (not a loose attribute) so callers read it without getattr. Some
+        # runners fetch logs only in their catch block and assign it post-raise —
+        # that's still a typed assignment.
+        self.container_logs = container_logs
 
 
 class StorageUnavailableError(InfrastructureError):
@@ -110,8 +118,14 @@ class PermanentError(InfrastructureError):
 class OOMError(PermanentError):
     """Container killed by out-of-memory. HookService intercepts for memory retry."""
 
-    def __init__(self, message: str, oom_retries: int | None = None) -> None:
-        super().__init__(message)
+    def __init__(
+        self,
+        message: str,
+        oom_retries: int | None = None,
+        *,
+        container_logs: str | None = None,
+    ) -> None:
+        super().__init__(message, container_logs=container_logs)
         # Number of doubled-memory retries performed before exhaustion (set by
         # HookService.run_hook when it gives up), so provenance records the real
         # count even though the failure surfaces as an exception (#145).

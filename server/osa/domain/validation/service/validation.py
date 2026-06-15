@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from typing import Any
 
-from osa.domain.shared.error import NotFoundError
+from osa.domain.shared.error import InfrastructureError, NotFoundError
 from osa.domain.shared.model.hook import HookIdentity, HookName
 from osa.domain.shared.model.srn import (
     ConventionSlug,
@@ -107,8 +107,17 @@ class ValidationService(Service):
             run_id = HookRunId(uuid4())
             try:
                 result = await hook_service.run_hook(hook, release, inputs, work_dir)
-            except Exception:
+            except Exception as exc:
                 finished_at = datetime.now(timezone.utc)
+                # Record ANY failure as a terminal ERROR run. Capture the failed
+                # container's logs (typed on InfrastructureError, else the message)
+                # to a tenant-scoped artifact so the ERROR is diagnosable (#145/#147).
+                text = (
+                    exc.container_logs
+                    if isinstance(exc, InfrastructureError) and exc.container_logs
+                    else str(exc)
+                )
+                log_ref = await self.hook_storage.write_hook_log(work_dir, text)
                 await self.hook_registry.record_run(
                     HookRun(
                         id=run_id,
@@ -120,6 +129,7 @@ class ValidationService(Service):
                         # The run raised (no HookResult), so the retry count isn't
                         # available on this failure path; diagnose via log_ref.
                         oom_retries=0,
+                        log_ref=log_ref,
                     )
                 )
                 overall_status = RunStatus.FAILED

@@ -135,3 +135,55 @@ async def test_record_run_is_idempotent_on_id(
             select(func.count()).select_from(hook_runs_table).where(hook_runs_table.c.id == run_id)
         )
     assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_record_run_persists_log_ref(
+    pg_engine: AsyncEngine,
+    pg_session: AsyncSession,
+) -> None:
+    """An ERROR run's log_ref (failed-container log locator) round-trips (#145/#147)."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from osa.domain.shared.model.hook import OciConfig, OciLimits
+    from osa.domain.validation.model.hook_run import HookRun, HookRunId, HookRunStatus
+    from osa.infrastructure.persistence.tables import hook_runs_table
+
+    factory = async_sessionmaker(pg_engine, expire_on_commit=False)
+    name = HookName("log_ref_hook")
+    async with factory() as session:
+        reg = PostgresHookRegistry(session)
+        await reg.upsert_identity(name, _feature())
+        outcome = await reg.create_release(
+            name,
+            OciConfig(image="reg/x:1", digest="sha256:logref", limits=OciLimits()),
+            source_ref="git:1",
+            built_by=None,
+        )
+        await session.commit()
+        release_id = outcome.release.id
+
+    run_id = HookRunId(uuid4())
+    now = datetime.now(UTC)
+    log_ref = "/data/runs/abc/hooks/log_ref_hook/output/hook.log"
+    async with factory() as session:
+        await PostgresHookRegistry(session).record_run(
+            HookRun(
+                id=run_id,
+                release_id=release_id,
+                status=HookRunStatus.ERROR,
+                started_at=now,
+                finished_at=now,
+                duration_s=1.0,
+                oom_retries=0,
+                log_ref=log_ref,
+            )
+        )
+        await session.commit()
+
+    async with factory() as session:
+        stored = await session.scalar(
+            select(hook_runs_table.c.log_ref).where(hook_runs_table.c.id == run_id)
+        )
+    assert stored == log_ref

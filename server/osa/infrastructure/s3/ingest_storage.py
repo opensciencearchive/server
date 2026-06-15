@@ -93,3 +93,10 @@ class S3IngestStorage:
         prefix = relative_path(work_dir, self._data_mount_path)
         key = f"{prefix}/output/run.json"
         await self._s3.put_object(key, json.dumps({"run_id": run_id, "release_id": release_id}))
+
+    async def write_hook_log(self, work_dir: Path, text: str) -> str:
+        """Write a failed hook's container logs to output/hook.log (#145/#147)."""
+        prefix = relative_path(work_dir, self._data_mount_path)
+        key = f"{prefix}/output/hook.log"
+        await self._s3.put_object(key, text)
+        return key

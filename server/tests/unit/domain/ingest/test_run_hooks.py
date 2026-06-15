@@ -58,7 +58,9 @@ def _passed_exec(name: str, *, offset: int = 0) -> HookExecution:
     )
 
 
-def _failed_exec(name: str, kind: FailureKind, *, offset: int = 0) -> HookExecution:
+def _failed_exec(
+    name: str, kind: FailureKind, *, offset: int = 0, log_text: str | None = None
+) -> HookExecution:
     start = _T0 + timedelta(seconds=offset)
     return HookExecution(
         hook_name=HookName(name),
@@ -70,6 +72,7 @@ def _failed_exec(name: str, kind: FailureKind, *, offset: int = 0) -> HookExecut
         oom_retries=3 if kind == FailureKind.OOM_EXHAUSTED else 0,
         failure=kind,
         error_message="boom",
+        log_text=log_text,
     )
 
 
@@ -161,6 +164,30 @@ class TestContinueOnError:
         # Batch completes; one hook's permanent failure is not a batch failure.
         assert any(isinstance(e, HookBatchCompleted) for e in _emitted(handler))
         handler.ingest_service.fail_batch.assert_not_called()
+
+
+class TestLogRefCapture:
+    @pytest.mark.asyncio
+    async def test_failed_hook_with_logs_records_log_ref(self) -> None:
+        execs = [_failed_exec("pockets", FailureKind.PERMANENT, log_text="traceback...")]
+        handler = _make_handler(executions=execs)
+        handler.ingest_storage.write_hook_log.return_value = "/data/.../output/hook.log"
+
+        await handler.handle(_make_event())
+
+        # The container logs were persisted and the locator stamped on the run.
+        handler.ingest_storage.write_hook_log.assert_awaited_once()
+        assert handler.ingest_storage.write_hook_log.await_args.args[1] == "traceback..."
+        assert _recorded_runs(handler)[0].log_ref == "/data/.../output/hook.log"
+
+    @pytest.mark.asyncio
+    async def test_passed_hook_has_no_log_ref(self) -> None:
+        handler = _make_handler(executions=[_passed_exec("pockets")])
+
+        await handler.handle(_make_event())
+
+        handler.ingest_storage.write_hook_log.assert_not_called()
+        assert _recorded_runs(handler)[0].log_ref is None
 
 
 class TestDeterministicRunId:
