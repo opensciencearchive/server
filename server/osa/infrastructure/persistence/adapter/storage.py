@@ -30,8 +30,13 @@ class FilesystemStorageAdapter(FileStoragePort):
     HookStoragePort, and FeatureStoragePort via structural subtyping.
     """
 
-    def __init__(self, base_path: str) -> None:
+    def __init__(self, base_path: str, data_root: str | None = None) -> None:
         self.base_path = Path(base_path)
+        # Confinement root for read-by-locator (read_hook_log). The node data root
+        # spans both deposition logs (under files/, where base_path points) and
+        # ingestion logs (under ingests/), so a locator from either path resolves
+        # under it. Defaults to base_path when not given (deposition-only callers).
+        self._data_root = Path(data_root) if data_root else self.base_path
 
     def _dep_dir(self, deposition_id: DepositionSRN) -> Path:
         safe_id = f"{deposition_id.domain.root}_{deposition_id.id.root}"
@@ -105,13 +110,14 @@ class FilesystemStorageAdapter(FileStoragePort):
     async def read_hook_log(self, log_ref: str) -> AsyncIterator[bytes]:
         """Stream a captured hook log by its absolute-path locator (#147).
 
-        Confines the read to the data root: a ``log_ref`` that resolves outside
-        ``base_path`` is rejected, so a tampered locator can't read arbitrary files.
+        Confines the read to the node data root (covers both deposition logs under
+        files/ and ingestion logs under ingests/): a ``log_ref`` that resolves
+        outside it is rejected, so a tampered locator can't read arbitrary files.
         """
         from osa.domain.shared.error import NotFoundError
 
         target = Path(log_ref).resolve()
-        if not target.is_relative_to(self.base_path.resolve()):
+        if not target.is_relative_to(self._data_root.resolve()):
             raise ValueError(f"log_ref escapes the data root: {log_ref}")
         if not target.is_file():
             raise NotFoundError(f"Hook log not found: {log_ref}")

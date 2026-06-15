@@ -116,6 +116,24 @@ class TestReadHookLog:
         assert data == b"stderr: kaboom\n"
 
     @pytest.mark.asyncio
+    async def test_reads_ingest_tree_log(self, tmp_path: Path):
+        # Ingest-path hook logs live under {data_root}/ingests/..., a sibling of
+        # the files/ tree this adapter is rooted at. Confinement is the data root,
+        # so they must be readable too (regression: #147 base-path bug).
+        data_root = tmp_path / "data"
+        adapter = FilesystemStorageAdapter(
+            base_path=str(data_root / "files"), data_root=str(data_root)
+        )
+        log_path = data_root / "ingests" / "run-1" / "batches" / "0" / "hooks" / "h" / "output"
+        log_path.mkdir(parents=True)
+        (log_path / "hook.log").write_text("ingest stderr\n")
+
+        stream = await adapter.read_hook_log(str(log_path / "hook.log"))
+        data = b"".join([chunk async for chunk in stream])
+
+        assert data == b"ingest stderr\n"
+
+    @pytest.mark.asyncio
     async def test_rejects_locator_outside_data_root(self, tmp_path: Path):
         # A tampered locator pointing outside base_path must not read arbitrary files.
         adapter = FilesystemStorageAdapter(base_path=str(tmp_path / "data"))

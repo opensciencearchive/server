@@ -139,7 +139,12 @@ class PersistenceProvider(Provider):
     # File storage — default (OCI/Docker, filesystem)
     @provide(scope=Scope.APP)
     def get_file_storage(self, paths: "OSAPaths") -> FileStoragePort:
-        return FilesystemStorageAdapter(base_path=str(paths.data_dir / "files"))
+        return FilesystemStorageAdapter(
+            base_path=str(paths.data_dir / "files"),
+            # Confinement root for hook-log reads spans files/ (deposition) and
+            # ingests/ (ingestion); see read_hook_log (#147).
+            data_root=str(paths.data_dir),
+        )
 
     # File storage — K8s (S3 via aioboto3, reuses S3Client from RunnerProvider)
     @provide(when=K8S, scope=Scope.APP)
