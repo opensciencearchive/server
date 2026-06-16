@@ -10,7 +10,9 @@ class InsertRecordFeatures(EventHandler[RecordPublished]):
     """Reads hook outputs from storage and inserts features with record_srn.
 
     Resolves the hook output directory from the record's source via the
-    feature storage port, then delegates to FeatureService for insertion.
+    feature storage port, then delegates to FeatureService for insertion. Each
+    hook's ``run_id`` is read from the ``run.json`` the producing run wrote into
+    that hook's output dir (design-revisions §6) — no registry/DB lookup.
     """
 
     feature_service: FeatureService

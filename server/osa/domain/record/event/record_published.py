@@ -4,7 +4,8 @@ from typing import Any
 
 from osa.domain.shared.event import Event, EventId
 from osa.domain.shared.model.source import RecordSource
-from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaId
+from osa.domain.shared.model.srn import ConventionSlug, RecordSRN, SchemaId
+from osa.domain.shared.model.hook import FeatureName
 
 
 class RecordPublished(Event):
@@ -17,7 +18,7 @@ class RecordPublished(Event):
     id: EventId
     record_srn: RecordSRN
     source: RecordSource
-    convention_srn: ConventionSRN
+    convention_id: ConventionSlug
     schema_id: SchemaId
     metadata: dict[str, Any]
-    expected_features: list[str] = []
+    expected_features: list[FeatureName] = []

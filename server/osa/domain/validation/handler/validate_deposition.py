@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from osa.domain.deposition.event.submitted import DepositionSubmittedEvent
 from osa.domain.shared.event import EventHandler, EventId
+from osa.domain.shared.model.hook import FeatureName
 from osa.domain.shared.outbox import Outbox
 from osa.domain.validation.event.validation_completed import ValidationCompleted
 from osa.domain.validation.event.validation_failed import ValidationFailed
@@ -27,7 +28,7 @@ class ValidateDeposition(EventHandler[DepositionSubmittedEvent]):
         try:
             run, hook_results = await self.validation_service.validate_deposition(
                 deposition_srn=event.deposition_id,
-                convention_srn=event.convention_srn,
+                convention_id=event.convention_id,
                 metadata=event.metadata,
                 hooks=event.hooks,
             )
@@ -44,20 +45,21 @@ class ValidateDeposition(EventHandler[DepositionSubmittedEvent]):
             failed = ValidationFailed(
                 id=EventId(uuid4()),
                 deposition_srn=event.deposition_id,
-                convention_srn=event.convention_srn,
+                convention_id=event.convention_id,
                 status=run.status,
                 reasons=reasons,
             )
             await self.outbox.append(failed)
             logger.info(f"Validation failed for: {event.deposition_id}")
         else:
-            # Extract expected_features from hooks at the validation boundary
-            expected_features = [h.name for h in event.hooks]
+            # Each hook produces one feature table named after it: convert the
+            # producing hook names to feature names at this boundary (#145).
+            expected_features = [FeatureName(h.root) for h in event.hooks]
             completed = ValidationCompleted(
                 id=EventId(uuid4()),
                 validation_run_srn=run.srn,
                 deposition_srn=event.deposition_id,
-                convention_srn=event.convention_srn,
+                convention_id=event.convention_id,
                 status=run.status,
                 hook_results=[r.model_dump() for r in hook_results],
                 metadata=event.metadata,

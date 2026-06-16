@@ -1,14 +1,16 @@
 """Tests for HookService — OOM retry with checkpointing."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
+    HookIdentity,
     OciConfig,
     OciLimits,
     TableFeatureSpec,
@@ -20,22 +22,34 @@ from osa.domain.validation.model.batch_outcome import (
 )
 from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.shared.error import OOMError
+from osa.domain.validation.model.hook_release import HookRelease, HookReleaseId
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs
 
 
-def _make_hook(name: str = "detect_pockets", memory: str = "1g") -> HookDefinition:
-    return HookDefinition(
+def _make_hook(name: str = "detect_pockets") -> HookIdentity:
+    # #145: HookIdentity holds only name + feature; runtime moved to HookRelease.
+    return HookIdentity(
         name=name,
+        feature=TableFeatureSpec(
+            cardinality="one",
+            columns=[ColumnDef(name="score", json_type="number", required=True)],
+        ),
+    )
+
+
+def _make_release(name: str = "detect_pockets", memory: str = "1g") -> HookRelease:
+    return HookRelease(
+        id=HookReleaseId(uuid4()),
+        hook_name=name,
+        version=1,
         runtime=OciConfig(
             image="img:v1",
             digest="sha256:abc",
             limits=OciLimits(memory=memory),
         ),
-        feature=TableFeatureSpec(
-            cardinality="one",
-            columns=[ColumnDef(name="score", json_type="number", required=True)],
-        ),
+        source_ref="git:abc",
+        built_at=datetime.now(UTC),
     )
 
 
@@ -97,6 +111,7 @@ class TestHookServiceNoOOM:
         from osa.domain.validation.service.hook import HookService
 
         hook = _make_hook()
+        release = _make_release()
         records = _make_records(2)
         work_dir = tmp_path / "hook_out"
         work_dir.mkdir()
@@ -118,10 +133,187 @@ class TestHookServiceNoOOM:
         )
 
         service = HookService(hook_runner=runner, hook_storage=storage)
-        result = await service.run_hook(hook, _inputs(records), work_dir)
+        result = await service.run_hook(hook, release, _inputs(records), work_dir)
 
         assert result.status == HookStatus.PASSED
+        assert result.oom_retries == 0  # clean run records no retries (#145)
         runner.run.assert_called_once()
+
+
+class TestHookServiceBatchTimestamps:
+    """run_hooks_for_batch must give each hook its own wall-clock window (#145).
+
+    Regression: started_at/finished_at used to be sampled once around the whole
+    batch, so finished_at − started_at was wrong for every hook after the first.
+    """
+
+    @pytest.mark.asyncio
+    async def test_per_hook_windows_are_distinct_and_sequential(self, tmp_path: Path):
+        import asyncio
+        import json
+
+        from osa.domain.validation.service.hook import HookService
+
+        hook1 = _make_hook("hook_one")
+        hook2 = _make_hook("hook_two")
+        rel1 = _make_release("hook_one")
+        rel2 = _make_release("hook_two")
+        records = _make_records(1)
+
+        wd1 = tmp_path / "hook_one"
+        (wd1 / "output").mkdir(parents=True)
+        wd2 = tmp_path / "hook_two"
+        (wd2 / "output").mkdir(parents=True)
+
+        async def mock_run(h, rel, inputs, wd):
+            await asyncio.sleep(0.01)  # make the two windows measurably distinct
+            (wd / "output" / "features.jsonl").write_text(
+                json.dumps({"id": records[0].id, "features": [{"score": 0.9}]}) + "\n"
+            )
+            return _passed_result(hook_name=h.name.root)
+
+        runner = AsyncMock()
+        runner.run.side_effect = mock_run
+        service = HookService(hook_runner=runner, hook_storage=FakeHookStorage())
+
+        executions = await service.run_hooks_for_batch(
+            [(hook1, rel1), (hook2, rel2)],
+            _inputs(records),
+            {hook1.name: wd1, hook2.name: wd2},
+        )
+
+        assert [e.hook_name.root for e in executions] == ["hook_one", "hook_two"]
+        for e in executions:
+            assert e.started_at <= e.finished_at
+            assert e.is_terminal
+        # Sequential, non-overlapping per-hook windows — not one shared batch span.
+        assert executions[1].started_at >= executions[0].finished_at
+
+
+class TestHookServiceBatchErrorsAsValues:
+    """run_hooks_for_batch surfaces every hook's outcome as a value (#145).
+
+    A failing hook is a failed HookExecution, not an exception that aborts the
+    batch and erases sibling hooks' results.
+    """
+
+    @pytest.mark.asyncio
+    async def test_continue_on_error_surfaces_passed_and_failed(self, tmp_path: Path):
+        import json
+
+        from osa.domain.shared.error import PermanentError
+        from osa.domain.validation.model.hook_result import FailureKind, HookStatus
+        from osa.domain.validation.service.hook import HookService
+
+        hook1, hook2 = _make_hook("hook_one"), _make_hook("hook_two")
+        rel1, rel2 = _make_release("hook_one"), _make_release("hook_two")
+        records = _make_records(1)
+        wd1, wd2 = tmp_path / "hook_one", tmp_path / "hook_two"
+        (wd1 / "output").mkdir(parents=True)
+        (wd2 / "output").mkdir(parents=True)
+
+        async def mock_run(h, rel, inputs, wd):
+            if h.name.root == "hook_two":
+                raise PermanentError("image pull failed")
+            (wd / "output" / "features.jsonl").write_text(
+                json.dumps({"id": records[0].id, "features": [{"score": 0.9}]}) + "\n"
+            )
+            return _passed_result(hook_name=h.name.root)
+
+        runner = AsyncMock()
+        runner.run.side_effect = mock_run
+        service = HookService(hook_runner=runner, hook_storage=FakeHookStorage())
+
+        execs = await service.run_hooks_for_batch(
+            [(hook1, rel1), (hook2, rel2)], _inputs(records), {hook1.name: wd1, hook2.name: wd2}
+        )
+
+        assert len(execs) == 2  # hook 2's failure did NOT discard hook 1
+        assert execs[0].hook_name.root == "hook_one"
+        assert execs[0].status == HookStatus.PASSED and execs[0].failure is None
+        assert execs[0].is_terminal
+        assert execs[1].hook_name.root == "hook_two"
+        assert execs[1].status is None and execs[1].failure == FailureKind.PERMANENT
+        assert execs[1].is_terminal
+        # Each keeps its own window.
+        assert execs[1].started_at >= execs[0].finished_at
+
+    @pytest.mark.asyncio
+    async def test_transient_failure_is_not_terminal(self, tmp_path: Path):
+        from osa.domain.shared.error import TransientError
+        from osa.domain.validation.model.hook_result import FailureKind
+        from osa.domain.validation.service.hook import HookService
+
+        hook, rel = _make_hook(), _make_release()
+        records = _make_records(1)
+        wd = tmp_path / "h"
+        (wd / "output").mkdir(parents=True)
+
+        runner = AsyncMock()
+        runner.run.side_effect = TransientError("registry timeout")
+        service = HookService(hook_runner=runner, hook_storage=FakeHookStorage())
+
+        execs = await service.run_hooks_for_batch([(hook, rel)], _inputs(records), {hook.name: wd})
+
+        assert execs[0].failure == FailureKind.TRANSIENT
+        assert execs[0].is_terminal is False
+
+    @pytest.mark.asyncio
+    async def test_oom_exhaustion_is_terminal_with_retry_count(self, tmp_path: Path):
+        from osa.domain.validation.model.hook_result import FailureKind
+        from osa.domain.validation.service.hook import HookService, MAX_OOM_RETRIES
+
+        hook, rel = _make_hook(), _make_release()
+        records = _make_records(1)
+        wd = tmp_path / "h"
+        (wd / "output").mkdir(parents=True)
+
+        runner = AsyncMock()
+        runner.run.side_effect = _oom_error()  # OOM on every attempt → exhaustion
+        service = HookService(hook_runner=runner, hook_storage=FakeHookStorage())
+
+        execs = await service.run_hooks_for_batch([(hook, rel)], _inputs(records), {hook.name: wd})
+
+        assert execs[0].failure == FailureKind.OOM_EXHAUSTED
+        assert execs[0].is_terminal
+        assert execs[0].oom_retries == MAX_OOM_RETRIES
+
+    @pytest.mark.asyncio
+    async def test_failed_execution_captures_container_logs(self, tmp_path: Path):
+        """A runner failure's container_logs surface on the execution's log_text (#145/#147)."""
+        from osa.domain.shared.error import PermanentError
+        from osa.domain.validation.service.hook import HookService
+
+        hook, rel = _make_hook(), _make_release()
+        records = _make_records(1)
+        wd = tmp_path / "h"
+        (wd / "output").mkdir(parents=True)
+
+        runner = AsyncMock()
+        runner.run.side_effect = PermanentError("exit 1", container_logs="stderr: kaboom")
+        service = HookService(hook_runner=runner, hook_storage=FakeHookStorage())
+
+        execs = await service.run_hooks_for_batch([(hook, rel)], _inputs(records), {hook.name: wd})
+
+        assert execs[0].log_text == "stderr: kaboom"
+
+    @pytest.mark.asyncio
+    async def test_oom_exhaustion_preserves_container_logs(self, tmp_path: Path):
+        """The OOM-exhaustion re-raise in run_hook keeps the runner's last-attempt logs."""
+        from osa.domain.validation.service.hook import HookService
+
+        hook, rel = _make_hook(), _make_release()
+        records = _make_records(1)
+        wd = tmp_path / "h"
+        (wd / "output").mkdir(parents=True)
+
+        runner = AsyncMock()
+        runner.run.side_effect = OOMError("Hook killed by OOM", container_logs="oom tail")
+        service = HookService(hook_runner=runner, hook_storage=FakeHookStorage())
+
+        execs = await service.run_hooks_for_batch([(hook, rel)], _inputs(records), {hook.name: wd})
+
+        assert execs[0].log_text == "oom tail"
 
 
 class TestHookServiceOOMRetry:
@@ -131,7 +323,8 @@ class TestHookServiceOOMRetry:
     async def test_oom_retry_doubles_memory(self, tmp_path: Path):
         from osa.domain.validation.service.hook import HookService
 
-        hook = _make_hook(memory="1g")
+        hook = _make_hook()
+        release = _make_release(memory="1g")
         records = _make_records(2)
         work_dir = tmp_path / "hook_out"
         work_dir.mkdir()
@@ -142,7 +335,7 @@ class TestHookServiceOOMRetry:
 
         call_count = 0
 
-        async def mock_run(h, inputs, wd):
+        async def mock_run(h, rel, inputs, wd):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -165,13 +358,55 @@ class TestHookServiceOOMRetry:
         storage = FakeHookStorage()
 
         service = HookService(hook_runner=runner, hook_storage=storage)
-        result = await service.run_hook(hook, _inputs(records), work_dir)
+        result = await service.run_hook(hook, release, _inputs(records), work_dir)
 
         assert result.status == HookStatus.PASSED
+        assert result.oom_retries == 1  # one OOM retry surfaced into provenance (#145)
         assert runner.run.call_count == 2
-        # Second call should have doubled memory
-        second_call_hook = runner.run.call_args_list[1][0][0]
-        assert second_call_hook.runtime.limits.memory == "2g"
+        # Second call should have doubled memory — escalation lives on the release (#145).
+        second_call_release = runner.run.call_args_list[1][0][1]
+        assert second_call_release.runtime.limits.memory == "2g"
+
+    @pytest.mark.asyncio
+    async def test_oom_retries_counted_across_multiple_retries(self, tmp_path: Path):
+        """Two OOMs then success → oom_retries == 2, memory doubled twice."""
+        from osa.domain.validation.service.hook import HookService
+
+        hook = _make_hook()
+        release = _make_release(memory="1g")
+        records = _make_records(1)
+        work_dir = tmp_path / "hook_out"
+        work_dir.mkdir()
+        output_dir = work_dir / "output"
+        output_dir.mkdir(parents=True)
+
+        import json
+
+        call_count = 0
+
+        async def mock_run(h, rel, inputs, wd):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 2:
+                raise _oom_error()
+            features_file = output_dir / "features.jsonl"
+            features_file.write_text(
+                json.dumps({"id": records[0].id, "features": [{"score": 0.8}]}) + "\n"
+            )
+            return _passed_result()
+
+        runner = AsyncMock()
+        runner.run.side_effect = mock_run
+        storage = FakeHookStorage()
+
+        service = HookService(hook_runner=runner, hook_storage=storage)
+        result = await service.run_hook(hook, release, _inputs(records), work_dir)
+
+        assert result.status == HookStatus.PASSED
+        assert result.oom_retries == 2
+        assert runner.run.call_count == 3  # 1 initial + 2 retries
+        # Memory doubled twice: 1g → 2g → 4g.
+        assert runner.run.call_args_list[2][0][1].runtime.limits.memory == "4g"
 
 
 class TestHookServiceOOMExhaustion:
@@ -181,7 +416,8 @@ class TestHookServiceOOMExhaustion:
     async def test_oom_exhaustion_marks_errored(self, tmp_path: Path):
         from osa.domain.validation.service.hook import HookService
 
-        hook = _make_hook(memory="1g")
+        hook = _make_hook()
+        release = _make_release(memory="1g")
         records = _make_records(1)
         work_dir = tmp_path / "hook_out"
         work_dir.mkdir()
@@ -194,7 +430,7 @@ class TestHookServiceOOMExhaustion:
 
         service = HookService(hook_runner=runner, hook_storage=storage)
         with pytest.raises(OOMError):
-            await service.run_hook(hook, _inputs(records), work_dir)
+            await service.run_hook(hook, release, _inputs(records), work_dir)
 
         # Should have retried MAX_OOM_RETRIES times
         assert runner.run.call_count == 4  # 1 initial + 3 retries
@@ -216,6 +452,7 @@ class TestHookServiceNonOOMFailure:
         from osa.domain.validation.service.hook import HookService
 
         hook = _make_hook()
+        release = _make_release()
         records = _make_records(1)
         work_dir = tmp_path / "hook_out"
         work_dir.mkdir()
@@ -227,7 +464,7 @@ class TestHookServiceNonOOMFailure:
 
         service = HookService(hook_runner=runner, hook_storage=storage)
         with pytest.raises(PermanentError):
-            await service.run_hook(hook, _inputs(records), work_dir)
+            await service.run_hook(hook, release, _inputs(records), work_dir)
 
         runner.run.assert_called_once()
 
@@ -240,6 +477,7 @@ class TestHookServiceFinalize:
         from osa.domain.validation.service.hook import HookService
 
         hook = _make_hook()
+        release = _make_release()
         records = _make_records(2)
         work_dir = tmp_path / "hook_out"
         work_dir.mkdir()
@@ -259,7 +497,7 @@ class TestHookServiceFinalize:
         storage = FakeHookStorage()
 
         service = HookService(hook_runner=runner, hook_storage=storage)
-        await service.run_hook(hook, _inputs(records), work_dir)
+        await service.run_hook(hook, release, _inputs(records), work_dir)
 
         assert str(work_dir) in storage.written_outcomes
         outcomes = storage.written_outcomes[str(work_dir)]
@@ -277,6 +515,7 @@ class TestHookServiceEmptyRecords:
         from osa.domain.validation.service.hook import HookService
 
         hook = _make_hook()
+        release = _make_release()
         work_dir = tmp_path / "hook_out"
         work_dir.mkdir()
 
@@ -284,7 +523,7 @@ class TestHookServiceEmptyRecords:
         storage = FakeHookStorage()
 
         service = HookService(hook_runner=runner, hook_storage=storage)
-        result = await service.run_hook(hook, _inputs([]), work_dir)
+        result = await service.run_hook(hook, release, _inputs([]), work_dir)
 
         assert result.status == HookStatus.PASSED
         runner.run.assert_not_called()
@@ -298,7 +537,9 @@ class TestHookServiceMultiHook:
         from osa.domain.validation.service.hook import HookService
 
         hook1 = _make_hook(name="hook_one")
-        hook2 = _make_hook(name="hook_two", memory="512m")
+        hook2 = _make_hook(name="hook_two")
+        release1 = _make_release(name="hook_one")
+        release2 = _make_release(name="hook_two", memory="512m")
         records = _make_records(1)
 
         work_dir1 = tmp_path / "hook_one"
@@ -320,10 +561,10 @@ class TestHookServiceMultiHook:
 
         call_index = 0
 
-        async def side_effect(h, inputs, wd):
+        async def side_effect(h, rel, inputs, wd):
             nonlocal call_index
             call_index += 1
-            if h.name == "hook_one":
+            if h.name.root == "hook_one":
                 return _passed_result(hook_name="hook_one")
             else:
                 raise _oom_error()
@@ -333,16 +574,16 @@ class TestHookServiceMultiHook:
         service = HookService(hook_runner=runner, hook_storage=storage)
 
         # Run hook 1 — should pass
-        r1 = await service.run_hook(hook1, _inputs(records), work_dir1)
+        r1 = await service.run_hook(hook1, release1, _inputs(records), work_dir1)
         assert r1.status == HookStatus.PASSED
 
         # Run hook 2 — should OOM and exhaust retries, then raise
         with pytest.raises(OOMError):
-            await service.run_hook(hook2, _inputs(records), work_dir2)
+            await service.run_hook(hook2, release2, _inputs(records), work_dir2)
 
         # Hook 1 was called once, hook 2 was called 4 times (1 + 3 retries)
-        hook1_calls = [c for c in runner.run.call_args_list if c[0][0].name == "hook_one"]
-        hook2_calls = [c for c in runner.run.call_args_list if c[0][0].name != "hook_one"]
+        hook1_calls = [c for c in runner.run.call_args_list if c[0][0].name.root == "hook_one"]
+        hook2_calls = [c for c in runner.run.call_args_list if c[0][0].name.root != "hook_one"]
         assert len(hook1_calls) == 1
         assert len(hook2_calls) == 4
 
@@ -355,6 +596,7 @@ class TestHookServiceCheckpointRecovery:
         from osa.domain.validation.service.hook import HookService
 
         hook = _make_hook()
+        release = _make_release()
         records = _make_records(3)
         work_dir = tmp_path / "hook_out"
         work_dir.mkdir()
@@ -379,7 +621,7 @@ class TestHookServiceCheckpointRecovery:
         runner = AsyncMock()
         storage = FakeHookStorage()
 
-        async def mock_run(h, inputs, wd):
+        async def mock_run(h, rel, inputs, wd):
             # Should only receive rec1 and rec2, not rec0
             input_ids = [r.id for r in inputs.records]
             assert "rec0" not in input_ids
@@ -393,7 +635,7 @@ class TestHookServiceCheckpointRecovery:
         runner.run.side_effect = mock_run
 
         service = HookService(hook_runner=runner, hook_storage=storage)
-        result = await service.run_hook(hook, _inputs(records), work_dir)
+        result = await service.run_hook(hook, release, _inputs(records), work_dir)
 
         assert result.status == HookStatus.PASSED
         runner.run.assert_called_once()
@@ -410,6 +652,7 @@ class TestHookServiceCheckpointAllComplete:
         from osa.domain.validation.service.hook import HookService
 
         hook = _make_hook()
+        release = _make_release()
         records = _make_records(2)
         work_dir = tmp_path / "hook_out"
         work_dir.mkdir()
@@ -428,7 +671,7 @@ class TestHookServiceCheckpointAllComplete:
         storage = FakeHookStorage()
 
         service = HookService(hook_runner=runner, hook_storage=storage)
-        result = await service.run_hook(hook, _inputs(records), work_dir)
+        result = await service.run_hook(hook, release, _inputs(records), work_dir)
 
         assert result.status == HookStatus.PASSED
         runner.run.assert_not_called()
@@ -442,6 +685,7 @@ class TestHookServiceSorting:
         from osa.domain.validation.service.hook import HookService
 
         hook = _make_hook()
+        release = _make_release()
         # Create records with different sizes — large first to test reordering
         records = [
             HookRecord(id="large", metadata={}, size_hint_mb=100.0),
@@ -457,7 +701,7 @@ class TestHookServiceSorting:
 
         captured_order: list[str] = []
 
-        async def mock_run(h, inputs, wd):
+        async def mock_run(h, rel, inputs, wd):
             for r in inputs.records:
                 captured_order.append(r.id)
             features_file = output_dir / "features.jsonl"
@@ -471,7 +715,7 @@ class TestHookServiceSorting:
         storage = FakeHookStorage()
 
         service = HookService(hook_runner=runner, hook_storage=storage)
-        await service.run_hook(hook, _inputs(records), work_dir)
+        await service.run_hook(hook, release, _inputs(records), work_dir)
 
         assert captured_order == ["small", "medium", "large"]
 
@@ -480,6 +724,7 @@ class TestHookServiceSorting:
         from osa.domain.validation.service.hook import HookService
 
         hook = _make_hook()
+        release = _make_release()
         # All records have default size_hint_mb=0 — original order preserved
         records = [
             HookRecord(id="a", metadata={}),
@@ -495,7 +740,7 @@ class TestHookServiceSorting:
 
         captured_order: list[str] = []
 
-        async def mock_run(h, inputs, wd):
+        async def mock_run(h, rel, inputs, wd):
             for r in inputs.records:
                 captured_order.append(r.id)
             features_file = output_dir / "features.jsonl"
@@ -509,7 +754,7 @@ class TestHookServiceSorting:
         storage = FakeHookStorage()
 
         service = HookService(hook_runner=runner, hook_storage=storage)
-        await service.run_hook(hook, _inputs(records), work_dir)
+        await service.run_hook(hook, release, _inputs(records), work_dir)
 
         assert captured_order == ["a", "b", "c"]
 
@@ -522,6 +767,7 @@ class TestHookServiceCorruptedCheckpoint:
         from osa.domain.validation.service.hook import HookService
 
         hook = _make_hook()
+        release = _make_release()
         records = _make_records(2)
         work_dir = tmp_path / "hook_out"
         work_dir.mkdir()
@@ -536,7 +782,7 @@ class TestHookServiceCorruptedCheckpoint:
 
         runner = AsyncMock()
 
-        async def mock_run(h, inputs, wd):
+        async def mock_run(h, rel, inputs, wd):
             # Should receive ALL records since checkpoint is corrupted
             assert len(inputs.records) == 2
             features_file = output_dir / "features.jsonl"
@@ -549,7 +795,7 @@ class TestHookServiceCorruptedCheckpoint:
         storage = FakeHookStorage()
 
         service = HookService(hook_runner=runner, hook_storage=storage)
-        result = await service.run_hook(hook, _inputs(records), work_dir)
+        result = await service.run_hook(hook, release, _inputs(records), work_dir)
 
         assert result.status == HookStatus.PASSED
         runner.run.assert_called_once()

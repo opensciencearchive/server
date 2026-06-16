@@ -5,7 +5,8 @@ from osa.domain.shared.model.reserved import RESERVED_NAMES
 
 
 def test_reserved_names_contains_records_and_datasets() -> None:
-    assert RESERVED_NAMES == frozenset({"records", "datasets"})
+    # 'runs' reserves the /hooks/runs/{run_id} slot (#147).
+    assert RESERVED_NAMES == frozenset({"records", "datasets", "runs"})
 
 
 def test_reserved_names_is_frozen() -> None:

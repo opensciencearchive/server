@@ -12,6 +12,9 @@ from osa.infrastructure.persistence.feature_store import PostgresFeatureStore
 from osa.infrastructure.persistence.feature_table import FEATURES_SCHEMA
 
 
+_RUN_ID = "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
+
+
 def _make_columns() -> list[ColumnDef]:
     return [
         ColumnDef(name="score", json_type="number", required=True),
@@ -50,6 +53,7 @@ def _mock_engine_with_reflect(table_name: str, feature_columns: list[str] | None
         cols = [
             sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
             sa.Column("record_srn", sa.Text, nullable=False),
+            sa.Column("run_id", sa.Text, nullable=False),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         ]
         for col_name in feature_columns or []:
@@ -147,7 +151,7 @@ class TestInsertFeatures:
             {"score": 0.82, "pocket_id": "P2"},
         ]
 
-        count = await store.insert_features("pocket_detect", "urn:rec:1", rows)
+        count = await store.insert_features("pocket_detect", "urn:rec:1", rows, _RUN_ID)
 
         assert count == 2
         conn.execute.assert_called_once()
@@ -157,7 +161,7 @@ class TestInsertFeatures:
         engine = AsyncMock()
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
 
-        count = await store.insert_features("pocket_detect", "urn:rec:1", [])
+        count = await store.insert_features("pocket_detect", "urn:rec:1", [], _RUN_ID)
 
         assert count == 0
 
@@ -166,12 +170,13 @@ class TestInsertFeatures:
         engine, conn = _mock_engine_with_reflect("pocket_detect", ["score"])
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
 
-        await store.insert_features("pocket_detect", "urn:rec:1", [{"score": 0.95}])
+        await store.insert_features("pocket_detect", "urn:rec:1", [{"score": 0.95}], _RUN_ID)
 
         call_args = conn.execute.call_args
         params = call_args[0][1]  # second positional arg is the params list
         assert len(params) == 1
         assert params[0]["record_srn"] == "urn:rec:1"
+        assert params[0]["run_id"] == _RUN_ID
         assert "created_at" in params[0]
         assert params[0]["score"] == 0.95
 
@@ -181,7 +186,7 @@ class TestInsertFeatures:
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
         rows = [{"score": float(i)} for i in range(2500)]
 
-        count = await store.insert_features("hook", "urn:rec:1", rows)
+        count = await store.insert_features("hook", "urn:rec:1", rows, _RUN_ID)
 
         assert count == 2500
         assert conn.execute.call_count == 3  # 1000 + 1000 + 500
@@ -192,7 +197,7 @@ class TestInsertFeatures:
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
         rows = [{"score": float(i)} for i in range(999)]
 
-        count = await store.insert_features("hook", "urn:rec:1", rows)
+        count = await store.insert_features("hook", "urn:rec:1", rows, _RUN_ID)
 
         assert count == 999
         assert conn.execute.call_count == 1
@@ -203,7 +208,7 @@ class TestInsertFeatures:
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
 
         with pytest.raises(ValidationError, match="Invalid identifier"):
-            await store.insert_features("'; DROP TABLE --", "urn:rec:1", [{"score": 1}])
+            await store.insert_features("'; DROP TABLE --", "urn:rec:1", [{"score": 1}], _RUN_ID)
 
     @pytest.mark.asyncio
     async def test_create_rejects_invalid_hook_name(self):
@@ -219,7 +224,7 @@ class TestInsertFeatures:
         engine, conn = _mock_engine_with_reflect("hook", ["score"])
         store = PostgresFeatureStore(engine=engine, session=AsyncMock())
 
-        await store.insert_features("hook", "urn:rec:1", [{"score": 0.95}])
+        await store.insert_features("hook", "urn:rec:1", [{"score": 0.95}], _RUN_ID)
 
         # run_sync should have been called for reflection
         conn.run_sync.assert_called_once()

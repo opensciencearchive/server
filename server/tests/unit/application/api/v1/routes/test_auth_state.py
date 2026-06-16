@@ -99,10 +99,13 @@ class TestSignedStateVerification:
         """Should reject state with tampered signature."""
         state = token_service.create_oauth_state("https://example.com", "orcid")
 
-        # Tamper with the signature
+        # Tamper with the signature. The signature is base64 of a random HMAC, so
+        # flip its first char to a *guaranteed-different* one — a fixed "x" + rest
+        # was a no-op (~1/64 of the time) whenever the signature already began "x".
         parts = state.split(".")
-        tampered_sig = "x" + parts[1][1:]
-        tampered_state = f"{parts[0]}.{tampered_sig}"
+        sig = parts[1]
+        flipped = ("a" if sig[0] != "a" else "b") + sig[1:]
+        tampered_state = f"{parts[0]}.{flipped}"
 
         result = token_service.verify_oauth_state(tampered_state)
         assert result is None

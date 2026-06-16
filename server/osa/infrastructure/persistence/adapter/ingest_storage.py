@@ -76,3 +76,19 @@ class FilesystemIngestStorage:
         d = self._layout.ingest_batch_hook_dir(ingest_run_id, batch_index, hook_name)
         d.mkdir(parents=True, exist_ok=True)
         return d
+
+    async def write_run_ref(self, work_dir: Path, run_id: str, release_id: str) -> None:
+        """Write run.json alongside a hook's features (per-row provenance, #145)."""
+        output_dir = Path(work_dir) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "run.json").write_text(
+            json.dumps({"run_id": run_id, "release_id": release_id})
+        )
+
+    async def write_hook_log(self, work_dir: Path, text: str) -> str:
+        """Write a failed hook's container logs to output/hook.log (#145/#147)."""
+        output_dir = Path(work_dir) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        log_path = output_dir / "hook.log"
+        log_path.write_text(text)
+        return str(log_path)

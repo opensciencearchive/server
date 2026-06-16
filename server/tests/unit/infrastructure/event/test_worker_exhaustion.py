@@ -36,7 +36,7 @@ class TestWorkerOnExhaustedErrorSafety:
         event = NextBatchRequested(
             id=EventId(uuid4()),
             ingest_run_id=IngestRunId("run-1"),
-            convention_srn="urn:osa:localhost:conv:test@1.0.0",
+            convention_id="urn:osa:localhost:conv:test@1.0.0",
             batch_size=100,
         )
         delivery = MagicMock()

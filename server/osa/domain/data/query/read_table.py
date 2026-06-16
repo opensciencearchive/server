@@ -31,7 +31,7 @@ from osa.domain.data.model.query_plan import (
 from osa.domain.data.service.data_catalog import DataCatalogService
 from osa.domain.data.service.data_query import DataQueryService
 from osa.domain.shared.authorization.gate import public
-from osa.domain.shared.model.ids import HookName
+from osa.domain.shared.model.ids import FeatureName
 from osa.domain.shared.query import Query, QueryHandler
 
 
@@ -45,7 +45,7 @@ class ReadRecordsTable(Query):
 
 
 class ReadFeatureTable(ReadRecordsTable):
-    feature: HookName
+    feature: FeatureName
 
 
 @dataclass

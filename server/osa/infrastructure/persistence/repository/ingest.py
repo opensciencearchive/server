@@ -23,7 +23,7 @@ class PostgresIngestRunRepository(IngestRunRepository):
         """Insert or update an ingest run."""
         values = {
             "id": ingest_run.id,
-            "convention_srn": ingest_run.convention_srn,
+            "convention_id": ingest_run.convention_id,
             "status": ingest_run.status.value,
             "ingestion_finished": ingest_run.ingestion_finished,
             "batches_ingested": ingest_run.batches_ingested,
@@ -54,10 +54,10 @@ class PostgresIngestRunRepository(IngestRunRepository):
             return None
         return _row_to_ingest_run(dict(row))
 
-    async def get_running_for_convention(self, convention_srn: str) -> IngestRun | None:
+    async def get_running_for_convention(self, convention_id: str) -> IngestRun | None:
         stmt = (
             select(ingest_runs_table)
-            .where(ingest_runs_table.c.convention_srn == convention_srn)
+            .where(ingest_runs_table.c.convention_id == convention_id)
             .where(
                 ingest_runs_table.c.status.in_(
                     [IngestStatus.PENDING.value, IngestStatus.RUNNING.value]
@@ -135,7 +135,7 @@ class PostgresIngestRunRepository(IngestRunRepository):
 def _row_to_ingest_run(row: dict) -> IngestRun:
     return IngestRun(
         id=row["id"],
-        convention_srn=row["convention_srn"],
+        convention_id=row["convention_id"],
         status=IngestStatus(row["status"]),
         ingestion_finished=row["ingestion_finished"],
         batches_ingested=row["batches_ingested"],

@@ -102,6 +102,59 @@ class TestHookFeaturesExist:
         assert await adapter.hook_features_exist(str(dep_root), "nonexistent") is False
 
 
+class TestReadHookLog:
+    @pytest.mark.asyncio
+    async def test_round_trips_written_log(self, tmp_path: Path):
+        adapter = FilesystemStorageAdapter(base_path=str(tmp_path))
+        work_dir = tmp_path / "depositions" / "localhost_test-dep" / "hooks" / "detect"
+        work_dir.mkdir(parents=True)
+
+        log_ref = await adapter.write_hook_log(work_dir, "stderr: kaboom\n")
+        stream = await adapter.read_hook_log(log_ref)
+        data = b"".join([chunk async for chunk in stream])
+
+        assert data == b"stderr: kaboom\n"
+
+    @pytest.mark.asyncio
+    async def test_reads_ingest_tree_log(self, tmp_path: Path):
+        # Ingest-path hook logs live under {data_root}/ingests/..., a sibling of
+        # the files/ tree this adapter is rooted at. Confinement is the data root,
+        # so they must be readable too (regression: #147 base-path bug).
+        data_root = tmp_path / "data"
+        adapter = FilesystemStorageAdapter(
+            base_path=str(data_root / "files"), data_root=str(data_root)
+        )
+        log_path = data_root / "ingests" / "run-1" / "batches" / "0" / "hooks" / "h" / "output"
+        log_path.mkdir(parents=True)
+        (log_path / "hook.log").write_text("ingest stderr\n")
+
+        stream = await adapter.read_hook_log(str(log_path / "hook.log"))
+        data = b"".join([chunk async for chunk in stream])
+
+        assert data == b"ingest stderr\n"
+
+    @pytest.mark.asyncio
+    async def test_rejects_locator_outside_data_root(self, tmp_path: Path):
+        # A tampered locator pointing outside base_path must not read arbitrary files.
+        adapter = FilesystemStorageAdapter(base_path=str(tmp_path / "data"))
+        (tmp_path / "data").mkdir()
+        secret = tmp_path / "secret.txt"
+        secret.write_text("top secret")
+
+        with pytest.raises(ValueError, match="escapes the data root"):
+            await adapter.read_hook_log(str(secret))
+
+    @pytest.mark.asyncio
+    async def test_missing_log_raises_not_found(self, tmp_path: Path):
+        from osa.domain.shared.error import NotFoundError
+
+        adapter = FilesystemStorageAdapter(base_path=str(tmp_path))
+        missing = tmp_path / "depositions" / "d" / "hooks" / "h" / "output" / "hook.log"
+
+        with pytest.raises(NotFoundError):
+            await adapter.read_hook_log(str(missing))
+
+
 class TestDeleteCleansHookOutputs:
     @pytest.mark.asyncio
     async def test_rmtree_removes_hooks_dir(self, tmp_path: Path):

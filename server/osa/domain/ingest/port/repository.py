@@ -26,7 +26,7 @@ class IngestRunRepository(Port, Protocol):
         ...
 
     @abstractmethod
-    async def get_running_for_convention(self, convention_srn: str) -> IngestRun | None:
+    async def get_running_for_convention(self, convention_id: str) -> IngestRun | None:
         """Get a running ingest run for a convention, if any."""
         ...
 

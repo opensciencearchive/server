@@ -78,7 +78,7 @@ async def _bulk_seed(engine: AsyncEngine, n: int) -> None:
             text(
                 """
                 INSERT INTO records
-                    (srn, convention_srn, schema_id, schema_version, source, metadata, published_at)
+                    (srn, convention_id, schema_id, schema_version, source, metadata, published_at)
                 SELECT 'urn:osa:localhost:rec:bulk' || g || '@1',
                        'urn:osa:localhost:conv:test@1.0.0', 'compound', '1.0.0',
                        jsonb_build_object('type', 'deposition', 'id', 'bulk' || g),

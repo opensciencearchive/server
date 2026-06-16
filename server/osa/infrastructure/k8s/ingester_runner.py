@@ -16,7 +16,7 @@ from osa.domain.shared.error import (
     TransientError,
 )
 from osa.domain.shared.model.source import IngesterDefinition
-from osa.domain.shared.model.srn import ConventionSRN
+from osa.domain.shared.model.srn import ConventionSlug
 from osa.domain.shared.port.ingester_runner import IngesterInputs, IngesterOutput, IngesterRunner
 from osa.infrastructure.k8s.errors import classify_api_error
 from osa.infrastructure.logging import get_logger
@@ -133,7 +133,7 @@ class K8sIngesterRunner(IngesterRunner):
         try:
             # Check for existing Jobs
             existing = await self._check_existing_job(
-                namespace, inputs.convention_srn, ingester.digest
+                namespace, inputs.convention_id, ingester.digest
             )
 
             if existing == "succeeded":
@@ -158,7 +158,7 @@ class K8sIngesterRunner(IngesterRunner):
                     work_dir=work_dir,
                     files_dir=files_dir,
                     inputs=inputs,
-                    convention_srn=inputs.convention_srn,
+                    convention_id=inputs.convention_id,
                 )
                 job_name_to_watch = spec.metadata.name
 
@@ -220,12 +220,12 @@ class K8sIngesterRunner(IngesterRunner):
     async def _check_existing_job(
         self,
         namespace: str,
-        convention_srn: ConventionSRN | None,
+        convention_id: ConventionSlug | None,
         digest: str = "",
     ) -> str | None:
         label_parts = ["osa.io/role=ingester"]
-        if convention_srn is not None:
-            label_parts.append(f"osa.io/convention={label_value(convention_srn)}")
+        if convention_id is not None:
+            label_parts.append(f"osa.io/convention={label_value(convention_id.root)}")
         if digest:
             label_parts.append(f"osa.io/digest={sanitize_label(digest)}")
         label_selector = ",".join(label_parts)
@@ -251,7 +251,7 @@ class K8sIngesterRunner(IngesterRunner):
         work_dir: Path,
         files_dir: Path,
         inputs: IngesterInputs | None = None,
-        convention_srn: ConventionSRN | None = None,
+        convention_id: ConventionSlug | None = None,
     ) -> V1Job:
         from kubernetes_asyncio.client import (
             V1Capabilities,
@@ -272,7 +272,7 @@ class K8sIngesterRunner(IngesterRunner):
             V1VolumeMount,
         )
 
-        name = job_name("ingester", "ing", str(convention_srn) if convention_srn else "unknown")
+        name = job_name("ingester", "ing", convention_id.root if convention_id else "unknown")
         relative_work = self._relative_path(work_dir)
         input_subpath = f"{relative_work}/input"
         output_subpath = f"{relative_work}/output"
@@ -282,8 +282,8 @@ class K8sIngesterRunner(IngesterRunner):
             "osa.io/role": "ingester",
             "osa.io/digest": sanitize_label(ingester.digest),
         }
-        if convention_srn is not None:
-            labels["osa.io/convention"] = label_value(convention_srn)
+        if convention_id is not None:
+            labels["osa.io/convention"] = label_value(convention_id.root)
         if inputs and inputs.ingest_run_id:
             labels["osa.io/ingest-run-id"] = inputs.ingest_run_id
             labels["osa.io/ingest-run-batch"] = str(inputs.batch_index)

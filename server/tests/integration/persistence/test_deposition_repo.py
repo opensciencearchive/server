@@ -10,7 +10,7 @@ from osa.domain.auth.model.identity import System
 from osa.domain.auth.model.value import SYSTEM_USER_ID, UserId
 from osa.domain.deposition.model.aggregate import Deposition
 from osa.domain.deposition.model.value import DepositionFile, DepositionStatus
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
 from osa.infrastructure.persistence.repository.deposition import (
     PostgresDepositionRepository,
 )
@@ -27,7 +27,7 @@ def _make_deposition(
     now = datetime.now(UTC)
     return Deposition(
         srn=DepositionSRN.parse(dep_id),
-        convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:test-conv@1.0.0"),
+        convention_id=ConventionSlug.parse("test-conv"),
         status=status,
         metadata=metadata or {"title": "Test Deposition"},
         files=[],
@@ -50,7 +50,7 @@ class TestDepositionRepoRoundTrip:
         got = await repo.get(dep.srn)
         assert got is not None
         assert str(got.srn) == str(dep.srn)
-        assert str(got.convention_srn) == str(dep.convention_srn)
+        assert str(got.convention_id) == str(dep.convention_id)
         assert got.status == DepositionStatus.DRAFT
         assert got.metadata == {"title": "Test Deposition"}
         assert got.owner_id == SYSTEM_USER_ID

@@ -11,18 +11,20 @@ maximizes checkpoint progress before a potential OOM on a large record.
 
 import json
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
 
-from osa.domain.shared.error import OOMError
-from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.error import OOMError, PermanentError, TransientError
+from osa.domain.shared.model.hook import HookIdentity, HookName
 from osa.domain.shared.service import Service
+from osa.domain.validation.model.hook_release import HookRelease
 from osa.domain.validation.model.batch_outcome import (
     BatchRecordOutcome,
     HookRecordId,
     OutcomeStatus,
 )
 from osa.domain.validation.model.hook_input import HookRecord
-from osa.domain.validation.model.hook_result import HookResult, HookStatus
+from osa.domain.validation.model.hook_result import HookExecution, HookResult, HookStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.domain.validation.port.storage import HookStoragePort
 from osa.infrastructure.logging import get_logger
@@ -40,7 +42,8 @@ class HookService(Service):
 
     async def run_hook(
         self,
-        hook: HookDefinition,
+        hook: HookIdentity,
+        release: HookRelease,
         inputs: HookInputs,
         work_dir: Path,
     ) -> HookResult:
@@ -71,8 +74,9 @@ class HookService(Service):
                 duration_seconds=0.0,
             )
 
-        current_hook = hook
+        current_release = release
         total_duration = 0.0
+        oom_retries = 0
 
         for attempt in range(1 + MAX_OOM_RETRIES):
             attempt_inputs = HookInputs(
@@ -83,8 +87,8 @@ class HookService(Service):
             )
 
             try:
-                result = await self.hook_runner.run(current_hook, attempt_inputs, work_dir)
-            except OOMError:
+                result = await self.hook_runner.run(hook, current_release, attempt_inputs, work_dir)
+            except OOMError as exc:
                 # Read any partial output written before OOM
                 new_outcomes = _read_output_dir(work_dir)
                 for rid, outcome in new_outcomes.items():
@@ -99,13 +103,14 @@ class HookService(Service):
                     break
 
                 if attempt < MAX_OOM_RETRIES:
-                    current_hook = current_hook.with_doubled_memory()
+                    current_release = current_release.with_doubled_memory()
+                    oom_retries += 1
                     log.info(
                         "OOM retry {attempt}/{max_retries} for hook={hook_name}, memory={memory}, remaining={remaining} records",
                         attempt=attempt + 1,
                         max_retries=MAX_OOM_RETRIES,
                         hook_name=hook.name,
-                        memory=current_hook.runtime.limits.memory,
+                        memory=current_release.runtime.limits.memory,
                         remaining=len(remaining),
                     )
                     continue
@@ -115,10 +120,17 @@ class HookService(Service):
                         outcomes[HookRecordId(r.id)] = BatchRecordOutcome(
                             record_id=HookRecordId(r.id),
                             status=OutcomeStatus.ERRORED,
-                            error=f"OOM after {MAX_OOM_RETRIES} retries (last limit: {current_hook.runtime.limits.memory})",
+                            error=f"OOM after {MAX_OOM_RETRIES} retries (last limit: {current_release.runtime.limits.memory})",
                         )
                     await self.hook_storage.write_batch_outcomes(work_dir, outcomes)
-                    raise
+                    # Surface the real retry count so the batch wrapper can record
+                    # it on the failed execution's provenance.
+                    raise OOMError(
+                        f"OOM after {oom_retries} retries "
+                        f"(last limit: {current_release.runtime.limits.memory})",
+                        oom_retries=oom_retries,
+                        container_logs=exc.container_logs,
+                    )
             # Non-OOM exceptions (TransientError, PermanentError, etc.)
             # propagate uncaught to the worker layer
 
@@ -138,6 +150,7 @@ class HookService(Service):
                     status=HookStatus.REJECTED,
                     rejection_reason=result.rejection_reason,
                     duration_seconds=total_duration,
+                    oom_retries=oom_retries,
                 )
             else:
                 # Success (PASSED)
@@ -151,24 +164,39 @@ class HookService(Service):
             hook_name=hook.name,
             status=HookStatus.PASSED,
             duration_seconds=total_duration,
+            oom_retries=oom_retries,
         )
 
     async def run_hooks_for_batch(
         self,
-        hooks: list[HookDefinition],
+        hook_releases: list[tuple[HookIdentity, HookRelease]],
         inputs: HookInputs,
-        work_dirs: dict[str, Path],
-    ) -> list[HookResult]:
+        work_dirs: dict[HookName, Path],
+    ) -> list[HookExecution]:
         """Run multiple hooks sequentially for a batch of records.
 
-        work_dirs maps hook_name → output directory.
+        *hook_releases* pairs each hook identity with the release resolved for
+        this run (snapshot, R8). work_dirs maps hook_name → output directory.
+
+        Errors are **values, not control flow**: a hook that raises is caught and
+        recorded as a failed :class:`HookExecution` (with its FailureKind) rather
+        than aborting the batch — so a failing hook never discards its siblings'
+        outcomes. Each execution carries *its own* wall-clock window.
         """
-        results: list[HookResult] = []
-        for hook in hooks:
+        executions: list[HookExecution] = []
+        for hook, release in hook_releases:
             work_dir = work_dirs[hook.name]
-            result = await self.run_hook(hook, inputs, work_dir)
-            results.append(result)
-        return results
+            started_at = datetime.now(UTC)
+            try:
+                result = await self.run_hook(hook, release, inputs, work_dir)
+                finished_at = datetime.now(UTC)
+                executions.append(
+                    HookExecution.completed(hook, release, result, started_at, finished_at)
+                )
+            except (OOMError, TransientError, PermanentError) as exc:
+                finished_at = datetime.now(UTC)
+                executions.append(HookExecution.failed(hook, release, exc, started_at, finished_at))
+        return executions
 
 
 def _sort_by_size(records: Iterable[HookRecord]) -> list[HookRecord]:

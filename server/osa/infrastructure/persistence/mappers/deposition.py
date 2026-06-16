@@ -4,7 +4,7 @@ from uuid import UUID
 from osa.domain.auth.model.value import UserId
 from osa.domain.deposition.model.aggregate import Deposition
 from osa.domain.deposition.model.value import DepositionFile, DepositionStatus
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, RecordSRN
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN, RecordSRN
 
 
 def row_to_deposition(row: dict[str, Any]) -> Deposition:
@@ -16,7 +16,7 @@ def row_to_deposition(row: dict[str, Any]) -> Deposition:
 
     return Deposition(
         srn=DepositionSRN.parse(row["srn"]),
-        convention_srn=ConventionSRN.parse(row["convention_srn"]),
+        convention_id=ConventionSlug.parse(row["convention_id"]),
         status=DepositionStatus(row["status"]),
         metadata=row.get("metadata", {}),
         files=files,
@@ -31,7 +31,7 @@ def deposition_to_dict(dep: Deposition) -> dict[str, Any]:
     """Convert Deposition aggregate to database dict."""
     return {
         "srn": str(dep.srn),
-        "convention_srn": str(dep.convention_srn),
+        "convention_id": str(dep.convention_id),
         "status": dep.status,
         "metadata": dep.metadata,
         "files": [f.model_dump(mode="json") for f in dep.files],

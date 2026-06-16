@@ -16,6 +16,10 @@ class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
     Handles IngestBatchPublished (batch-level event) rather than
     per-record RecordPublished. Uses read_batch_outcomes to parse
     the JSONL output format (not the single-record features.json).
+
+    Per-row provenance: each hook's ``run_id`` is read from the ``run.json`` the
+    producing run wrote into that hook's output dir (design-revisions §6) — no
+    registry call, no DB run-id lookup.
     """
 
     feature_service: FeatureService
@@ -31,9 +35,21 @@ class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
         total_inserted = 0
         skipped_dupes = 0
 
-        for hook_name in event.expected_features:
-            # Read JSONL outcomes for this hook
-            outcomes = await self.feature_storage.read_batch_outcomes(batch_output_dir, hook_name)
+        for feature in event.expected_features:
+            name = feature.root
+            # Read JSONL outcomes for this feature's hook
+            outcomes = await self.feature_storage.read_batch_outcomes(batch_output_dir, name)
+
+            run_ref = await self.feature_storage.read_run_ref(batch_output_dir, name)
+            if run_ref is None:
+                log.warn(
+                    "no run.json for feature {feature} in batch {batch_index}; "
+                    "skipping feature insert (no provenance)",
+                    feature=name,
+                    batch_index=event.batch_index,
+                    ingest_run_id=event.ingest_run_id,
+                )
+                continue
 
             # Insert features for each published record that passed this hook.
             # Map upstream source ID → published record SRN so features
@@ -51,9 +67,10 @@ class InsertBatchFeatures(EventHandler[IngestBatchPublished]):
                     continue
 
                 count = await self.feature_service.insert_features(
-                    hook_name=hook_name,
+                    feature=feature,
                     record_srn=record_srn,
                     rows=outcome.features,
+                    run_id=run_ref.run_id,
                 )
                 total_inserted += count
 

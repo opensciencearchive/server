@@ -1,4 +1,4 @@
-"""Tests for shared hook domain models: HookDefinition, OciConfig, OciLimits, TableFeatureSpec, ColumnDef."""
+"""Tests for shared hook domain models: HookIdentity, OciConfig, OciLimits, TableFeatureSpec, ColumnDef."""
 
 import pytest
 from pydantic import ValidationError
@@ -129,23 +129,15 @@ def test_oci_config_default_config():
     assert cfg.limits.timeout_seconds == 300
 
 
-def test_hook_definition_full():
+def test_hook_identity_holds_name_and_feature():
     from osa.domain.shared.model.hook import (
         ColumnDef,
-        HookDefinition,
-        OciConfig,
-        OciLimits,
+        HookIdentity,
         TableFeatureSpec,
     )
 
-    hook_def = HookDefinition(
+    ident = HookIdentity(
         name="detect_pockets",
-        runtime=OciConfig(
-            image="ghcr.io/osa/hooks/pocketeer:v1",
-            digest="sha256:abc123",
-            config={"r_min": 3.0},
-            limits=OciLimits(timeout_seconds=300, memory="512m", cpu="0.5"),
-        ),
         feature=TableFeatureSpec(
             cardinality="many",
             columns=[
@@ -154,48 +146,22 @@ def test_hook_definition_full():
             ],
         ),
     )
-    assert hook_def.name == "detect_pockets"
-    assert hook_def.runtime.image == "ghcr.io/osa/hooks/pocketeer:v1"
-    assert hook_def.runtime.digest == "sha256:abc123"
-    assert hook_def.runtime.config == {"r_min": 3.0}
-    assert hook_def.runtime.limits.timeout_seconds == 300
-    assert hook_def.feature.cardinality == "many"
-    assert len(hook_def.feature.columns) == 2
+    assert ident.name.root == "detect_pockets"
+    assert ident.feature.cardinality == "many"
+    assert len(ident.feature.columns) == 2
+    # Runtime moved to HookRelease (#145) — covered in test_hook_release.py.
+    assert not hasattr(ident, "runtime")
 
 
-def test_hook_definition_default_limits():
-    from osa.domain.shared.model.hook import (
-        HookDefinition,
-        OciConfig,
-        TableFeatureSpec,
-    )
-
-    hook_def = HookDefinition(
-        name="h",
-        runtime=OciConfig(image="img:v1", digest="sha256:abc"),
-        feature=TableFeatureSpec(cardinality="one", columns=[]),
-    )
-    assert hook_def.runtime.limits.timeout_seconds == 300
-    assert hook_def.runtime.limits.memory == "1g"
-
-
-def test_hook_definition_serialization_roundtrip():
+def test_hook_identity_serialization_roundtrip():
     from osa.domain.shared.model.hook import (
         ColumnDef,
-        HookDefinition,
-        OciConfig,
-        OciLimits,
+        HookIdentity,
         TableFeatureSpec,
     )
 
-    hook_def = HookDefinition(
+    ident = HookIdentity(
         name="detect_pockets",
-        runtime=OciConfig(
-            image="ghcr.io/osa/hooks/pocketeer:v1",
-            digest="sha256:abc123",
-            config={"key": "value"},
-            limits=OciLimits(timeout_seconds=120, memory="1g", cpu="1.5"),
-        ),
         feature=TableFeatureSpec(
             cardinality="many",
             columns=[
@@ -205,124 +171,70 @@ def test_hook_definition_serialization_roundtrip():
         ),
     )
 
-    data = hook_def.model_dump()
-    restored = HookDefinition.model_validate(data)
-    assert restored == hook_def
+    data = ident.model_dump()
+    restored = HookIdentity.model_validate(data)
+    assert restored == ident
     assert restored.feature.columns[1].required is False
-
-
-class TestMemoryDoubling:
-    """Tests for HookDefinition.with_memory() and with_doubled_memory()."""
-
-    def _make_hook(self, memory: str = "1g"):
-        from osa.domain.shared.model.hook import (
-            HookDefinition,
-            OciConfig,
-            OciLimits,
-            TableFeatureSpec,
-        )
-
-        return HookDefinition(
-            name="detect_pockets",
-            runtime=OciConfig(
-                image="img:v1",
-                digest="sha256:abc",
-                limits=OciLimits(memory=memory),
-            ),
-            feature=TableFeatureSpec(cardinality="one", columns=[]),
-        )
-
-    def test_hook_definition_with_memory(self):
-        hook = self._make_hook("1g")
-        updated = hook.with_memory("2g")
-        assert updated.runtime.limits.memory == "2g"
-        # original unchanged (frozen)
-        assert hook.runtime.limits.memory == "1g"
-
-    def test_hook_definition_with_doubled_memory_1g(self):
-        hook = self._make_hook("1g")
-        doubled = hook.with_doubled_memory()
-        assert doubled.runtime.limits.memory == "2g"
-
-    def test_hook_definition_with_doubled_memory_512m(self):
-        hook = self._make_hook("512m")
-        doubled = hook.with_doubled_memory()
-        assert doubled.runtime.limits.memory == "1g"
-
-    def test_hook_definition_with_doubled_memory_768m(self):
-        hook = self._make_hook("768m")
-        doubled = hook.with_doubled_memory()
-        assert doubled.runtime.limits.memory == "1536m"
-
-    def test_hook_definition_with_doubled_memory_preserves_other_fields(self):
-        hook = self._make_hook("1g")
-        doubled = hook.with_doubled_memory()
-        assert doubled.name == hook.name
-        assert doubled.runtime.image == hook.runtime.image
-        assert doubled.runtime.digest == hook.runtime.digest
-        assert doubled.runtime.limits.timeout_seconds == hook.runtime.limits.timeout_seconds
-        assert doubled.runtime.limits.cpu == hook.runtime.limits.cpu
-        assert doubled.feature == hook.feature
 
 
 class TestNameValidation:
     """Hook and column names must be safe PG identifiers."""
 
     def test_hook_name_rejects_uppercase(self):
-        from osa.domain.shared.model.hook import HookDefinition, OciConfig, TableFeatureSpec
+        from osa.domain.shared.model.hook import HookIdentity, OciConfig, TableFeatureSpec
 
         with pytest.raises(ValidationError):
-            HookDefinition(
+            HookIdentity(
                 name="BadName",
                 runtime=OciConfig(image="img:v1", digest="sha256:abc"),
                 feature=TableFeatureSpec(cardinality="one", columns=[]),
             )
 
     def test_hook_name_rejects_newline_injection(self):
-        from osa.domain.shared.model.hook import HookDefinition, OciConfig, TableFeatureSpec
+        from osa.domain.shared.model.hook import HookIdentity, OciConfig, TableFeatureSpec
 
         with pytest.raises(ValidationError):
-            HookDefinition(
+            HookIdentity(
                 name="hook\nEVIL_VAR=pwned",
                 runtime=OciConfig(image="img:v1", digest="sha256:abc"),
                 feature=TableFeatureSpec(cardinality="one", columns=[]),
             )
 
     def test_hook_name_rejects_path_traversal(self):
-        from osa.domain.shared.model.hook import HookDefinition, OciConfig, TableFeatureSpec
+        from osa.domain.shared.model.hook import HookIdentity, OciConfig, TableFeatureSpec
 
         with pytest.raises(ValidationError):
-            HookDefinition(
+            HookIdentity(
                 name="../etc/passwd",
                 runtime=OciConfig(image="img:v1", digest="sha256:abc"),
                 feature=TableFeatureSpec(cardinality="one", columns=[]),
             )
 
     def test_hook_name_rejects_sql_injection(self):
-        from osa.domain.shared.model.hook import HookDefinition, OciConfig, TableFeatureSpec
+        from osa.domain.shared.model.hook import HookIdentity, OciConfig, TableFeatureSpec
 
         with pytest.raises(ValidationError):
-            HookDefinition(
+            HookIdentity(
                 name="'; DROP TABLE --",
                 runtime=OciConfig(image="img:v1", digest="sha256:abc"),
                 feature=TableFeatureSpec(cardinality="one", columns=[]),
             )
 
     def test_hook_name_rejects_empty(self):
-        from osa.domain.shared.model.hook import HookDefinition, OciConfig, TableFeatureSpec
+        from osa.domain.shared.model.hook import HookIdentity, OciConfig, TableFeatureSpec
 
         with pytest.raises(ValidationError):
-            HookDefinition(
+            HookIdentity(
                 name="",
                 runtime=OciConfig(image="img:v1", digest="sha256:abc"),
                 feature=TableFeatureSpec(cardinality="one", columns=[]),
             )
 
     def test_hook_name_rejects_leading_digit(self):
-        from osa.domain.shared.model.hook import HookDefinition, OciConfig, TableFeatureSpec
+        from osa.domain.shared.model.hook import HookIdentity, OciConfig, TableFeatureSpec
 
         with pytest.raises(ValidationError):
-            HookDefinition(
+            HookIdentity(
                 name="1hook",
                 runtime=OciConfig(image="img:v1", digest="sha256:abc"),
                 feature=TableFeatureSpec(cardinality="one", columns=[]),
@@ -343,19 +255,17 @@ class TestNameValidation:
     def test_valid_names_accepted(self):
         from osa.domain.shared.model.hook import (
             ColumnDef,
-            HookDefinition,
-            OciConfig,
+            HookIdentity,
             TableFeatureSpec,
         )
 
         valid_names = ["a", "hook_v2", "pocket_detect", "x1", "a_b_c_d"]
         for name in valid_names:
-            hook = HookDefinition(
+            hook = HookIdentity(
                 name=name,
-                runtime=OciConfig(image="img:v1", digest="sha256:abc"),
                 feature=TableFeatureSpec(cardinality="one", columns=[]),
             )
-            assert hook.name == name
+            assert hook.name.root == name
 
             col = ColumnDef(name=name, json_type="number", required=True)
             assert col.name == name
@@ -364,23 +274,22 @@ class TestNameValidation:
         """Hook names must fit in derived identifiers like
         ``fk_features_{name}_record_srn`` — 23 chars overhead + up to 40-char
         hook = 63-char max, which is PG's identifier limit."""
-        from osa.domain.shared.model.hook import HookDefinition, OciConfig, TableFeatureSpec
+        from osa.domain.shared.model.hook import HookIdentity, TableFeatureSpec
 
         forty = "a" + "b" * 39
-        hook = HookDefinition(
+        hook = HookIdentity(
             name=forty,
-            runtime=OciConfig(image="img:v1", digest="sha256:abc"),
             feature=TableFeatureSpec(cardinality="one", columns=[]),
         )
-        assert hook.name == forty
+        assert hook.name.root == forty
 
     def test_hook_name_rejects_over_40_chars(self):
         """41+ char names would produce an FK name exceeding PG's 63-char
         identifier limit."""
-        from osa.domain.shared.model.hook import HookDefinition, OciConfig, TableFeatureSpec
+        from osa.domain.shared.model.hook import HookIdentity, OciConfig, TableFeatureSpec
 
         with pytest.raises(ValidationError):
-            HookDefinition(
+            HookIdentity(
                 name="a" + "b" * 40,  # 41 chars
                 runtime=OciConfig(image="img:v1", digest="sha256:abc"),
                 feature=TableFeatureSpec(cardinality="one", columns=[]),

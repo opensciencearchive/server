@@ -18,6 +18,14 @@ class Principal(Identity):
     user_id: UserId
     provider_identity: ProviderIdentity
     roles: frozenset[Role]
+    scopes: frozenset[str] = frozenset()
+    """OAuth scopes granted to a machine (M2M) credential (#145, US5).
+
+    Empty for human/user principals (authorized by ``roles``). A second token
+    issuer mints scope-limited credentials (e.g. ``conventions:write``,
+    ``hooks:write``) with empty ``roles``; the ``RequiresScope`` gate authorizes
+    on scope OR ADMIN role.
+    """
 
     def has_role(self, role: Role) -> bool:
         """Check if any assigned role >= the given role (hierarchy comparison)."""
@@ -26,3 +34,7 @@ class Principal(Identity):
     def has_any_role(self, *roles: Role) -> bool:
         """Check if any assigned role satisfies any of the given roles."""
         return any(self.has_role(r) for r in roles)
+
+    def has_scope(self, scope: str) -> bool:
+        """Check if the principal was granted the given OAuth scope."""
+        return scope in self.scopes

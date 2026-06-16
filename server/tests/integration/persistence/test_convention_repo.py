@@ -1,4 +1,11 @@
-"""Integration tests for ConventionRepository against real PostgreSQL."""
+"""Integration tests for ConventionRepository against real PostgreSQL.
+
+Feature #145: conventions are unversioned, slug-keyed (``ConventionSlug``) and
+mutable. ``save`` is an idempotent UPSERT by slug (re-saving updates in place,
+preserving ``created_at``). Hooks are referenced by **name** (``HookName``) —
+the versioned release each name resolves to lives in the validation hook
+registry, not inline on the convention.
+"""
 
 from datetime import UTC, datetime
 
@@ -7,20 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.value import FileRequirements
-from osa.domain.shared.model.hook import (
-    ColumnDef,
-    HookDefinition,
-    OciConfig,
-    OciLimits,
-    TableFeatureSpec,
-)
+from osa.domain.shared.model.hook import HookName
 from osa.domain.shared.model.source import (
     IngesterDefinition,
     IngesterLimits,
     IngesterScheduleConfig,
     InitialRunConfig,
 )
-from osa.domain.shared.model.srn import ConventionSRN, SchemaId
+from osa.domain.shared.model.srn import ConventionSlug, SchemaId
 from osa.infrastructure.persistence.repository.convention import (
     PostgresConventionRepository,
 )
@@ -28,14 +29,14 @@ from osa.infrastructure.persistence.repository.convention import (
 
 def _make_convention(
     *,
-    srn: str = "urn:osa:localhost:conv:test-convention-001@1.0.0",
+    slug: str = "test-convention",
     title: str = "Test Convention",
     schema_id: str = "test-schema-001@1.0.0",
-    hooks: list[HookDefinition] | None = None,
+    hooks: list[HookName] | None = None,
     ingester: IngesterDefinition | None = None,
 ) -> Convention:
     return Convention(
-        srn=ConventionSRN.parse(srn),
+        id=ConventionSlug.parse(slug),
         title=title,
         description="A test convention for integration tests",
         schema_id=SchemaId.parse(schema_id),
@@ -51,23 +52,8 @@ def _make_convention(
     )
 
 
-def _make_hook() -> HookDefinition:
-    return HookDefinition(
-        name="quality_check",
-        runtime=OciConfig(
-            image="ghcr.io/example/validator:latest",
-            digest="sha256:abc123",
-            config={"threshold": 0.95},
-            limits=OciLimits(timeout_seconds=600, memory="4g", cpu="2.0"),
-        ),
-        feature=TableFeatureSpec(
-            cardinality="many",
-            columns=[
-                ColumnDef(name="score", json_type="number", required=True),
-                ColumnDef(name="labels", json_type="array", required=False),
-            ],
-        ),
-    )
+def _make_hook() -> HookName:
+    return HookName("quality_check")
 
 
 def _make_ingester() -> IngesterDefinition:
@@ -94,18 +80,16 @@ class TestConventionRepoRoundTrip:
         await repo.save(conv)
         await pg_session.commit()
 
-        got = await repo.get(conv.srn)
+        got = await repo.get(conv.id)
         assert got is not None
-        assert str(got.srn) == str(conv.srn)
+        assert str(got.id) == str(conv.id)
         assert got.title == conv.title
         assert got.description == conv.description
         assert str(got.schema_id) == str(conv.schema_id)
         assert got.file_requirements == conv.file_requirements
         assert len(got.hooks) == 1
-        assert got.hooks[0].runtime.image == hook.runtime.image
-        assert got.hooks[0].runtime.digest == hook.runtime.digest
-        assert got.hooks[0].name == "quality_check"
-        assert got.hooks[0].feature.columns[0].name == "score"
+        # Hooks are name references now (registry resolves the live release).
+        assert got.hooks[0].root == "quality_check"
         assert got.ingester is not None
         assert got.ingester.image == ingester.image
         assert got.ingester.schedule is not None
@@ -115,14 +99,39 @@ class TestConventionRepoRoundTrip:
 
     async def test_get_nonexistent_returns_none(self, pg_session: AsyncSession):
         repo = PostgresConventionRepository(pg_session)
-        got = await repo.get(ConventionSRN.parse("urn:osa:localhost:conv:does-not-exist@1.0.0"))
+        got = await repo.get(ConventionSlug.parse("does-not-exist"))
         assert got is None
+
+    async def test_save_is_idempotent_upsert_preserving_created_at(self, pg_session: AsyncSession):
+        """Re-saving a slug updates in place and preserves the original created_at
+        (conventions are mutable + unversioned in #145 — no insert conflict)."""
+        repo = PostgresConventionRepository(pg_session)
+        conv = _make_convention(slug="upsert-me", title="Original")
+        original_created_at = conv.created_at
+
+        await repo.save(conv)
+        await pg_session.commit()
+
+        # Re-declare with a different title + later created_at; upsert keeps the
+        # original created_at but applies the new title.
+        updated = _make_convention(slug="upsert-me", title="Updated")
+        await repo.save(updated)
+        await pg_session.commit()
+
+        got = await repo.get(ConventionSlug.parse("upsert-me"))
+        assert got is not None
+        assert got.title == "Updated"
+        assert got.created_at == original_created_at
+
+        # Still exactly one row for this slug.
+        result = await repo.list()
+        assert sum(1 for c in result if c.id.root == "upsert-me") == 1
 
     async def test_list_returns_ordered_by_created_at_desc(self, pg_session: AsyncSession):
         repo = PostgresConventionRepository(pg_session)
 
-        conv_a = _make_convention(srn="urn:osa:localhost:conv:conv-aaa@1.0.0", title="First")
-        conv_b = _make_convention(srn="urn:osa:localhost:conv:conv-bbb@1.0.0", title="Second")
+        conv_a = _make_convention(slug="conv-aaa", title="First")
+        conv_b = _make_convention(slug="conv-bbb", title="Second")
 
         await repo.save(conv_a)
         await pg_session.flush()
@@ -140,7 +149,7 @@ class TestConventionRepoRoundTrip:
 
         for i in range(5):
             conv = _make_convention(
-                srn=f"urn:osa:localhost:conv:conv-{i:03d}@1.0.0",
+                slug=f"conv-{i:03d}",
                 title=f"Conv {i}",
             )
             await repo.save(conv)
@@ -157,11 +166,11 @@ class TestConventionRepoRoundTrip:
         await repo.save(conv)
         await pg_session.commit()
 
-        assert await repo.exists(conv.srn) is True
+        assert await repo.exists(conv.id) is True
 
     async def test_exists_false(self, pg_session: AsyncSession):
         repo = PostgresConventionRepository(pg_session)
-        assert await repo.exists(ConventionSRN.parse("urn:osa:localhost:conv:nope@1.0.0")) is False
+        assert await repo.exists(ConventionSlug.parse("nope-nope")) is False
 
     async def test_convention_without_ingester(self, pg_session: AsyncSession):
         """Ingester is optional — should be None on retrieval when not set."""
@@ -170,7 +179,7 @@ class TestConventionRepoRoundTrip:
         await repo.save(conv)
         await pg_session.commit()
 
-        got = await repo.get(conv.srn)
+        got = await repo.get(conv.id)
         assert got is not None
         assert got.ingester is None
         assert got.hooks == []

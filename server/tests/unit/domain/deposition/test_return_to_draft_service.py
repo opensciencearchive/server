@@ -10,7 +10,7 @@ from osa.domain.auth.model.value import UserId
 from osa.domain.deposition.model.aggregate import Deposition
 from osa.domain.deposition.model.value import DepositionStatus
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
 from osa.domain.validation.event.validation_failed import ValidationFailed
 from osa.domain.validation.model import RunStatus
 
@@ -19,14 +19,14 @@ def _make_dep_srn() -> DepositionSRN:
     return DepositionSRN.parse("urn:osa:localhost:dep:test-dep")
 
 
-def _make_conv_srn() -> ConventionSRN:
-    return ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
+def _make_conv_slug() -> ConventionSlug:
+    return ConventionSlug("test-conv")
 
 
 def _make_deposition(status: DepositionStatus = DepositionStatus.IN_VALIDATION) -> Deposition:
     return Deposition(
         srn=_make_dep_srn(),
-        convention_srn=_make_conv_srn(),
+        convention_id=_make_conv_slug(),
         status=status,
         owner_id=UserId(uuid4()),
         created_at=datetime.now(UTC),
@@ -91,7 +91,7 @@ class TestReturnToDraftHandlerDelegatesToService:
         event = ValidationFailed(
             id=EventId(uuid4()),
             deposition_srn=_make_dep_srn(),
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             status=RunStatus.FAILED,
             reasons=["Missing required field"],
         )
@@ -112,7 +112,7 @@ class TestReturnToDraftHandlerDelegatesToService:
         event = ValidationFailed(
             id=EventId(uuid4()),
             deposition_srn=_make_dep_srn(),
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             status=RunStatus.FAILED,
             reasons=["error"],
         )

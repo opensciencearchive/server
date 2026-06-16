@@ -21,15 +21,15 @@ from osa.domain.deposition.event.metadata_updated import MetadataUpdatedEvent
 from osa.domain.deposition.event.submitted import DepositionSubmittedEvent
 from osa.domain.deposition.service.deposition import DepositionService
 from osa.domain.shared.error import NotFoundError, ValidationError
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, Domain, SchemaId
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN, Domain, SchemaId
 
 
 def _make_dep_srn(id: str = "test-dep") -> DepositionSRN:
     return DepositionSRN.parse(f"urn:osa:localhost:dep:{id}")
 
 
-def _make_conv_srn(id: str = "test-conv", version: str = "1.0.0") -> ConventionSRN:
-    return ConventionSRN.parse(f"urn:osa:localhost:conv:{id}@{version}")
+def _make_conv_slug(slug: str = "test-conv") -> ConventionSlug:
+    return ConventionSlug(slug)
 
 
 def _make_schema_id(id: str = "test-schema", version: str = "1.0.0") -> SchemaId:
@@ -49,8 +49,9 @@ def _make_file_reqs(**overrides) -> FileRequirements:
 
 def _make_convention(**overrides) -> Convention:
     defaults = dict(
-        srn=_make_conv_srn(),
+        id=_make_conv_slug(),
         title="Test Convention",
+        description="A test convention",
         schema_id=_make_schema_id(),
         file_requirements=_make_file_reqs(),
         created_at=datetime.now(UTC),
@@ -62,7 +63,7 @@ def _make_convention(**overrides) -> Convention:
 def _make_deposition(**overrides) -> Deposition:
     defaults = dict(
         srn=_make_dep_srn(),
-        convention_srn=_make_conv_srn(),
+        convention_id=_make_conv_slug(),
         owner_id=UserId(uuid4()),
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -95,10 +96,10 @@ class TestDepositionServiceCreate:
 
         service = _make_service(conv_repo=conv_repo)
         result = await service.create(
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             owner_id=owner,
         )
-        assert result.convention_srn == _make_conv_srn()
+        assert result.convention_id == _make_conv_slug()
         assert result.owner_id == owner
         assert result.status == DepositionStatus.DRAFT
 
@@ -110,7 +111,7 @@ class TestDepositionServiceCreate:
         service = _make_service(conv_repo=conv_repo)
         with pytest.raises(NotFoundError, match="Convention not found"):
             await service.create(
-                convention_srn=_make_conv_srn(),
+                convention_id=_make_conv_slug(),
                 owner_id=UserId(uuid4()),
             )
 
@@ -121,7 +122,7 @@ class TestDepositionServiceCreate:
 
         service = _make_service(conv_repo=conv_repo)
         result = await service.create(
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             owner_id=UserId(uuid4()),
         )
         assert str(result.srn).startswith("urn:osa:localhost:dep:")
@@ -134,27 +135,27 @@ class TestDepositionServiceCreate:
 
         service = _make_service(dep_repo=dep_repo, conv_repo=conv_repo)
         await service.create(
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             owner_id=UserId(uuid4()),
         )
         dep_repo.save.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_create_emits_deposition_created_event(self):
-        conv_srn = _make_conv_srn()
+        conv_slug = _make_conv_slug()
         conv_repo = AsyncMock()
-        conv_repo.get.return_value = _make_convention(srn=conv_srn)
+        conv_repo.get.return_value = _make_convention(id=conv_slug)
         outbox = AsyncMock()
         owner = UserId(uuid4())
 
         service = _make_service(conv_repo=conv_repo, outbox=outbox)
-        result = await service.create(convention_srn=conv_srn, owner_id=owner)
+        result = await service.create(convention_id=conv_slug, owner_id=owner)
 
         outbox.append.assert_called_once()
         event = outbox.append.call_args[0][0]
         assert isinstance(event, DepositionCreatedEvent)
         assert event.deposition_id == result.srn
-        assert event.convention_srn == conv_srn
+        assert event.convention_id == conv_slug
         assert event.owner_id == owner
 
 

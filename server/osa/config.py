@@ -225,6 +225,25 @@ class AdminsConfig(BaseModel):
         return v
 
 
+class ExtraIssuerConfig(BaseModel):
+    """Optional second JWT issuer for machine (M2M) credentials (#145, US5).
+
+    When absent, token validation is byte-identical to the single-HS256-secret
+    path (SC-007). When present, tokens whose ``iss`` matches ``issuer`` are
+    verified against ``public_key`` (Ed25519, verify-only) and authorized by the
+    scopes parsed from ``scope_claim`` rather than DB roles.
+
+    The signature algorithm is fixed to **EdDSA (Ed25519)** — not configurable.
+    Pinning a single asymmetric algorithm removes a whole class of misconfig /
+    downgrade footguns (no ``none``, no HS256-treats-the-PEM-as-a-shared-secret).
+    """
+
+    issuer: str  # expected `iss` claim
+    public_key: str  # Ed25519 public key, PEM (verify-only)
+    audience: str  # expected `aud`
+    scope_claim: str = "scope"  # "scope" (space-delimited) or "scp" (array)
+
+
 class AuthConfig(BaseModel):
     """Authentication configuration."""
 
@@ -232,6 +251,8 @@ class AuthConfig(BaseModel):
     # JwtConfig has a loud dev default; the boot safety check refuses to
     # start on the default secret unless `dev_mode=True` and bind is loopback.
     jwt: JwtConfig = JwtConfig()
+    # Optional M2M issuer (#145, US5). None → existing single-issuer behaviour.
+    extra_issuer: ExtraIssuerConfig | None = None
     callback_url: str = ""  # Full callback URL (e.g., https://myarchive.org/api/v1/auth/callback)
     base_role: str | None = None  # Implicit role for all authenticated users (e.g., "DEPOSITOR")
     admins: AdminsConfig = AdminsConfig()

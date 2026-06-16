@@ -7,7 +7,7 @@ from pydantic import Field
 
 from osa.domain.shared.model.aggregate import Aggregate
 from osa.domain.shared.model.source import RecordSource
-from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaId
+from osa.domain.shared.model.srn import ConventionSlug, RecordSRN, SchemaId
 
 
 class Record(Aggregate):
@@ -15,7 +15,7 @@ class Record(Aggregate):
 
     srn: RecordSRN
     source: RecordSource
-    convention_srn: ConventionSRN
+    convention_id: ConventionSlug
     schema_id: SchemaId = Field(frozen=True)
     metadata: dict[str, Any]
     published_at: datetime

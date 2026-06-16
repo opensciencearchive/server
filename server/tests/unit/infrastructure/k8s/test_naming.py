@@ -2,7 +2,7 @@
 
 import re
 
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
 from osa.infrastructure.k8s.naming import job_name, label_value, sanitize_label
 
 
@@ -78,10 +78,13 @@ class TestLabelValue:
         assert result == "localhost.dep.abc123"
         assert ":" not in result
 
-    def test_convention_srn_with_version(self):
-        srn = ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
-        result = label_value(srn)
-        assert result == "localhost.conv.test.1.0.0"
+    def test_convention_slug(self):
+        # Conventions are now identified by a bare slug (#145); the runner
+        # passes ``slug.root`` to label_value.
+        slug = ConventionSlug("pdb-structure")
+        result = label_value(slug.root)
+        assert result == "pdb-structure"
+        assert ":" not in result
 
     def test_no_colons_in_output(self):
         srn = DepositionSRN.parse("urn:osa:archive.university.edu:dep:xyz789")

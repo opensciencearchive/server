@@ -2,7 +2,7 @@ from dishka import provide
 
 from osa.config import Config
 from osa.domain.deposition.command.create import CreateDepositionHandler
-from osa.domain.deposition.command.create_convention import CreateConventionHandler
+from osa.domain.deposition.command.create_convention import DeployConventionHandler
 from osa.domain.deposition.command.delete_files import DeleteFileHandler
 from osa.domain.deposition.command.submit import SubmitDepositionHandler
 from osa.domain.deposition.command.update import UpdateMetadataHandler
@@ -19,6 +19,7 @@ from osa.domain.deposition.query.get_deposition import GetDepositionHandler
 from osa.domain.deposition.query.list_conventions import ListConventionsHandler
 from osa.domain.deposition.query.list_depositions import ListDepositionsHandler
 from osa.domain.deposition.service.convention import ConventionService
+from osa.domain.validation.service.hook_registry import HookRegistryService
 from osa.domain.deposition.service.deposition import DepositionService
 from osa.domain.metadata.service.metadata import MetadataService
 from osa.domain.semantics.service.schema import SchemaService
@@ -53,6 +54,7 @@ class DepositionProvider(Provider):
         convention_repo: ConventionRepository,
         schema_service: SchemaService,
         metadata_service: MetadataService,
+        hook_registry: HookRegistryService,
         outbox: Outbox,
         config: Config,
     ) -> ConventionService:
@@ -60,6 +62,7 @@ class DepositionProvider(Provider):
             convention_repo=convention_repo,
             schema_service=schema_service,
             metadata_service=metadata_service,
+            hook_registry=hook_registry,
             outbox=outbox,
             node_domain=Domain(config.domain),
         )
@@ -75,7 +78,7 @@ class DepositionProvider(Provider):
     upload_handler = provide(UploadFileHandler, scope=Scope.UOW)
     delete_file_handler = provide(DeleteFileHandler, scope=Scope.UOW)
     upload_spreadsheet_handler = provide(UploadSpreadsheetHandler, scope=Scope.UOW)
-    create_convention_handler = provide(CreateConventionHandler, scope=Scope.UOW)
+    deploy_convention_handler = provide(DeployConventionHandler, scope=Scope.UOW)
 
     # Query Handlers
     get_deposition_handler = provide(GetDepositionHandler, scope=Scope.UOW)

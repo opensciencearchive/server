@@ -3,11 +3,14 @@
 import logging
 import uuid
 from datetime import datetime, timezone
+from uuid import uuid4
+
 from typing import Any
 
-from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.error import InfrastructureError, NotFoundError, OOMError
+from osa.domain.shared.model.hook import HookIdentity, HookName
 from osa.domain.shared.model.srn import (
-    ConventionSRN,
+    ConventionSlug,
     DepositionSRN,
     Domain,
     LocalId,
@@ -19,11 +22,14 @@ from osa.domain.validation.model import (
     ValidationRun,
 )
 from osa.domain.validation.model.hook_input import HookRecord
+from osa.domain.validation.model.hook_release import HookRelease
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
+from osa.domain.validation.model.hook_run import HookRun, HookRunId, HookRunStatus
 from osa.domain.validation.port.hook_runner import HookInputs, HookRunner
 from osa.domain.validation.port.repository import ValidationRunRepository
 from osa.domain.validation.port.storage import HookStoragePort
 from osa.domain.validation.service.hook import HookService
+from osa.domain.validation.service.hook_registry import HookRegistryService
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +40,7 @@ class ValidationService(Service):
     run_repo: ValidationRunRepository
     hook_runner: HookRunner
     hook_storage: HookStoragePort
+    hook_registry: HookRegistryService
     node_domain: Domain
 
     async def create_run(
@@ -63,13 +70,14 @@ class ValidationService(Service):
         run: ValidationRun,
         deposition_srn: DepositionSRN,
         inputs: HookInputs,
-        hooks: list[HookDefinition],
+        hook_names: list[HookName],
     ) -> tuple[ValidationRun, list[HookResult]]:
         """Execute hooks sequentially with OOM retry. Halt on reject/fail/OOM.
 
-        Hook outputs are written to durable cold storage under the deposition directory.
-        Feature insertion is deferred to record publication time.
-        Each hook is executed via HookService which handles OOM retry with memory doubling.
+        Resolves each hook's live release once at run start (snapshot, R8) and
+        records an append-only ``hook_run`` per hook (deposition context). The
+        run ids are reconstructed at feature-insert time from the deposition,
+        so they are recorded here but not returned.
         """
         run.status = RunStatus.RUNNING
         run.started_at = datetime.now(timezone.utc)
@@ -80,16 +88,69 @@ class ValidationService(Service):
             hook_storage=self.hook_storage,
         )
 
+        # Resolve identity + live release per hook (snapshot).
+        releases = await self.hook_registry.resolve_live(hook_names)
+        pairs: list[tuple[HookIdentity, HookRelease]] = []
+        for name in hook_names:
+            hook = await self.hook_registry.get_hook(name)
+            release = releases.get(name)
+            if hook is None or release is None:
+                raise NotFoundError(f"Hook {name!r} has no live release")
+            pairs.append((HookIdentity(name=hook.name, feature=hook.feature), release))
+
         hook_results: list[HookResult] = []
         overall_status: RunStatus = RunStatus.COMPLETED
 
-        for hook in hooks:
-            work_dir = self.hook_storage.get_hook_output_dir(deposition_srn, hook.name)
+        for hook, release in pairs:
+            work_dir = self.hook_storage.get_hook_output_dir(deposition_srn, hook.name.root)
+            started_at = datetime.now(timezone.utc)
+            run_id = HookRunId(uuid4())
             try:
-                result = await hook_service.run_hook(hook, inputs, work_dir)
-            except Exception:
+                result = await hook_service.run_hook(hook, release, inputs, work_dir)
+            except Exception as exc:
+                finished_at = datetime.now(timezone.utc)
+                # Record ANY failure as a terminal ERROR run. Capture the failed
+                # container's logs (typed on InfrastructureError, else the message)
+                # to a tenant-scoped artifact so the ERROR is diagnosable (#145/#147).
+                text = (
+                    exc.container_logs
+                    if isinstance(exc, InfrastructureError) and exc.container_logs
+                    else str(exc)
+                )
+                log_ref = await self.hook_storage.write_hook_log(work_dir, text)
+                # run_hook re-raises OOMError carrying the real retry count after
+                # exhausting memory retries — record it, don't zero it (mirrors
+                # the batch path's HookExecution.failed). Non-OOM failures: 0.
+                oom_retries = exc.oom_retries or 0 if isinstance(exc, OOMError) else 0
+                await self.hook_registry.record_run(
+                    HookRun(
+                        id=run_id,
+                        release_id=release.id,
+                        status=HookRunStatus.ERROR,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        duration_s=(finished_at - started_at).total_seconds(),
+                        oom_retries=oom_retries,
+                        log_ref=log_ref,
+                    )
+                )
                 overall_status = RunStatus.FAILED
                 break
+
+            finished_at = datetime.now(timezone.utc)
+            # run.json carries run_id to InsertRecordFeatures — no DB lookup (§6).
+            await self.hook_storage.write_run_ref(work_dir, str(run_id), str(release.id))
+            await self.hook_registry.record_run(
+                HookRun(
+                    id=run_id,
+                    release_id=release.id,
+                    status=HookRunStatus.from_hook_status(result.status),
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    duration_s=result.duration_seconds,
+                    oom_retries=result.oom_retries,
+                )
+            )
             hook_results.append(result)
 
             if result.status == HookStatus.REJECTED:
@@ -106,9 +167,9 @@ class ValidationService(Service):
     async def validate_deposition(
         self,
         deposition_srn: DepositionSRN,
-        convention_srn: ConventionSRN,
+        convention_id: ConventionSlug,
         metadata: dict[str, Any],
-        hooks: list[HookDefinition],
+        hooks: list[HookName],
     ) -> tuple[ValidationRun, list[HookResult]]:
         """Full validation workflow using enriched event data.
 
@@ -133,14 +194,12 @@ class ValidationService(Service):
             await self.run_repo.save(run)
             return run, []
 
-        run, hook_results = await self.run_hooks(
+        return await self.run_hooks(
             run=run,
             deposition_srn=deposition_srn,
             inputs=inputs,
-            hooks=hooks,
+            hook_names=hooks,
         )
-
-        return run, hook_results
 
     async def save_run(self, run: ValidationRun) -> None:
         """Persist a validation run."""

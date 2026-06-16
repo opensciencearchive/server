@@ -5,12 +5,12 @@ from osa.domain.auth.model.value import UserId
 from osa.domain.deposition.model.value import DepositionFile, DepositionStatus
 from osa.domain.shared.error import InvalidStateError
 from osa.domain.shared.model.aggregate import Aggregate
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN, RecordSRN
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN, RecordSRN
 
 
 class Deposition(Aggregate):
     srn: DepositionSRN
-    convention_srn: ConventionSRN
+    convention_id: ConventionSlug
     status: DepositionStatus = DepositionStatus.DRAFT
     metadata: dict[str, Any] = {}
     files: list[DepositionFile] = []

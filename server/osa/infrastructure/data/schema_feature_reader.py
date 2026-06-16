@@ -68,6 +68,7 @@ class SchemaFeatureReader:
         result = await self.session.execute(stmt)
         names: set[str] = set()
         for (hooks,) in result.all():
-            for hook in hooks or []:
-                names.add(hook["name"])
+            # conventions.hooks is a JSON list of bare hook-name strings (#145).
+            for hook_name in hooks or []:
+                names.add(hook_name)
         return names

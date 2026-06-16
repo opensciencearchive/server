@@ -9,9 +9,11 @@ from osa.domain.feature.handler.insert_record_features import InsertRecordFeatur
 from osa.domain.feature.service.feature import FeatureService
 from osa.domain.record.event.record_published import RecordPublished
 from osa.domain.shared.event import EventId
+from osa.domain.shared.model.hook import FeatureName
+from osa.domain.shared.model.provenance import RunRef
 from osa.domain.shared.model.source import DepositionSource, IngestSource
 from osa.domain.shared.model.srn import (
-    ConventionSRN,
+    ConventionSlug,
     RecordSRN,
     SchemaId,
 )
@@ -21,8 +23,12 @@ def _make_record_srn() -> RecordSRN:
     return RecordSRN.parse("urn:osa:localhost:rec:test-rec@1")
 
 
-def _make_conv_srn() -> ConventionSRN:
-    return ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
+def _make_conv_slug() -> ConventionSlug:
+    return ConventionSlug("test")
+
+
+def _make_run_ref() -> RunRef:
+    return RunRef(run_id="run-abc", release_id="rel-xyz")
 
 
 def _make_schema_id() -> SchemaId:
@@ -37,7 +43,7 @@ def _make_event(
         record_srn=_make_record_srn(),
         source=DepositionSource(id="urn:osa:localhost:dep:test-dep"),
         metadata={"title": "Test"},
-        convention_srn=_make_conv_srn(),
+        convention_id=_make_conv_slug(),
         schema_id=_make_schema_id(),
         expected_features=expected_features or [],
     )
@@ -81,7 +87,7 @@ class TestInsertRecordFeaturesHandler:
         feature_service.insert_features_for_record.assert_called_once_with(
             hook_output_dir="/fake/output/dir",
             record_srn=str(event.record_srn),
-            expected_features=["pocket_detect"],
+            expected_features=[FeatureName("pocket_detect")],
         )
 
 
@@ -91,6 +97,7 @@ class TestFeatureServiceInsertFeaturesForRecord:
         """Reads features.json from cold storage and inserts with record_srn."""
         feature_storage = AsyncMock()
         feature_storage.hook_features_exist.return_value = True
+        feature_storage.read_run_ref.return_value = _make_run_ref()
         feature_storage.read_hook_features.return_value = [{"score": 0.95}, {"score": 0.82}]
 
         feature_store = AsyncMock()
@@ -104,13 +111,15 @@ class TestFeatureServiceInsertFeaturesForRecord:
         await service.insert_features_for_record(
             hook_output_dir="/fake/output/dir",
             record_srn=str(_make_record_srn()),
-            expected_features=["pocket_detect"],
+            expected_features=[FeatureName("pocket_detect")],
         )
 
+        # run_id (from the hook output dir's run.json) is stamped on every row (#145).
         feature_store.insert_features.assert_called_once_with(
             "pocket_detect",
             str(_make_record_srn()),
             [{"score": 0.95}, {"score": 0.82}],
+            "run-abc",
         )
 
     @pytest.mark.asyncio
@@ -129,7 +138,7 @@ class TestFeatureServiceInsertFeaturesForRecord:
         await service.insert_features_for_record(
             hook_output_dir="/fake/output/dir",
             record_srn=str(_make_record_srn()),
-            expected_features=["pocket_detect"],
+            expected_features=[FeatureName("pocket_detect")],
         )
 
         feature_storage.read_hook_features.assert_not_called()
@@ -152,9 +161,32 @@ class TestFeatureServiceInsertFeaturesForRecord:
         await service.insert_features_for_record(
             hook_output_dir="/fake/output/dir",
             record_srn=str(_make_record_srn()),
-            expected_features=["pocket_detect"],
+            expected_features=[FeatureName("pocket_detect")],
         )
 
+        feature_store.insert_features.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_features_without_run_json(self):
+        """A hook with features but no run.json is skipped (no provenance, #145)."""
+        feature_storage = AsyncMock()
+        feature_storage.hook_features_exist.return_value = True
+        feature_storage.read_run_ref.return_value = None
+
+        feature_store = AsyncMock()
+
+        service = _make_feature_service(
+            feature_store=feature_store,
+            feature_storage=feature_storage,
+        )
+
+        await service.insert_features_for_record(
+            hook_output_dir="/fake/output/dir",
+            record_srn=str(_make_record_srn()),
+            expected_features=[FeatureName("pocket_detect")],
+        )
+
+        feature_storage.read_hook_features.assert_not_called()
         feature_store.insert_features.assert_not_called()
 
     @pytest.mark.asyncio
@@ -162,6 +194,7 @@ class TestFeatureServiceInsertFeaturesForRecord:
         """Processes all expected features."""
         feature_storage = AsyncMock()
         feature_storage.hook_features_exist.return_value = True
+        feature_storage.read_run_ref.return_value = _make_run_ref()
         feature_storage.read_hook_features.side_effect = [
             [{"score": 0.9}],
             [{"score": 0.8}],
@@ -178,7 +211,7 @@ class TestFeatureServiceInsertFeaturesForRecord:
         await service.insert_features_for_record(
             hook_output_dir="/fake/output/dir",
             record_srn=str(_make_record_srn()),
-            expected_features=["hook_a", "hook_b"],
+            expected_features=[FeatureName("hook_a"), FeatureName("hook_b")],
         )
 
         assert feature_store.insert_features.call_count == 2
@@ -224,7 +257,7 @@ class TestInsertRecordFeaturesIngestSource:
                 upstream_source="pdb",
             ),
             metadata={"title": "Ingested"},
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             schema_id=_make_schema_id(),
             expected_features=["pocket_detect"],
         )
@@ -234,5 +267,5 @@ class TestInsertRecordFeaturesIngestSource:
         feature_service.insert_features_for_record.assert_called_once_with(
             hook_output_dir="/fake/ingest/dir",
             record_srn=str(_make_record_srn()),
-            expected_features=["pocket_detect"],
+            expected_features=[FeatureName("pocket_detect")],
         )

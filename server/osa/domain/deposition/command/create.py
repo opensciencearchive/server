@@ -3,11 +3,11 @@ from osa.domain.auth.model.role import Role
 from osa.domain.deposition.service.deposition import DepositionService
 from osa.domain.shared.authorization.gate import at_least
 from osa.domain.shared.command import Command, CommandHandler, Result
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
 
 
 class CreateDeposition(Command):
-    convention_srn: ConventionSRN
+    convention_id: ConventionSlug
 
 
 class DepositionCreated(Result):
@@ -21,7 +21,7 @@ class CreateDepositionHandler(CommandHandler[CreateDeposition, DepositionCreated
 
     async def run(self, cmd: CreateDeposition) -> DepositionCreated:
         dep = await self.deposition_service.create(
-            convention_srn=cmd.convention_srn,
+            convention_id=cmd.convention_id,
             owner_id=self.principal.user_id,
         )
         return DepositionCreated(srn=dep.srn)

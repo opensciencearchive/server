@@ -2,11 +2,11 @@
 
 from osa.domain.record.model.draft import RecordDraft
 from osa.domain.shared.model.source import DepositionSource
-from osa.domain.shared.model.srn import ConventionSRN
+from osa.domain.shared.model.srn import ConventionSlug
 
 
-def _make_conv_srn() -> ConventionSRN:
-    return ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
+def _make_conv_slug() -> ConventionSlug:
+    return ConventionSlug("test")
 
 
 class TestRecordDraft:
@@ -14,17 +14,17 @@ class TestRecordDraft:
         draft = RecordDraft(
             source=DepositionSource(id="urn:osa:localhost:dep:abc"),
             metadata={"title": "Test"},
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
         )
         assert draft.source.type == "deposition"
         assert draft.metadata == {"title": "Test"}
-        assert draft.convention_srn == _make_conv_srn()
+        assert draft.convention_id == _make_conv_slug()
 
     def test_expected_features_defaults_empty(self):
         draft = RecordDraft(
             source=DepositionSource(id="dep-1"),
             metadata={},
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
         )
         assert draft.expected_features == []
 
@@ -32,7 +32,7 @@ class TestRecordDraft:
         draft = RecordDraft(
             source=DepositionSource(id="dep-1"),
             metadata={},
-            convention_srn=_make_conv_srn(),
+            convention_id=_make_conv_slug(),
             expected_features=["pocket_detect", "qc_check"],
         )
-        assert draft.expected_features == ["pocket_detect", "qc_check"]
+        assert [f.root for f in draft.expected_features] == ["pocket_detect", "qc_check"]

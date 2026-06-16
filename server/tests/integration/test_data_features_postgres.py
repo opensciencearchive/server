@@ -38,7 +38,7 @@ from osa.infrastructure.persistence.repository.schema import (
 )
 from osa.infrastructure.persistence.tables import conventions_table
 
-from tests.integration.conftest import seed_record
+from tests.integration.conftest import seed_hook_run, seed_record
 
 SCHEMA = SchemaId.parse("compound@1.0.0")
 SCHEMA_B = SchemaId.parse("protein@1.0.0")
@@ -79,33 +79,39 @@ async def _register_hook(
     session: AsyncSession,
     hook_name: str = HOOK,
     schema: SchemaId = SCHEMA,
-) -> None:
-    """Link the schema → hook via a convention row, then create its feature table.
+) -> str:
+    """Link the schema → hook via a convention row, seed the provenance chain,
+    and create the hook's feature table. Returns a real ``hook_runs.id`` to
+    stamp on inserted feature rows (#145).
 
-    The read store only reads ``hooks[*].name`` from the convention, so a
-    name-only hooks payload is sufficient to scope the feature to the schema.
-    A pre-existing feature table is reused, mirroring ``CreateFeatureTables``
-    (which swallows the ConflictError when two conventions share a hook name).
+    The read store only reads hook **names** from the convention's ``hooks``
+    column (now a JSON list of name strings), so a name-only payload is
+    sufficient to scope the feature to the schema. A pre-existing feature table
+    is reused, mirroring ``CreateFeatureTables`` (which swallows the
+    ConflictError when two conventions share a hook name).
     """
     await session.execute(
         conventions_table.insert().values(
-            srn=f"urn:osa:localhost:conv:{schema.id.root}-{hook_name}@1.0.0",
+            id=f"{schema.id.root}-{hook_name}",
             title=f"{schema.id.root} conv",
-            description=None,
+            description=f"{schema.id.root} convention",
             schema_id=schema.id.root,
             schema_version=schema.version.root,
             file_requirements={},
-            hooks=[{"name": hook_name}],
+            hooks=[hook_name],
             source=None,
             created_at=datetime.now(UTC),
         )
     )
     await session.commit()
+    # Seed hooks/releases/runs so feature rows have a valid run_id FK target.
+    run_id = await seed_hook_run(engine, feature_name=hook_name, columns=_feature_columns())
     feature_store = PostgresFeatureStore(engine, session)
     try:
         await feature_store.create_table(hook_name, _feature_columns())
     except ConflictError:
         pass
+    return run_id
 
 
 async def _publish(
@@ -146,10 +152,13 @@ class TestStreamFeatures:
         store = await _setup_schema(pg_engine, pg_session)
         srn = await _publish(pg_engine, store, "rec1")
         await pg_session.commit()
-        await _register_hook(pg_engine, pg_session)
+        run_id = await _register_hook(pg_engine, pg_session)
         feature_store = PostgresFeatureStore(pg_engine, pg_session)
         await feature_store.insert_features(
-            HOOK, str(srn), [{"score": 0.9, "label": "high"}, {"score": 0.1, "label": "low"}]
+            HOOK,
+            str(srn),
+            [{"score": 0.9, "label": "high"}, {"score": 0.1, "label": "low"}],
+            run_id,
         )
 
         rs = PostgresTableReadStore(pg_session)
@@ -169,10 +178,13 @@ class TestStreamFeatures:
         store = await _setup_schema(pg_engine, pg_session)
         srn = await _publish(pg_engine, store, "rec1")
         await pg_session.commit()
-        await _register_hook(pg_engine, pg_session)
+        run_id = await _register_hook(pg_engine, pg_session)
         feature_store = PostgresFeatureStore(pg_engine, pg_session)
         await feature_store.insert_features(
-            HOOK, str(srn), [{"score": 0.9, "label": "high"}, {"score": 0.1, "label": "low"}]
+            HOOK,
+            str(srn),
+            [{"score": 0.9, "label": "high"}, {"score": 0.1, "label": "low"}],
+            run_id,
         )
 
         rs = PostgresTableReadStore(pg_session)
@@ -217,9 +229,11 @@ class TestFeatureCreatedAtCursor:
         store = await _setup_schema(pg_engine, pg_session)
         srn = await _publish(pg_engine, store, "rec1")
         await pg_session.commit()
-        await _register_hook(pg_engine, pg_session)
+        run_id = await _register_hook(pg_engine, pg_session)
         feature_store = PostgresFeatureStore(pg_engine, pg_session)
-        await feature_store.insert_features(HOOK, str(srn), [{"score": s} for s in (0.1, 0.2, 0.3)])
+        await feature_store.insert_features(
+            HOOK, str(srn), [{"score": s} for s in (0.1, 0.2, 0.3)], run_id
+        )
 
         rs = PostgresTableReadStore(pg_session)
         sort = [SortSpec(column="created_at", direction=SortDirection.ASC)]
@@ -260,11 +274,11 @@ class TestFeatureSchemaScoping:
         srn_a = await _publish(pg_engine, store_a, "reca")
         srn_b = await _publish(pg_engine, store_b, "recb", schema=SCHEMA_B)
         await pg_session.commit()
-        await _register_hook(pg_engine, pg_session)
-        await _register_hook(pg_engine, pg_session, schema=SCHEMA_B)
+        run_a = await _register_hook(pg_engine, pg_session)
+        run_b = await _register_hook(pg_engine, pg_session, schema=SCHEMA_B)
         feature_store = PostgresFeatureStore(pg_engine, pg_session)
-        await feature_store.insert_features(HOOK, str(srn_a), [{"score": 0.9, "label": "a"}])
-        await feature_store.insert_features(HOOK, str(srn_b), [{"score": 0.2, "label": "b"}])
+        await feature_store.insert_features(HOOK, str(srn_a), [{"score": 0.9, "label": "a"}], run_a)
+        await feature_store.insert_features(HOOK, str(srn_b), [{"score": 0.2, "label": "b"}], run_b)
         return srn_a, srn_b
 
     async def test_stream_excludes_rows_of_other_schemas(
@@ -297,9 +311,11 @@ class TestFeatureCatalogAndManifest:
         store = await _setup_schema(pg_engine, pg_session)
         srn = await _publish(pg_engine, store, "rec1")
         await pg_session.commit()
-        await _register_hook(pg_engine, pg_session)
+        run_id = await _register_hook(pg_engine, pg_session)
         feature_store = PostgresFeatureStore(pg_engine, pg_session)
-        await feature_store.insert_features(HOOK, str(srn), [{"score": 0.9, "label": "high"}])
+        await feature_store.insert_features(
+            HOOK, str(srn), [{"score": 0.9, "label": "high"}], run_id
+        )
 
         rs = PostgresCatalogReadStore(pg_session, Domain("localhost"))
         manifest = await rs.get_schema_manifest(SCHEMA)

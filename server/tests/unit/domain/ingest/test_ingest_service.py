@@ -13,7 +13,7 @@ from osa.domain.shared.model.srn import Domain
 
 def _make_convention(*, has_ingester: bool = True):
     conv = MagicMock()
-    conv.srn = "urn:osa:localhost:conv:test-conv@1.0.0"
+    conv.srn = "test-conv"
     conv.ingester = (
         IngesterDefinition(
             image="ghcr.io/example/ingester:v1",
@@ -56,17 +56,17 @@ class TestStartIngest:
     async def test_creates_pending_ingest(self) -> None:
         service = _make_service()
         run = await service.start_ingest(
-            convention_srn="urn:osa:localhost:conv:test-conv@1.0.0",
+            convention_id="test-conv",
         )
         assert run.status == IngestStatus.PENDING
-        assert run.convention_srn == "urn:osa:localhost:conv:test-conv@1.0.0"
+        assert run.convention_id == "test-conv"
         assert run.batch_size == 1000
 
     @pytest.mark.asyncio
     async def test_saves_and_emits_events(self) -> None:
         service = _make_service()
         run = await service.start_ingest(
-            convention_srn="urn:osa:localhost:conv:test-conv@1.0.0",
+            convention_id="test-conv",
         )
         service.ingest_repo.save.assert_called_once()
         assert service.outbox.append.call_count == 2
@@ -75,19 +75,19 @@ class TestStartIngest:
         first_event = service.outbox.append.call_args_list[0][0][0]
         assert first_event.__class__.__name__ == "IngestRunStarted"
         assert first_event.ingest_run_id == run.id
-        assert first_event.convention_srn == run.convention_srn
+        assert first_event.convention_id == run.convention_id
 
         # Second event: NextBatchRequested (triggers first batch)
         second_event = service.outbox.append.call_args_list[1][0][0]
         assert second_event.__class__.__name__ == "NextBatchRequested"
         assert second_event.ingest_run_id == run.id
-        assert second_event.convention_srn == run.convention_srn
+        assert second_event.convention_id == run.convention_id
 
     @pytest.mark.asyncio
     async def test_custom_batch_size(self) -> None:
         service = _make_service()
         run = await service.start_ingest(
-            convention_srn="urn:osa:localhost:conv:test-conv@1.0.0",
+            convention_id="test-conv",
             batch_size=500,
         )
         assert run.batch_size == 500
@@ -97,7 +97,7 @@ class TestStartIngest:
         service = _make_service(convention_not_found=True)
         with pytest.raises(NotFoundError):
             await service.start_ingest(
-                convention_srn="urn:osa:localhost:conv:nonexistent@1.0.0",
+                convention_id="nonexistent",
             )
 
     @pytest.mark.asyncio
@@ -105,7 +105,7 @@ class TestStartIngest:
         service = _make_service(convention=_make_convention(has_ingester=False))
         with pytest.raises(NotFoundError, match="No ingester configured"):
             await service.start_ingest(
-                convention_srn="urn:osa:localhost:conv:test-conv@1.0.0",
+                convention_id="test-conv",
             )
 
     @pytest.mark.asyncio
@@ -114,5 +114,5 @@ class TestStartIngest:
         service = _make_service(running_ingest=existing)
         with pytest.raises(ConflictError, match="already running"):
             await service.start_ingest(
-                convention_srn="urn:osa:localhost:conv:test-conv@1.0.0",
+                convention_id="test-conv",
             )

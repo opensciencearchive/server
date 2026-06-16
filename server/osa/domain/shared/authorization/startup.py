@@ -3,7 +3,7 @@
 import dataclasses
 import logging
 
-from osa.domain.shared.authorization.gate import AtLeast, Gate
+from osa.domain.shared.authorization.gate import AtLeast, Gate, RequiresScope
 from osa.domain.shared.command import CommandHandler
 from osa.domain.shared.error import ConfigurationError
 from osa.domain.shared.query import QueryHandler
@@ -24,15 +24,16 @@ def _check_handler_class(handler_cls: type) -> None:
     if not isinstance(auth, Gate):
         raise ConfigurationError(f"Handler {handler_cls.__name__} has no __auth__ declaration")
 
-    if isinstance(auth, AtLeast):
+    if isinstance(auth, (AtLeast, RequiresScope)):
         field_names = (
             {f.name for f in dataclasses.fields(handler_cls)}
             if dataclasses.is_dataclass(handler_cls)
             else set()
         )
         if "principal" not in field_names:
+            gate_name = "at_least(...)" if isinstance(auth, AtLeast) else "requires_scope(...)"
             raise ConfigurationError(
-                f"Handler {handler_cls.__name__} declares __auth__ = at_least(...) "
+                f"Handler {handler_cls.__name__} declares __auth__ = {gate_name} "
                 "but is missing a `principal: Principal` field. Without it the "
                 "auth gate rejects every request with a misleading 'missing_token' "
                 "even when the caller's JWT is valid."

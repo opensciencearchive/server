@@ -1,70 +1,138 @@
 from datetime import datetime
+from typing import Any
 
-from pydantic import ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from osa.domain.auth.model.principal import Principal
-from osa.domain.auth.model.role import Role
+from osa.domain.deposition.model.deploy import HookDeploy
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.semantics.model.value import FieldDefinition
-from osa.domain.shared.authorization.gate import at_least
+from osa.domain.shared.authorization.gate import requires_scope
 from osa.domain.shared.command import Command, CommandHandler, Result
-from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.model.hook import (
+    HookIdentity,
+    HookName,
+    OciConfig,
+    OciLimits,
+    TableFeatureSpec,
+)
 from osa.domain.shared.model.source import IngesterDefinition
-from osa.domain.shared.model.srn import ConventionSRN, SchemaId, SchemaIdentifier
+from osa.domain.shared.model.srn import ConventionSlug, SchemaId, SchemaIdentifier
 
 
-class CreateConvention(Command):
-    model_config = ConfigDict(populate_by_name=True)
+class DeployConventionSchema(BaseModel):
+    """The deploy's nested ``schema`` sub-structure (== POST /schemas body)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     id: SchemaIdentifier
-    """Schema slug — becomes the ``<id>`` in ``schema_id = <id>@<version>``.
+    version: str
+    fields: list[FieldDefinition] = []
 
-    A convention is a bundle of (schema + validators + file requirements), and
-    the caller supplies the slug of the embedded schema here. The convention
-    itself gets an opaque server-generated SRN.
+
+class DeployConventionRelease(BaseModel):
+    """A hook's release block (== POST /hooks/{name}/releases body).
+
+    ``extra="forbid"`` + a required ``config`` make a client/server payload-shape
+    mismatch fail loudly at deploy (422, naming the offending field) rather than
+    being silently swallowed into an empty config that only fails at container
+    runtime. ``limits`` keeps its defaults — omitting resource limits is a valid,
+    explicit choice; a *misnamed* limits field is still caught by ``extra``.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
+    image: str
+    digest: str
+    # Opaque, image-defined JSON object forwarded verbatim to the container —
+    # OSA never reads its keys. Required (don't default a dropped config to {}).
+    config: dict[str, Any]
+    limits: OciLimits = Field(default_factory=OciLimits)
+    source_ref: str  # REQUIRED — reproducibility anchor (FR-005)
+
+
+class DeployConventionHook(BaseModel):
+    """One hook in the bundled deploy: identity (name + fixed feature) + release."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: HookName
+    feature: TableFeatureSpec
+    release: DeployConventionRelease
+
+    def to_deploy(self) -> HookDeploy:
+        return HookDeploy(
+            identity=HookIdentity(name=self.name, feature=self.feature),
+            runtime=OciConfig(
+                image=self.release.image,
+                digest=self.release.digest,
+                config=self.release.config,
+                limits=self.release.limits,
+            ),
+            source_ref=self.release.source_ref,
+        )
+
+
+class DeployConvention(Command):
+    """Bundled deploy: schema + hooks (+ first releases) + convention, atomically.
+
+    Conventions are unversioned and mutable (design-revisions §3): deploy is a
+    declarative upsert keyed by ``slug`` — re-declaring the same state is a no-op,
+    a different declaration updates the convention in place. No caller-supplied
+    version, no conflict path.
+
+    The identity ``slug`` is **derived server-side** from ``title`` (the API does
+    not accept a slug). Because the slug is what deploy upserts on, the title is
+    identity-bearing: a different title yields a different slug (a new convention).
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
     title: str
-    version: str
-    schema_fields: list[FieldDefinition] = Field(alias="schema")
+    description: str = Field(min_length=1)  # required — every convention must describe itself
     file_requirements: FileRequirements
-    description: str | None = None
-    hooks: list[HookDefinition] = []
+    schema_block: DeployConventionSchema = Field(alias="schema")
+    hooks: list[DeployConventionHook] = []
     ingester: IngesterDefinition | None = None
 
 
 class ConventionCreated(Result):
-    srn: ConventionSRN
+    slug: ConventionSlug
     title: str
-    description: str | None
+    description: str
     schema_id: SchemaId
+    hooks: list[str]
     created_at: datetime
 
 
-class CreateConventionHandler(CommandHandler[CreateConvention, ConventionCreated]):
-    # Conventions are curated registry artifacts (like ontologies and schemas) —
-    # they define submission formats and bundle validators. Creation is an
-    # admin operation, matching CreateOntology / CreateSchema.
-    __auth__ = at_least(Role.ADMIN)
+class DeployConventionHandler(CommandHandler[DeployConvention, ConventionCreated]):
+    # Conventions are curated registry artifacts; deploy is an admin/automation
+    # operation. Authorized by the ``conventions:write`` M2M scope OR an ADMIN
+    # role (#145, US5).
+    __auth__ = requires_scope("conventions:write")
     principal: Principal
     convention_service: ConventionService
 
-    async def run(self, cmd: CreateConvention) -> ConventionCreated:
-        convention = await self.convention_service.create_convention(
-            id=cmd.id,
+    async def run(self, cmd: DeployConvention) -> ConventionCreated:
+        built_by = str(self.principal.user_id) if self.principal.user_id else None
+        convention = await self.convention_service.deploy(
+            slug=ConventionSlug.from_title(cmd.title),
             title=cmd.title,
-            version=cmd.version,
-            schema=cmd.schema_fields,
-            file_requirements=cmd.file_requirements,
             description=cmd.description,
-            hooks=cmd.hooks,
+            file_requirements=cmd.file_requirements,
+            schema_slug=cmd.schema_block.id,
+            schema_version=cmd.schema_block.version,
+            schema_fields=cmd.schema_block.fields,
+            hooks=[h.to_deploy() for h in cmd.hooks],
             ingester=cmd.ingester,
+            built_by=built_by,
         )
         return ConventionCreated(
-            srn=convention.srn,
+            slug=convention.id,
             title=convention.title,
             description=convention.description,
             schema_id=convention.schema_id,
+            hooks=[name.root for name in convention.hooks],
             created_at=convention.created_at,
         )

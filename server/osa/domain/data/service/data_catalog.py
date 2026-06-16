@@ -13,7 +13,7 @@ from osa.domain.data.model.query_plan import TableKind
 from osa.domain.data.model.record_summary import RecordSummary
 from osa.domain.data.port.data_read_store import DataCatalogReadStore
 from osa.domain.shared.error import NotFoundError
-from osa.domain.shared.model.ids import HookName, RecordId
+from osa.domain.shared.model.ids import FeatureName, RecordId
 from osa.domain.shared.model.reserved import RESERVED_NAMES
 from osa.domain.shared.model.srn import SchemaId
 from osa.domain.shared.service import Service
@@ -72,7 +72,7 @@ class DataCatalogService(Service):
         self,
         schema: str,
         table_kind: TableKind,
-        feature_name: HookName | None = None,
+        feature_name: FeatureName | None = None,
     ) -> ResolvedTable:
         """Resolve a URL schema segment + table selector to its column schema.
 
@@ -83,7 +83,12 @@ class DataCatalogService(Service):
         """
         schema_id = await self.resolve_schema(schema)
         manifest = await self.get_schema_manifest(schema_id)
-        name = "records" if table_kind == TableKind.RECORDS else feature_name
+        # TableResource.name is a plain str ("records" or a feature-table name).
+        name = (
+            "records"
+            if table_kind == TableKind.RECORDS
+            else (feature_name.root if feature_name is not None else None)
+        )
         resource = next(
             (tr for tr in manifest.table_resources if tr.name == name and tr.kind == table_kind),
             None,

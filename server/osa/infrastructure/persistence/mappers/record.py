@@ -14,7 +14,7 @@ from pydantic import TypeAdapter
 
 from osa.domain.record.model.aggregate import Record
 from osa.domain.shared.model.source import RecordSource
-from osa.domain.shared.model.srn import ConventionSRN, LocalId, RecordSRN, SchemaId, Semver
+from osa.domain.shared.model.srn import ConventionSlug, LocalId, RecordSRN, SchemaId, Semver
 
 _source_adapter = TypeAdapter(RecordSource)
 
@@ -30,7 +30,7 @@ def row_to_record(row: dict[str, Any]) -> Record:
     return Record(
         srn=RecordSRN.parse(row["srn"]),
         source=source,
-        convention_srn=ConventionSRN.parse(row["convention_srn"]),
+        convention_id=ConventionSlug.parse(row["convention_id"]),
         schema_id=SchemaId(
             id=LocalId(row["schema_id"]),
             version=Semver.from_string(row["schema_version"]),
@@ -44,7 +44,7 @@ def record_to_dict(record: Record) -> dict[str, Any]:
     """Convert Record aggregate to database dict."""
     return {
         "srn": str(record.srn),
-        "convention_srn": str(record.convention_srn),
+        "convention_id": str(record.convention_id),
         "schema_id": record.schema_id.id.root,
         "schema_version": record.schema_id.version.root,
         "source": _source_adapter.dump_python(record.source, mode="json"),

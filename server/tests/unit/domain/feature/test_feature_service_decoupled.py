@@ -12,7 +12,8 @@ import pytest
 from osa.domain.feature.service.feature import FeatureService
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
+    FeatureName,
+    HookIdentity,
     OciConfig,
     TableFeatureSpec,
 )
@@ -23,8 +24,8 @@ def _make_dep_srn() -> DepositionSRN:
     return DepositionSRN.parse("urn:osa:localhost:dep:test-dep")
 
 
-def _make_hook_definition() -> HookDefinition:
-    return HookDefinition(
+def _make_hook_definition() -> HookIdentity:
+    return HookIdentity(
         name="pocketeer",
         runtime=OciConfig(
             image="osa-hooks/pocketeer:latest",
@@ -77,7 +78,7 @@ class TestDecoupledFeatureService:
         await service.insert_features_for_record(
             hook_output_dir="/fake/output/dir",
             record_srn="urn:osa:localhost:rec:test@1",
-            expected_features=["pocketeer"],
+            expected_features=[FeatureName("pocketeer")],
         )
 
         feature_storage.hook_features_exist.assert_called_once_with("/fake/output/dir", "pocketeer")

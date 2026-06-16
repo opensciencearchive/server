@@ -51,6 +51,7 @@ class TestBuildFeatureTable:
 
         assert "id" in table.c
         assert "record_srn" in table.c
+        assert "run_id" in table.c
         assert "created_at" in table.c
 
     def test_id_is_primary_key(self) -> None:
@@ -81,7 +82,12 @@ class TestBuildFeatureTable:
 
     def test_empty_schema_has_only_auto_columns(self) -> None:
         table = build_feature_table("empty", FeatureSchema())
-        assert set(c.key for c in table.columns) == {"id", "record_srn", "created_at"}
+        assert set(c.key for c in table.columns) == {
+            "id",
+            "record_srn",
+            "run_id",
+            "created_at",
+        }
 
     def test_array_column_is_jsonb(self) -> None:
         schema = FeatureSchema(
@@ -110,6 +116,7 @@ class TestDataColumns:
         assert col_names == ["score", "label"]
         assert "id" not in col_names
         assert "record_srn" not in col_names
+        assert "run_id" not in col_names
         assert "created_at" not in col_names
 
     def test_empty_for_schema_with_no_data_columns(self) -> None:

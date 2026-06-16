@@ -11,28 +11,23 @@ from osa.domain.shared.error import ConflictError
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
-    OciConfig,
+    HookIdentity,
     TableFeatureSpec,
 )
-from osa.domain.shared.model.srn import ConventionSRN, SchemaId
+from osa.domain.shared.model.srn import ConventionSlug, SchemaId
 
 
-def _make_conv_srn() -> ConventionSRN:
-    return ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0")
+def _make_conv_slug() -> ConventionSlug:
+    return ConventionSlug("test")
 
 
 def _make_schema_id() -> SchemaId:
     return SchemaId.parse("test@1.0.0")
 
 
-def _make_hook_definition(name: str = "pocket_detect") -> HookDefinition:
-    return HookDefinition(
+def _make_hook_definition(name: str = "pocket_detect") -> HookIdentity:
+    return HookIdentity(
         name=name,
-        runtime=OciConfig(
-            image="ghcr.io/example/hook",
-            digest="sha256:abc123",
-        ),
         feature=TableFeatureSpec(
             cardinality="many",
             columns=[ColumnDef(name="score", json_type="number", required=True)],
@@ -40,10 +35,10 @@ def _make_hook_definition(name: str = "pocket_detect") -> HookDefinition:
     )
 
 
-def _make_event(hooks: list[HookDefinition] | None = None) -> ConventionRegistered:
+def _make_event(hooks: list[HookIdentity] | None = None) -> ConventionRegistered:
     return ConventionRegistered(
         id=EventId(uuid4()),
-        convention_srn=_make_conv_srn(),
+        convention_id=_make_conv_slug(),
         schema_id=_make_schema_id(),
         schema_fields=[],
         hooks=hooks or [],

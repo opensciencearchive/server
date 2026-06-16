@@ -7,7 +7,7 @@ from osa.domain.auth.model.role import Role
 from osa.domain.deposition.model.value import DepositionStatus
 from osa.domain.deposition.service.deposition import DepositionService
 from osa.domain.shared.authorization.gate import at_least
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
 from osa.domain.shared.query import Query, QueryHandler, Result
 
 
@@ -17,7 +17,7 @@ class ListDepositions(Query):
 
 class DepositionSummary(BaseModel):
     srn: DepositionSRN
-    convention_srn: ConventionSRN
+    convention_id: ConventionSlug
     status: DepositionStatus
     file_count: int
     created_at: datetime
@@ -42,7 +42,7 @@ class ListDepositionsHandler(QueryHandler[ListDepositions, DepositionList]):
             items=[
                 DepositionSummary(
                     srn=d.srn,
-                    convention_srn=d.convention_srn,
+                    convention_id=d.convention_id,
                     status=d.status,
                     file_count=len(d.files),
                     created_at=d.created_at,

@@ -5,9 +5,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from osa.domain.shared.model.hook import HookDefinition
+from osa.domain.shared.model.hook import HookIdentity
 from osa.domain.shared.port import Port
 from osa.domain.validation.model.hook_input import HookRecord
+from osa.domain.validation.model.hook_release import HookRelease
 from osa.domain.validation.model.hook_result import HookResult
 
 
@@ -33,11 +34,15 @@ class HookRunner(Port, Protocol):
     @abstractmethod
     async def run(
         self,
-        hook: HookDefinition,
+        hook: HookIdentity,
+        release: HookRelease,
         inputs: HookInputs,
         work_dir: Path,
     ) -> HookResult:
         """Run a hook and return its result.
+
+        *hook* supplies the identity (name) and *release* supplies the runtime
+        (image/digest/config/limits) — feature #145's identity/release split.
 
         The runner creates ``input/`` and ``output/`` subdirectories under *work_dir*.
         ``input/`` is ephemeral (cleaned after run); ``output/`` persists for later reading.

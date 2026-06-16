@@ -1,7 +1,9 @@
 """Unit tests for K8sHookRunner — Job spec, scheduling, execution, orphans, cleanup."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
@@ -13,11 +15,12 @@ from osa.domain.shared.error import (
 )
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
+    HookIdentity,
     OciConfig,
     OciLimits,
     TableFeatureSpec,
 )
+from osa.domain.validation.model.hook_release import HookRelease, HookReleaseId
 from osa.domain.validation.model.hook_result import HookStatus
 from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.validation.port.hook_runner import HookInputs
@@ -26,7 +29,18 @@ from osa.infrastructure.k8s.runner import K8sHookRunner
 _RUN_ID = "run-abc123"
 
 
-def _make_hook(
+def _make_hook(name: str = "validate_dna") -> HookIdentity:
+    """Build a HookIdentity (#145: name + feature only, no runtime)."""
+    return HookIdentity(
+        name=name,
+        feature=TableFeatureSpec(
+            cardinality="many",
+            columns=[ColumnDef(name="score", json_type="number", required=True)],
+        ),
+    )
+
+
+def _make_release(
     name: str = "validate_dna",
     timeout: int = 300,
     memory: str = "2g",
@@ -34,19 +48,20 @@ def _make_hook(
     config: dict | None = None,
     image: str = "ghcr.io/example/hook:v1",
     digest: str = "sha256:abc123",
-) -> HookDefinition:
-    return HookDefinition(
-        name=name,
+) -> HookRelease:
+    """Build a HookRelease carrying the OCI runtime (#145)."""
+    return HookRelease(
+        id=HookReleaseId(uuid4()),
+        hook_name=name,
+        version=1,
         runtime=OciConfig(
             image=image,
             digest=digest,
             config=config or {},
             limits=OciLimits(timeout_seconds=timeout, memory=memory, cpu=cpu),
         ),
-        feature=TableFeatureSpec(
-            cardinality="many",
-            columns=[ColumnDef(name="score", json_type="number", required=True)],
-        ),
+        source_ref="git+https://example.com/hook@abc",
+        built_at=datetime.now(UTC),
     )
 
 
@@ -88,9 +103,11 @@ def _make_runner(config: K8sConfig | None = None) -> K8sHookRunner:
 class TestJobSpecGeneration:
     def test_correct_image(self):
         runner = _make_runner()
-        hook = _make_hook(image="ghcr.io/org/hook:v2", digest="sha256:def456")
+        hook = _make_hook()
+        release = _make_release(image="ghcr.io/org/hook:v2", digest="sha256:def456")
         spec = runner._build_job_spec(
             hook,
+            release,
             Path("/data/depositions/localhost_abc/hooks/validate_dna"),
             run_id=_RUN_ID,
         )
@@ -101,8 +118,10 @@ class TestJobSpecGeneration:
     def test_security_context(self):
         runner = _make_runner()
         hook = _make_hook()
+        release = _make_release()
         spec = runner._build_job_spec(
             hook,
+            release,
             Path("/data/depositions/localhost_abc/hooks/validate_dna"),
             run_id=_RUN_ID,
         )
@@ -122,9 +141,11 @@ class TestJobSpecGeneration:
 
     def test_resource_limits(self):
         runner = _make_runner()
-        hook = _make_hook(memory="4g", cpu="2.0")
+        hook = _make_hook()
+        release = _make_release(memory="4g", cpu="2.0")
         spec = runner._build_job_spec(
             hook,
+            release,
             Path("/data/depositions/localhost_abc/hooks/validate_dna"),
             run_id=_RUN_ID,
         )
@@ -136,8 +157,9 @@ class TestJobSpecGeneration:
     def test_volume_mounts(self):
         runner = _make_runner()
         hook = _make_hook()
+        release = _make_release()
         work_dir = Path("/data/depositions/localhost_abc/hooks/validate_dna")
-        spec = runner._build_job_spec(hook, work_dir, run_id=_RUN_ID)
+        spec = runner._build_job_spec(hook, release, work_dir, run_id=_RUN_ID)
 
         volumes = spec.spec.template.spec.volumes
         pvc_vol = next(v for v in volumes if v.name == "data")
@@ -155,8 +177,10 @@ class TestJobSpecGeneration:
     def test_env_vars(self):
         runner = _make_runner()
         hook = _make_hook(name="pocket_detect")
+        release = _make_release(name="pocket_detect")
         spec = runner._build_job_spec(
             hook,
+            release,
             Path("/data/depositions/localhost_abc/hooks/pocket_detect"),
             run_id=_RUN_ID,
         )
@@ -170,8 +194,10 @@ class TestJobSpecGeneration:
     def test_backoff_limit_zero(self):
         runner = _make_runner()
         hook = _make_hook()
+        release = _make_release()
         spec = runner._build_job_spec(
             hook,
+            release,
             Path("/data/depositions/localhost_abc/hooks/validate_dna"),
             run_id=_RUN_ID,
         )
@@ -180,9 +206,11 @@ class TestJobSpecGeneration:
 
     def test_active_deadline_seconds(self):
         runner = _make_runner()
-        hook = _make_hook(timeout=300)
+        hook = _make_hook()
+        release = _make_release(timeout=300)
         spec = runner._build_job_spec(
             hook,
+            release,
             Path("/data/depositions/localhost_abc/hooks/validate_dna"),
             run_id=_RUN_ID,
         )
@@ -193,8 +221,10 @@ class TestJobSpecGeneration:
     def test_dns_policy_none(self):
         runner = _make_runner()
         hook = _make_hook()
+        release = _make_release()
         spec = runner._build_job_spec(
             hook,
+            release,
             Path("/data/depositions/localhost_abc/hooks/validate_dna"),
             run_id=_RUN_ID,
         )
@@ -206,8 +236,10 @@ class TestJobSpecGeneration:
     def test_labels(self):
         runner = _make_runner()
         hook = _make_hook(name="validate_dna")
+        release = _make_release(name="validate_dna")
         spec = runner._build_job_spec(
             hook,
+            release,
             Path("/data/depositions/localhost_abc/hooks/validate_dna"),
             run_id=_RUN_ID,
         )
@@ -221,8 +253,10 @@ class TestJobSpecGeneration:
     def test_human_readable_job_name(self):
         runner = _make_runner()
         hook = _make_hook(name="validate_dna")
+        release = _make_release(name="validate_dna")
         spec = runner._build_job_spec(
             hook,
+            release,
             Path("/data/depositions/localhost_abc/hooks/validate_dna"),
             run_id=_RUN_ID,
         )
@@ -234,8 +268,10 @@ class TestJobSpecGeneration:
     def test_empty_dir_at_tmp(self):
         runner = _make_runner()
         hook = _make_hook()
+        release = _make_release()
         spec = runner._build_job_spec(
             hook,
+            release,
             Path("/data/depositions/localhost_abc/hooks/validate_dna"),
             run_id=_RUN_ID,
         )
@@ -247,8 +283,10 @@ class TestJobSpecGeneration:
     def test_automount_service_account_false(self):
         runner = _make_runner()
         hook = _make_hook()
+        release = _make_release()
         spec = runner._build_job_spec(
             hook,
+            release,
             Path("/data/depositions/localhost_abc/hooks/validate_dna"),
             run_id=_RUN_ID,
         )
@@ -259,8 +297,10 @@ class TestJobSpecGeneration:
     def test_ttl_seconds_after_finished(self):
         runner = _make_runner(config=_make_config(job_ttl_seconds=600))
         hook = _make_hook()
+        release = _make_release()
         spec = runner._build_job_spec(
             hook,
+            release,
             Path("/data/depositions/localhost_abc/hooks/validate_dna"),
             run_id=_RUN_ID,
         )
@@ -270,8 +310,10 @@ class TestJobSpecGeneration:
     def test_files_mount_when_files_dir_provided(self):
         runner = _make_runner()
         hook = _make_hook()
+        release = _make_release()
         spec = runner._build_job_spec(
             hook,
+            release,
             Path("/data/depositions/localhost_abc/hooks/validate_dna"),
             run_id=_RUN_ID,
             files_dir=Path("/data/depositions/localhost_abc/files"),
@@ -285,8 +327,10 @@ class TestJobSpecGeneration:
     def test_image_pull_secrets(self):
         runner = _make_runner(config=_make_config(image_pull_secrets=["ghcr-secret"]))
         hook = _make_hook()
+        release = _make_release()
         spec = runner._build_job_spec(
             hook,
+            release,
             Path("/data/depositions/localhost_abc/hooks/validate_dna"),
             run_id=_RUN_ID,
         )
@@ -298,8 +342,10 @@ class TestJobSpecGeneration:
     def test_service_account(self):
         runner = _make_runner(config=_make_config(service_account="osa-runner"))
         hook = _make_hook()
+        release = _make_release()
         spec = runner._build_job_spec(
             hook,
+            release,
             Path("/data/depositions/localhost_abc/hooks/validate_dna"),
             run_id=_RUN_ID,
         )
@@ -471,13 +517,14 @@ class TestExecutionAndCleanup:
 
         # Configure S3 mock to return progress data
         hook = _make_hook()
+        release = _make_release()
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         runner._s3.get_object.return_value = (
             b'{"step":"Check","status":"completed","message":"OK"}\n'
         )
 
         inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
-        result = await runner._run_job(hook, inputs, work_dir)
+        result = await runner._run_job(hook, release, inputs, work_dir)
 
         assert result.status == HookStatus.PASSED
         assert len(result.progress) == 1
@@ -519,6 +566,7 @@ class TestExecutionAndCleanup:
         batch_api.read_namespaced_job.return_value = failed_job
 
         hook = _make_hook()
+        release = _make_release()
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         work_dir.mkdir(parents=True)
         inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
@@ -526,6 +574,7 @@ class TestExecutionAndCleanup:
         with pytest.raises(TransientError, match="[Tt]imed out|[Dd]eadline"):
             await runner._run_job(
                 hook,
+                release,
                 inputs,
                 work_dir,
             )
@@ -579,6 +628,7 @@ class TestExecutionAndCleanup:
         core_api.list_namespaced_pod.side_effect = [pod_list, oom_pod_list]
 
         hook = _make_hook()
+        release = _make_release()
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         work_dir.mkdir(parents=True)
         inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
@@ -586,6 +636,7 @@ class TestExecutionAndCleanup:
         with pytest.raises(OOMError, match="[Oo][Oo][Mm]"):
             await runner._run_job(
                 hook,
+                release,
                 inputs,
                 work_dir,
             )
@@ -636,6 +687,7 @@ class TestExecutionAndCleanup:
         core_api.list_namespaced_pod.side_effect = [pod_list, exit_pod_list]
 
         hook = _make_hook()
+        release = _make_release()
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         work_dir.mkdir(parents=True)
         inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
@@ -643,6 +695,7 @@ class TestExecutionAndCleanup:
         with pytest.raises(PermanentError, match="[Ee]xit"):
             await runner._run_job(
                 hook,
+                release,
                 inputs,
                 work_dir,
             )
@@ -687,6 +740,7 @@ class TestExecutionAndCleanup:
         batch_api.read_namespaced_job.return_value = completed_job
 
         hook = _make_hook()
+        release = _make_release()
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         output_dir = work_dir / "output"
         output_dir.mkdir(parents=True)
@@ -694,6 +748,7 @@ class TestExecutionAndCleanup:
 
         result = await runner._run_job(
             hook,
+            release,
             inputs,
             work_dir,
         )
@@ -723,6 +778,7 @@ class TestExecutionAndCleanup:
         batch_api.list_namespaced_job.return_value = job_list
 
         hook = _make_hook()
+        release = _make_release()
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         output_dir = work_dir / "output"
         output_dir.mkdir(parents=True)
@@ -730,6 +786,7 @@ class TestExecutionAndCleanup:
 
         result = await runner._run_job(
             hook,
+            release,
             inputs,
             work_dir,
         )
@@ -778,6 +835,7 @@ class TestExecutionAndCleanup:
         batch_api.read_namespaced_job.return_value = completed_job
 
         hook = _make_hook()
+        release = _make_release()
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         output_dir = work_dir / "output"
         output_dir.mkdir(parents=True)
@@ -785,6 +843,7 @@ class TestExecutionAndCleanup:
 
         result = await runner._run_job(
             hook,
+            release,
             inputs,
             work_dir,
         )
@@ -842,6 +901,7 @@ class TestExecutionAndCleanup:
         batch_api.read_namespaced_job.return_value = completed_job
 
         hook = _make_hook()
+        release = _make_release()
         work_dir = tmp_path / "depositions" / "localhost_abc" / "hooks" / "validate_dna"
         runner._s3.get_object.return_value = (
             b'{"step":"Validate","status":"rejected","message":"Missing atoms"}\n'
@@ -850,6 +910,7 @@ class TestExecutionAndCleanup:
 
         result = await runner._run_job(
             hook,
+            release,
             inputs,
             work_dir,
         )
@@ -904,12 +965,13 @@ class TestRunIdFromInputs:
         # S3 mock returns empty progress (default from _make_s3_mock)
 
         hook = _make_hook()
+        release = _make_release()
         inputs = HookInputs(
             records=[HookRecord(id="test", metadata={})],
             run_id="my-real-run-id",
         )
 
-        await runner.run(hook, inputs, work_dir)
+        await runner.run(hook, release, inputs, work_dir)
 
         # Verify the Job was created with the run_id from inputs
         call_args = batch_api.create_namespaced_job.call_args

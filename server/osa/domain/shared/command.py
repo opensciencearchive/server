@@ -32,7 +32,7 @@ def _wrap_run_with_auth(cls: type, original_run: _HandlerMethod) -> _HandlerMeth
 
     @wraps(original_run)
     async def auth_wrapped_run(self: Any, cmd: Any) -> Any:
-        from osa.domain.shared.authorization.gate import AtLeast, Gate, Public
+        from osa.domain.shared.authorization.gate import AtLeast, Gate, Public, RequiresScope
         from osa.domain.shared.error import AuthorizationError, ConfigurationError
 
         auth_gate = getattr(type(self), "__auth__", None)
@@ -56,6 +56,25 @@ def _wrap_run_with_auth(cls: type, original_run: _HandlerMethod) -> _HandlerMeth
             if not principal.has_role(auth_gate.role):
                 raise AuthorizationError(
                     f"Access denied: insufficient role for {type(self).__name__}",
+                    code="access_denied",
+                )
+
+            return await original_run(self, cmd)
+
+        if isinstance(auth_gate, RequiresScope):
+            from osa.domain.auth.model.principal import Principal
+            from osa.domain.auth.model.role import Role
+
+            principal = getattr(self, "principal", None)
+            if not isinstance(principal, Principal):
+                raise AuthorizationError(
+                    "Authentication required",
+                    code="missing_token",
+                )
+
+            if not (principal.has_scope(auth_gate.scope) or principal.has_role(Role.ADMIN)):
+                raise AuthorizationError(
+                    f"Access denied: missing scope {auth_gate.scope!r} for {type(self).__name__}",
                     code="access_denied",
                 )
 

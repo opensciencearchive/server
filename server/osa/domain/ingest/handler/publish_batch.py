@@ -15,9 +15,10 @@ from osa.domain.ingest.service.ingest import IngestService
 from osa.domain.record.model.draft import RecordDraft
 from osa.domain.record.service import RecordService
 from osa.domain.shared.error import NotFoundError
+from osa.domain.shared.model.hook import FeatureName, HookName
 from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.model.source import IngestSource
-from osa.domain.shared.model.srn import ConventionSRN
+from osa.domain.shared.model.srn import ConventionSlug
 from osa.domain.shared.outbox import Outbox
 from osa.infrastructure.logging import get_logger
 
@@ -41,7 +42,7 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
             raise NotFoundError(f"Ingest run not found: {event.ingest_run_id}")
 
         convention = await self.convention_service.get_convention(
-            ConventionSRN.parse(ingest_run.convention_srn)
+            ConventionSlug.parse(ingest_run.convention_id)
         )
 
         # Read ingester records via storage port (filesystem or S3)
@@ -51,23 +52,27 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
         # batch_dir used as locator for hook outcome reads
         batch_dir = str(self.ingest_storage.batch_dir(event.ingest_run_id, event.batch_index))
 
-        # Read hook outcomes for all hooks
-        expected_features = [h.name for h in convention.hooks]
+        # Producer-side hook names (for reading each hook's outcomes) vs the
+        # feature-table names they produce (carried downstream for insertion).
+        hook_names = list(convention.hooks)
+        expected_features = [FeatureName(h.root) for h in convention.hooks]
 
         # Determine which records passed all hooks (via storage port — works on filesystem + S3)
         # TODO: is this efficient, are we hitting S3 a lot?
         passed_records = await _get_passed_records(
             ingester_records=ingester_records,
             batch_dir=str(batch_dir),
-            hooks=expected_features,
+            hooks=hook_names,
             feature_storage=self.feature_storage,
         )
 
         # Log outcome breakdown per hook
         short_id = event.ingest_run_id[:8]
         total = len(ingester_records)
-        for hook_name in expected_features:
-            outcomes = await self.feature_storage.read_batch_outcomes(str(batch_dir), hook_name)
+        for hook_name in hook_names:
+            outcomes = await self.feature_storage.read_batch_outcomes(
+                str(batch_dir), hook_name.root
+            )
             from osa.domain.validation.model.batch_outcome import OutcomeStatus
 
             passed = sum(1 for o in outcomes.values() if o.status == OutcomeStatus.PASSED)
@@ -96,12 +101,12 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
                 drafts.append(
                     RecordDraft(
                         source=IngestSource(
-                            id=f"{ingest_run.convention_srn}:{record.source_id}",
+                            id=f"{ingest_run.convention_id}:{record.source_id}",
                             ingest_run_id=ingest_run.id,
                             upstream_source=record.source_id,
                         ),
                         metadata=record.metadata,
-                        convention_srn=ConventionSRN.parse(ingest_run.convention_srn),
+                        convention_id=ConventionSlug.parse(ingest_run.convention_id),
                         expected_features=expected_features,
                     )
                 )
@@ -139,7 +144,7 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
                     IngestBatchPublished(
                         id=EventId(uuid4()),
                         ingest_run_id=event.ingest_run_id,
-                        convention_srn=ingest_run.convention_srn,
+                        convention_id=ingest_run.convention_id,
                         batch_index=event.batch_index,
                         published_srns=published_srns,
                         published_count=published_count,
@@ -164,7 +169,7 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
 async def _get_passed_records(
     ingester_records: list[IngesterRecord],
     batch_dir: str,
-    hooks: list[str],
+    hooks: list[HookName],
     feature_storage: FeatureStoragePort,
 ) -> list[IngesterRecord]:
     """Determine which records passed ALL hooks via the storage port."""
@@ -174,7 +179,7 @@ async def _get_passed_records(
     passed_ids: set[str] | None = None
 
     for hook_name in hooks:
-        outcomes = await feature_storage.read_batch_outcomes(batch_dir, hook_name)
+        outcomes = await feature_storage.read_batch_outcomes(batch_dir, hook_name.root)
         if not outcomes:
             return []
         from osa.domain.validation.model.batch_outcome import OutcomeStatus

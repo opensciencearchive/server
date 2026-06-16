@@ -12,7 +12,8 @@ from typing import Any
 from osa.domain.deposition.model.value import DepositionFile
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.error import InfrastructureError
-from osa.domain.shared.model.srn import ConventionSRN, DepositionSRN
+from osa.domain.shared.model.provenance import RunRef
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
 from osa.domain.validation.model.batch_outcome import (
     BatchRecordOutcome,
     HookRecordId,
@@ -29,8 +30,13 @@ class FilesystemStorageAdapter(FileStoragePort):
     HookStoragePort, and FeatureStoragePort via structural subtyping.
     """
 
-    def __init__(self, base_path: str) -> None:
+    def __init__(self, base_path: str, data_root: str | None = None) -> None:
         self.base_path = Path(base_path)
+        # Confinement root for read-by-locator (read_hook_log). The node data root
+        # spans both deposition logs (under files/, where base_path points) and
+        # ingestion logs (under ingests/), so a locator from either path resolves
+        # under it. Defaults to base_path when not given (deposition-only callers).
+        self._data_root = Path(data_root) if data_root else self.base_path
 
     def _dep_dir(self, deposition_id: DepositionSRN) -> Path:
         safe_id = f"{deposition_id.domain.root}_{deposition_id.id.root}"
@@ -84,6 +90,51 @@ class FilesystemStorageAdapter(FileStoragePort):
     async def hook_features_exist(self, hook_output_dir: str, feature_name: str) -> bool:
         features_file = Path(hook_output_dir) / "hooks" / feature_name / "output" / "features.json"
         return features_file.exists()
+
+    async def write_run_ref(self, work_dir: Path, run_id: str, release_id: str) -> None:
+        """Write run.json alongside a hook's features (per-row provenance, #145)."""
+        output_dir = Path(work_dir) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "run.json").write_text(
+            json.dumps({"run_id": run_id, "release_id": release_id})
+        )
+
+    async def write_hook_log(self, work_dir: Path, text: str) -> str:
+        """Write a failed hook's container logs to output/hook.log (#145/#147)."""
+        output_dir = Path(work_dir) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        log_path = output_dir / "hook.log"
+        log_path.write_text(text)
+        return str(log_path)
+
+    async def read_hook_log(self, log_ref: str) -> AsyncIterator[bytes]:
+        """Stream a captured hook log by its absolute-path locator (#147).
+
+        Confines the read to the node data root (covers both deposition logs under
+        files/ and ingestion logs under ingests/): a ``log_ref`` that resolves
+        outside it is rejected, so a tampered locator can't read arbitrary files.
+        """
+        from osa.domain.shared.error import NotFoundError
+
+        target = Path(log_ref).resolve()
+        if not target.is_relative_to(self._data_root.resolve()):
+            raise ValueError(f"log_ref escapes the data root: {log_ref}")
+        if not target.is_file():
+            raise NotFoundError(f"Hook log not found: {log_ref}")
+
+        async def _stream() -> AsyncIterator[bytes]:
+            with open(target, "rb") as f:
+                while chunk := f.read(8192):
+                    yield chunk
+
+        return _stream()
+
+    async def read_run_ref(self, output_dir: str, hook_name: str) -> RunRef | None:
+        run_file = Path(output_dir) / "hooks" / hook_name / "output" / "run.json"
+        if not run_file.exists():
+            return None
+        data = json.loads(run_file.read_text())
+        return RunRef(run_id=data["run_id"], release_id=data["release_id"])
 
     async def save_file(
         self,
@@ -160,16 +211,16 @@ class FilesystemStorageAdapter(FileStoragePort):
         if dep_dir.exists():
             shutil.rmtree(dep_dir)
 
-    def _conv_id(self, convention_srn: ConventionSRN) -> str:
-        return f"{convention_srn.domain.root}_{convention_srn.id.root}"
+    def _conv_id(self, convention_id: ConventionSlug) -> str:
+        return convention_id.root
 
-    def get_source_staging_dir(self, convention_srn: ConventionSRN, run_id: str) -> Path:
-        staging = self.base_path / "sources" / self._conv_id(convention_srn) / "staging" / run_id
+    def get_source_staging_dir(self, convention_id: ConventionSlug, run_id: str) -> Path:
+        staging = self.base_path / "sources" / self._conv_id(convention_id) / "staging" / run_id
         staging.mkdir(parents=True, exist_ok=True)
         return staging
 
-    def get_source_output_dir(self, convention_srn: ConventionSRN, run_id: str) -> Path:
-        output = self.base_path / "sources" / self._conv_id(convention_srn) / "runs" / run_id
+    def get_source_output_dir(self, convention_id: ConventionSlug, run_id: str) -> Path:
+        output = self.base_path / "sources" / self._conv_id(convention_id) / "runs" / run_id
         output.mkdir(parents=True, exist_ok=True)
         return output
 

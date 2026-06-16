@@ -28,6 +28,7 @@ from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.event_repository import EventRepository
 from osa.domain.feature.port.feature_store import FeatureStore
 from osa.domain.validation.port.repository import ValidationRunRepository
+from osa.domain.validation.port.hook_registry import HookRegistry
 from osa.domain.data.port.data_read_store import (
     DataCatalogReadStore,
     DataTableReadStore,
@@ -45,6 +46,9 @@ from osa.infrastructure.persistence.database import (
 )
 from osa.infrastructure.persistence.repository.convention import (
     PostgresConventionRepository,
+)
+from osa.infrastructure.persistence.repository.hook_registry import (
+    PostgresHookRegistry,
 )
 from osa.infrastructure.persistence.repository.deposition import (
     PostgresDepositionRepository,
@@ -124,6 +128,10 @@ class PersistenceProvider(Provider):
         PostgresConventionRepository, scope=Scope.UOW, provides=ConventionRepository
     )
 
+    # Hook registry (validation domain — feature #145). Owns hooks, releases,
+    # the live pointer, and hook_runs (record + provenance reads).
+    hook_registry_repo = provide(PostgresHookRegistry, scope=Scope.UOW, provides=HookRegistry)
+
     # Cross-domain readers
     schema_reader = provide(SchemaReaderAdapter, scope=Scope.UOW, provides=SchemaReader)
     ontology_reader = provide(OntologyReaderAdapter, scope=Scope.UOW, provides=OntologyReader)
@@ -131,7 +139,12 @@ class PersistenceProvider(Provider):
     # File storage — default (OCI/Docker, filesystem)
     @provide(scope=Scope.APP)
     def get_file_storage(self, paths: "OSAPaths") -> FileStoragePort:
-        return FilesystemStorageAdapter(base_path=str(paths.data_dir / "files"))
+        return FilesystemStorageAdapter(
+            base_path=str(paths.data_dir / "files"),
+            # Confinement root for hook-log reads spans files/ (deposition) and
+            # ingests/ (ingestion); see read_hook_log (#147).
+            data_root=str(paths.data_dir),
+        )
 
     # File storage — K8s (S3 via aioboto3, reuses S3Client from RunnerProvider)
     @provide(when=K8S, scope=Scope.APP)

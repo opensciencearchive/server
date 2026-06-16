@@ -6,6 +6,7 @@ from string import Template
 from typing import Any, ClassVar, Generic, Self, Type, TypeVar, Union
 
 from pydantic import (
+    ConfigDict,
     Field,
     RootModel,
     field_validator,
@@ -280,11 +281,6 @@ class OntologySRN(SRN):
     version: Semver
 
 
-class ConventionSRN(SRN):
-    type: ResourceType = Field(default=ResourceType.conv, frozen=True)
-    version: Semver
-
-
 class DepositionSRN(SRN):
     type: ResourceType = Field(default=ResourceType.dep, frozen=True)
     version: None = None
@@ -355,3 +351,68 @@ class SchemaId(ValueObject):
 
     def to_srn(self, domain: Domain) -> "SchemaSRN":
         return SchemaSRN(domain=domain, id=self.id, version=self.version)
+
+
+# ---------- Convention identity (slug — internal primitive) ----------
+
+
+class ConventionSlug(RootModel[str]):
+    """A convention's identity — a frozen, human-readable slug (#145).
+
+    Conventions are **unversioned** (design-revisions §3): a convention is a thin
+    wrapper that delegates versioning to its parts — it pins a versioned
+    :class:`SchemaId` and references hooks by name (each resolving to a versioned
+    live release). It therefore has no meaningful version of its own, so its
+    identity is a bare slug rather than the old ``"<slug>@<version>"``
+    ``ConventionSlug``.
+
+    Mirrors :class:`SchemaIdentifier`'s charset (starts with a letter, 3–64 chars
+    of ``[a-z0-9-]``) so it is safe as a URL segment and a PG identifier. Frozen,
+    so it is hashable and usable as a dict key. Use ``.root`` where a plain
+    ``str`` is required.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    _re: ClassVar[re.Pattern] = re.compile(r"^[a-z][a-z0-9\-]{2,63}$")
+
+    @field_validator("root")
+    @classmethod
+    def _validate(cls, v: str) -> str:
+        if not cls._re.match(v):
+            raise ValueError(
+                "invalid convention slug: must be 3–64 chars of [a-z0-9-] and start with a letter"
+            )
+        return v
+
+    @classmethod
+    def parse(cls, value: str) -> "ConventionSlug":
+        """Parse/validate a bare slug. Raises ``ValueError`` on malformed input."""
+        return cls(value)
+
+    @classmethod
+    def from_title(cls, title: str) -> "ConventionSlug":
+        """Derive the convention's identity slug from its human title.
+
+        Lowercases, collapses each run of non-alphanumeric characters to a single
+        hyphen, trims hyphens, and caps at 64 chars. Raises a domain
+        ``ValidationError`` (→ HTTP 422) when the title can't yield a valid slug —
+        e.g. it has no letters, slugifies to fewer than 3 chars, or begins with a
+        digit (slugs must start with a letter).
+
+        Deterministic: the same title always yields the same slug, which is what
+        makes deploy a stable upsert by identity.
+        """
+        from osa.domain.shared.error import ValidationError
+
+        slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:64].strip("-")
+        if not cls._re.match(slug):
+            raise ValidationError(
+                f"cannot derive a convention slug from title {title!r}: the slugified "
+                f"form {slug!r} must be 3–64 chars of [a-z0-9-] starting with a letter",
+                field="title",
+            )
+        return cls(slug)
+
+    def __str__(self) -> str:
+        return self.root

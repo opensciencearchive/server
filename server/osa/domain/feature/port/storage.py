@@ -3,12 +3,22 @@
 from abc import abstractmethod
 from typing import Any, Protocol
 
+from osa.domain.shared.model.provenance import RunRef
 from osa.domain.shared.port import Port
 from osa.domain.validation.model.batch_outcome import BatchRecordOutcome, HookRecordId
 
 
 class FeatureStoragePort(Port, Protocol):
     """File storage operations used by the feature domain."""
+
+    @abstractmethod
+    async def read_run_ref(self, output_dir: str, hook_name: str) -> RunRef | None:
+        """Read ``{output_dir}/hooks/{hook_name}/output/run.json`` (provenance).
+
+        Returns the ``run_id``/``release_id`` the producing hook stamped, or
+        ``None`` if absent (e.g. the hook produced no output). #145.
+        """
+        ...
 
     @abstractmethod
     def get_hook_output_root(self, source_type: str, source_id: str) -> str:

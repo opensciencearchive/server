@@ -20,7 +20,7 @@ class ConvertDepositionToRecord(EventHandler[DepositionApproved]):
         draft = RecordDraft(
             source=DepositionSource(id=str(event.deposition_srn)),
             metadata=event.metadata,
-            convention_srn=event.convention_srn,
+            convention_id=event.convention_id,
             expected_features=event.expected_features,
         )
         await self.service.publish_record(draft)

@@ -7,14 +7,14 @@ from pydantic import ValidationError
 
 from osa.domain.record.model.aggregate import Record
 from osa.domain.shared.model.source import DepositionSource
-from osa.domain.shared.model.srn import ConventionSRN, RecordSRN, SchemaId
+from osa.domain.shared.model.srn import ConventionSlug, RecordSRN, SchemaId
 
 
 def _make_record() -> Record:
     return Record(
         srn=RecordSRN.parse("urn:osa:localhost:rec:abc@1"),
         source=DepositionSource(id="urn:osa:localhost:dep:d1"),
-        convention_srn=ConventionSRN.parse("urn:osa:localhost:conv:test@1.0.0"),
+        convention_id=ConventionSlug("test"),
         schema_id=SchemaId.parse("test@1.0.0"),
         metadata={"title": "T"},
         published_at=datetime.now(UTC),

@@ -30,9 +30,9 @@ class UploadSpreadsheetHandler(CommandHandler[UploadSpreadsheet, SpreadsheetUplo
     async def run(self, cmd: UploadSpreadsheet) -> SpreadsheetUploaded:
         dep = await self.deposition_service.get(cmd.srn)
 
-        convention = await self.convention_repo.get(dep.convention_srn)
+        convention = await self.convention_repo.get(dep.convention_id)
         if convention is None:
-            raise NotFoundError(f"Convention not found: {dep.convention_srn}")
+            raise NotFoundError(f"Convention not found: {dep.convention_id}")
 
         schema = await self.schema_reader.get_schema(convention.schema_id)
         if schema is None:

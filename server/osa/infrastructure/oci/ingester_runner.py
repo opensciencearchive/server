@@ -172,13 +172,19 @@ class OciIngesterRunner(IngesterRunner):
                 raise OOMError("Ingester killed by OOM")
 
             if exit_code != 0:
+                # Tenant container output (which can carry upstream credentials /
+                # PII) is deliberately kept OUT of the OSA operator's logs: it is
+                # written to the run's own output dir, and the operator log carries
+                # only a reference. A tenant-scoped retrieval surface (log_ref +
+                # endpoint, mirroring hook runs) is tracked in #147.
                 logs = await container.log(stdout=True, stderr=True)
-                logs_str = "".join(logs) if logs else ""
+                logs_str = "".join(logs).strip() if logs else "<no container output>"
+                (output_dir / "ingester.log").write_text(logs_str)
                 log.error(
-                    "Ingester exited with code {exit_code}",
+                    "Ingester exited with code {exit_code} (image {image}); "
+                    "container logs written to the run's output dir (ingester.log)",
                     exit_code=exit_code,
                     image=ingester.image,
-                    container_logs=logs_str[:2000],
                 )
                 raise TransientError(f"Ingester exited with code {exit_code}")
 

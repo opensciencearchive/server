@@ -1,6 +1,7 @@
 """Storage port scoped to the validation domain."""
 
 from abc import abstractmethod
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Protocol
 
@@ -20,6 +21,35 @@ class HookStoragePort(Port, Protocol):
     @abstractmethod
     def get_files_dir(self, deposition_id: DepositionSRN) -> Path:
         """Return the directory containing data files for a deposition."""
+        ...
+
+    @abstractmethod
+    async def write_run_ref(self, work_dir: Path, run_id: str, release_id: str) -> None:
+        """Write ``{work_dir}/output/run.json`` carrying this run's provenance.
+
+        The feature-insert handler reads it back to stamp ``feature.run_id`` —
+        no DB run-id lookup (design-revisions §6). #145.
+        """
+        ...
+
+    @abstractmethod
+    async def write_hook_log(self, work_dir: Path, text: str) -> str:
+        """Write a failed hook container's logs to ``{work_dir}/output/hook.log``.
+
+        Returns the locator stored as ``HookRun.log_ref`` (#145/#147). The logs are
+        tenant-scoped — written beside the hook's other outputs, never to operator
+        logs. Retrieval is served by the authenticated #147 endpoint.
+        """
+        ...
+
+    @abstractmethod
+    async def read_hook_log(self, log_ref: str) -> AsyncIterator[bytes]:
+        """Stream a captured hook log back by its stored ``log_ref`` locator (#147).
+
+        Reads the artifact written by :meth:`write_hook_log` (deposition or
+        ingestion path — the locator is self-contained). Raises ``NotFoundError``
+        if the locator is absent; rejects a locator that escapes the data root.
+        """
         ...
 
     @abstractmethod

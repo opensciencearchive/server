@@ -6,33 +6,26 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from osa.domain.shared.model.hook import (
     ColumnDef,
-    HookDefinition,
-    OciConfig,
     TableFeatureSpec,
 )
 from osa.infrastructure.persistence.feature_store import PostgresFeatureStore
 from osa.infrastructure.persistence.feature_table import FEATURES_SCHEMA
 
 
-def _make_hook(
-    name: str = "quality_check",
+def _make_feature(
     columns: list[ColumnDef] | None = None,
-) -> HookDefinition:
+) -> TableFeatureSpec:
+    """A hook's output contract (#145: ``HookIdentity`` is name + feature only;
+    runtime moved to ``HookDeploy``/``HookRelease``). The store only needs the
+    feature columns, so build the ``TableFeatureSpec`` directly."""
     if columns is None:
         columns = [
             ColumnDef(name="score", json_type="number", required=True),
             ColumnDef(name="label", json_type="string", required=False),
         ]
-    return HookDefinition(
-        name=name,
-        runtime=OciConfig(
-            image="ghcr.io/example/validator:latest",
-            digest="sha256:abc123",
-        ),
-        feature=TableFeatureSpec(
-            cardinality="many",
-            columns=columns,
-        ),
+    return TableFeatureSpec(
+        cardinality="many",
+        columns=columns,
     )
 
 
@@ -42,9 +35,9 @@ class TestFeatureStoreCreateTable:
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
     ):
         store = PostgresFeatureStore(pg_engine, pg_session)
-        hook = _make_hook(name="integration_test_hook")
+        feature = _make_feature()
 
-        await store.create_table("integration_test_hook", hook.feature.columns)
+        await store.create_table("integration_test_hook", feature.columns)
 
         # Verify the table exists in the features schema
         async with pg_engine.begin() as conn:
@@ -82,19 +75,19 @@ class TestFeatureStoreCreateTable:
         from osa.domain.shared.error import ConflictError
 
         store = PostgresFeatureStore(pg_engine, pg_session)
-        hook = _make_hook(name="duplicate_hook")
+        feature = _make_feature()
 
-        await store.create_table("duplicate_hook", hook.feature.columns)
+        await store.create_table("duplicate_hook", feature.columns)
         with pytest.raises(ConflictError, match="already exists"):
-            await store.create_table("duplicate_hook", hook.feature.columns)
+            await store.create_table("duplicate_hook", feature.columns)
 
     async def test_create_table_registers_in_catalog(
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
     ):
         store = PostgresFeatureStore(pg_engine, pg_session)
-        hook = _make_hook(name="catalog_hook")
+        feature = _make_feature()
 
-        await store.create_table("catalog_hook", hook.feature.columns)
+        await store.create_table("catalog_hook", feature.columns)
 
         # Check catalog
         async with pg_engine.begin() as conn:
@@ -111,21 +104,23 @@ class TestFeatureStoreCreateTable:
 @pytest.mark.asyncio
 class TestFeatureStoreInsert:
     async def test_insert_features(self, pg_engine: AsyncEngine, pg_session: AsyncSession):
-        from tests.integration.conftest import seed_record
+        from tests.integration.conftest import seed_hook_run, seed_record
 
         store = PostgresFeatureStore(pg_engine, pg_session)
-        hook = _make_hook(name="insert_hook")
-        await store.create_table("insert_hook", hook.feature.columns)
+        feature = _make_feature()
+        await store.create_table("insert_hook", feature.columns)
 
         record_srn = "urn:osa:localhost:rec:rec-001@1"
         await seed_record(pg_engine, srn=record_srn)
+        # Every feature row carries a NOT NULL run_id FK to hook_runs.id (#145).
+        run_id = await seed_hook_run(pg_engine, feature_name="insert_hook")
 
         rows = [
             {"score": 0.95, "label": "good"},
             {"score": 0.42, "label": "poor"},
             {"score": 0.78, "label": None},
         ]
-        count = await store.insert_features("insert_hook", record_srn, rows)
+        count = await store.insert_features("insert_hook", record_srn, rows, run_id)
         assert count == 3
 
         # Verify data is in the table
@@ -142,7 +137,11 @@ class TestFeatureStoreInsert:
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
     ):
         store = PostgresFeatureStore(pg_engine, pg_session)
-        count = await store.insert_features("whatever", "urn:osa:localhost:rec:x@1", [])
+        # Empty rows short-circuits before any insert, so the run_id is never
+        # used (no FK check) — a placeholder is fine here.
+        count = await store.insert_features(
+            "whatever", "urn:osa:localhost:rec:x@1", [], "00000000-0000-0000-0000-000000000000"
+        )
         assert count == 0
 
 
@@ -157,9 +156,9 @@ class TestFeatureStoreJsonbColumns:
             ColumnDef(name="metadata", json_type="object", required=False),
             ColumnDef(name="count", json_type="integer", required=True),
         ]
-        hook = _make_hook(name="jsonb_hook", columns=columns)
+        feature = _make_feature(columns=columns)
         store = PostgresFeatureStore(pg_engine, pg_session)
-        await store.create_table("jsonb_hook", hook.feature.columns)
+        await store.create_table("jsonb_hook", feature.columns)
 
         # Verify JSONB columns via information_schema
         async with pg_engine.begin() as conn:
@@ -176,10 +175,11 @@ class TestFeatureStoreJsonbColumns:
             assert col_types["metadata"] == "jsonb"
             assert col_types["count"] == "bigint"
 
-        from tests.integration.conftest import seed_record
+        from tests.integration.conftest import seed_hook_run, seed_record
 
         record_srn = "urn:osa:localhost:rec:rec-jsonb@1"
         await seed_record(pg_engine, srn=record_srn)
+        run_id = await seed_hook_run(pg_engine, feature_name="jsonb_hook", columns=columns)
 
         # Insert data with JSONB values
         rows = [
@@ -189,5 +189,5 @@ class TestFeatureStoreJsonbColumns:
                 "count": 42,
             }
         ]
-        count = await store.insert_features("jsonb_hook", record_srn, rows)
+        count = await store.insert_features("jsonb_hook", record_srn, rows, run_id)
         assert count == 1
