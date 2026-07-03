@@ -133,7 +133,7 @@ class PostgresCatalogReadStore:
         return NodeCatalog(node_domain=self.node_domain.root, schemas=entries)
 
     async def get_schema_manifest(self, schema_id: SchemaId) -> SchemaManifest | None:
-        stmt = select(schemas_table.c.fields).where(
+        stmt = select(schemas_table.c.title, schemas_table.c.fields).where(
             schemas_table.c.id == schema_id.id.root,
             schemas_table.c.version == schema_id.version.root,
         )
@@ -152,6 +152,10 @@ class PostgresCatalogReadStore:
                     type=ftype,
                     ontology_id=f.get("ontology_id"),
                     ontology_version=f.get("ontology_version"),
+                    description=f.get("description"),
+                    # Hoisted for consumers; the constraints union itself stays internal.
+                    unit=(f.get("constraints") or {}).get("unit"),
+                    examples=f.get("examples"),
                 )
             )
             column_specs.append(ColumnSpec(name=f["name"], type=ftype))
@@ -171,6 +175,7 @@ class PostgresCatalogReadStore:
             id=schema_id.id.root,
             version=schema_id.version.root,
             srn=schema_id.to_srn(self.node_domain).render(),
+            title=row["title"],
             fields=field_specs,
             table_resources=[records_resource, *feature_resources],
         )
@@ -220,6 +225,12 @@ class PostgresCatalogReadStore:
     def _feature_column_specs(fschema: FeatureSchema) -> list[ColumnSpec]:
         """Map a feature table's declared columns to manifest ColumnSpecs."""
         return [
-            ColumnSpec(name=c.name, type=_JSON_TYPE_TO_FIELD_TYPE[c.json_type])
+            ColumnSpec(
+                name=c.name,
+                type=_JSON_TYPE_TO_FIELD_TYPE[c.json_type],
+                format=c.format,
+                description=c.description,
+                unit=c.unit,
+            )
             for c in fschema.columns
         ]
