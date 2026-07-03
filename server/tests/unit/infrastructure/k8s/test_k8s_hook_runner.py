@@ -8,11 +8,7 @@ from uuid import uuid4
 import pytest
 
 from osa.config import K8sConfig
-from osa.domain.shared.error import (
-    OOMError,
-    PermanentError,
-    TransientError,
-)
+from osa.domain.shared.failure import FailureKind, RuntimeFailure
 from osa.domain.shared.model.hook import (
     ColumnDef,
     HookIdentity,
@@ -411,10 +407,11 @@ class TestSchedulingWatch:
         pod_list.items = [pod]
         core_api.list_namespaced_pod.return_value = pod_list
 
-        with pytest.raises(TransientError, match="scheduling"):
+        with pytest.raises(RuntimeFailure, match="scheduling") as exc_info:
             await runner._wait_for_scheduling(
                 "test-job", "osa", timeout_seconds=0.1, poll_interval=0.05
             )
+        assert exc_info.value.kind is FailureKind.TIMEOUT
 
     @pytest.mark.asyncio
     async def test_image_pull_backoff_fails_fast(self):
@@ -432,8 +429,9 @@ class TestSchedulingWatch:
         pod_list.items = [pod]
         core_api.list_namespaced_pod.return_value = pod_list
 
-        with pytest.raises(PermanentError, match="[Ii]mage pull"):
+        with pytest.raises(RuntimeFailure, match="[Ii]mage pull") as exc_info:
             await runner._wait_for_scheduling("test-job", "osa")
+        assert exc_info.value.kind is FailureKind.IMAGE_PULL
 
     @pytest.mark.asyncio
     async def test_err_image_pull_fails_fast(self):
@@ -451,8 +449,9 @@ class TestSchedulingWatch:
         pod_list.items = [pod]
         core_api.list_namespaced_pod.return_value = pod_list
 
-        with pytest.raises(PermanentError, match="[Ii]mage pull"):
+        with pytest.raises(RuntimeFailure, match="[Ii]mage pull") as exc_info:
             await runner._wait_for_scheduling("test-job", "osa")
+        assert exc_info.value.kind is FailureKind.IMAGE_PULL
 
     @pytest.mark.asyncio
     async def test_pod_evicted(self):
@@ -468,8 +467,9 @@ class TestSchedulingWatch:
         pod_list.items = [pod]
         core_api.list_namespaced_pod.return_value = pod_list
 
-        with pytest.raises(TransientError, match="[Ee]vict"):
+        with pytest.raises(RuntimeFailure, match="[Ee]vict") as exc_info:
             await runner._wait_for_scheduling("test-job", "osa")
+        assert exc_info.value.kind is FailureKind.RUNTIME
 
 
 # ---------------------------------------------------------------------------
@@ -571,13 +571,14 @@ class TestExecutionAndCleanup:
         work_dir.mkdir(parents=True)
         inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
 
-        with pytest.raises(TransientError, match="[Tt]imed out|[Dd]eadline"):
+        with pytest.raises(RuntimeFailure, match="[Tt]imed out|[Dd]eadline") as exc_info:
             await runner._run_job(
                 hook,
                 release,
                 inputs,
                 work_dir,
             )
+        assert exc_info.value.kind is FailureKind.TIMEOUT
         batch_api.delete_namespaced_job.assert_called_once()
 
     @pytest.mark.asyncio
@@ -633,13 +634,14 @@ class TestExecutionAndCleanup:
         work_dir.mkdir(parents=True)
         inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
 
-        with pytest.raises(OOMError, match="[Oo][Oo][Mm]"):
+        with pytest.raises(RuntimeFailure, match="[Oo][Oo][Mm]") as exc_info:
             await runner._run_job(
                 hook,
                 release,
                 inputs,
                 work_dir,
             )
+        assert exc_info.value.kind is FailureKind.OOM
 
     @pytest.mark.asyncio
     async def test_nonzero_exit(self, tmp_path: Path):
@@ -692,13 +694,15 @@ class TestExecutionAndCleanup:
         work_dir.mkdir(parents=True)
         inputs = HookInputs(records=[HookRecord(id="test", metadata={})], run_id=_RUN_ID)
 
-        with pytest.raises(PermanentError, match="[Ee]xit"):
+        with pytest.raises(RuntimeFailure, match="[Ee]xit") as exc_info:
             await runner._run_job(
                 hook,
                 release,
                 inputs,
                 work_dir,
             )
+        assert exc_info.value.kind is FailureKind.HOOK_EXIT
+        assert exc_info.value.exit_code == 1
 
     @pytest.mark.asyncio
     async def test_orphan_running_job_attaches(self, tmp_path: Path):

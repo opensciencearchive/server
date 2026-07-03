@@ -9,7 +9,7 @@ from pathlib import Path
 from shutil import rmtree
 
 import aiodocker
-from osa.domain.shared.error import OOMError, PermanentError, TransientError
+from osa.domain.shared.failure import FailureKind, RuntimeFailure
 from osa.domain.shared.model.hook import HookIdentity
 from osa.domain.validation.model.hook_release import HookRelease
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
@@ -114,7 +114,7 @@ class OciHookRunner(HookRunner):
                     run_id=inputs.run_id,
                     timeout=timeout,
                 )
-                raise TransientError(f"Hook timed out after {timeout}s")
+                raise RuntimeFailure(FailureKind.TIMEOUT, f"Hook timed out after {timeout}s")
         finally:
             rmtree(staging_dir, onexc=_force_remove)
 
@@ -193,7 +193,8 @@ class OciHookRunner(HookRunner):
                     hook_name=hook.name,
                     memory=release.runtime.limits.memory,
                 )
-                raise OOMError(
+                raise RuntimeFailure(
+                    FailureKind.OOM,
                     f"Hook killed by OOM (limit: {release.runtime.limits.memory})",
                     container_logs=oom_text,
                 )
@@ -213,8 +214,10 @@ class OciHookRunner(HookRunner):
             if exit_code != 0:
                 logs = await container.log(stdout=True, stderr=True)
                 logs_str = "".join(logs) if logs else None
-                raise PermanentError(
+                raise RuntimeFailure(
+                    FailureKind.HOOK_EXIT,
                     f"Hook exited with code {exit_code}",
+                    exit_code=exit_code,
                     container_logs=logs_str,
                 )
 
@@ -223,14 +226,14 @@ class OciHookRunner(HookRunner):
                 "progress": progress,
             }
 
-        except (OOMError, PermanentError):
+        except RuntimeFailure:
             raise
         except aiodocker.DockerError as e:
             log.error("Docker error running hook", error=str(e))
-            raise TransientError(f"Docker error: {e}") from e
+            raise RuntimeFailure(FailureKind.RUNTIME, f"Docker error: {e}") from e
         except Exception as e:
             log.error("Unexpected error running hook", error=str(e))
-            raise TransientError(f"Unexpected error: {e}") from e
+            raise RuntimeFailure(FailureKind.RUNTIME, f"Unexpected error: {e}") from e
         finally:
             if container is not None:
                 try:
@@ -268,5 +271,8 @@ class OciHookRunner(HookRunner):
 
         # Pull from registry as last resort
         log.info("Pulling hook image", image=image)
-        await self._docker.images.pull(image)
+        try:
+            await self._docker.images.pull(image)
+        except aiodocker.DockerError as e:
+            raise RuntimeFailure(FailureKind.IMAGE_PULL, f"Image pull failed: {e}") from e
         return image

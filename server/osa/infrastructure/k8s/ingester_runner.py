@@ -9,12 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from osa.config import K8sConfig
-from osa.domain.shared.error import (
-    InfrastructureError,
-    OOMError,
-    PermanentError,
-    TransientError,
-)
+from osa.domain.shared.failure import FailureKind, RuntimeFailure
 from osa.domain.shared.model.source import IngesterDefinition
 from osa.domain.shared.model.srn import ConventionSlug
 from osa.domain.shared.port.ingester_runner import IngesterInputs, IngesterOutput, IngesterRunner
@@ -189,7 +184,7 @@ class K8sIngesterRunner(IngesterRunner):
             )
             return output
 
-        except InfrastructureError as e:
+        except RuntimeFailure as e:
             # Capture logs before cleanup destroys the pod
             if job_name_to_watch:
                 logs = await self._capture_pod_logs(job_name_to_watch, namespace)
@@ -396,14 +391,17 @@ class K8sIngesterRunner(IngesterRunner):
                 phase = pod.status.phase
                 if phase == "Failed":
                     reason = getattr(pod.status, "reason", None) or "Unknown"
-                    raise TransientError(f"Pod failed during scheduling: {reason}")
+                    raise RuntimeFailure(
+                        FailureKind.RUNTIME, f"Pod failed during scheduling: {reason}"
+                    )
 
                 if phase == "Pending" and pod.status.container_statuses:
                     for cs in pod.status.container_statuses:
                         waiting = getattr(cs.state, "waiting", None)
                         if waiting and waiting.reason in ("ImagePullBackOff", "ErrImagePull"):
-                            raise PermanentError(
-                                f"Image pull failed: {waiting.reason}: {getattr(waiting, 'message', '')}"
+                            raise RuntimeFailure(
+                                FailureKind.IMAGE_PULL,
+                                f"Image pull failed: {waiting.reason}: {getattr(waiting, 'message', '')}",
                             )
 
                 if phase in ("Running", "Succeeded", "Failed"):
@@ -411,7 +409,10 @@ class K8sIngesterRunner(IngesterRunner):
 
             await asyncio.sleep(poll_interval)
 
-        raise TransientError(f"Pod scheduling timeout after {timeout_seconds}s for Job {job_name}")
+        raise RuntimeFailure(
+            FailureKind.TIMEOUT,
+            f"Pod scheduling timeout after {timeout_seconds}s for Job {job_name}",
+        )
 
     async def _wait_for_completion(
         self,
@@ -452,7 +453,9 @@ class K8sIngesterRunner(IngesterRunner):
         except Exception:
             pass
 
-        raise TransientError(f"Watch timeout waiting for ingester Job {job_name} completion")
+        raise RuntimeFailure(
+            FailureKind.TIMEOUT, f"Watch timeout waiting for ingester Job {job_name} completion"
+        )
 
     async def _capture_pod_logs(self, job_name: str, namespace: str) -> str:
         """Capture tail logs from a Job's pod. Returns empty if unavailable."""
@@ -474,10 +477,10 @@ class K8sIngesterRunner(IngesterRunner):
         job_name: str,
         namespace: str,
         failure_info: str,
-    ) -> InfrastructureError:
-        """Inspect pod status, capture logs, and return the appropriate exception."""
+    ) -> RuntimeFailure:
+        """Inspect pod status and return the observed failure facts."""
         if "DeadlineExceeded" in failure_info:
-            return TransientError("Ingester timed out (deadline exceeded)")
+            return RuntimeFailure(FailureKind.TIMEOUT, "Ingester timed out (deadline exceeded)")
 
         try:
             label_selector = f"job-name={job_name}"
@@ -490,17 +493,21 @@ class K8sIngesterRunner(IngesterRunner):
                         terminated = getattr(cs.state, "terminated", None)
                         if terminated:
                             if getattr(terminated, "reason", None) == "OOMKilled":
-                                return OOMError("Source killed by OOM")
+                                return RuntimeFailure(FailureKind.OOM, "Source killed by OOM")
                             exit_code = getattr(terminated, "exit_code", -1)
                             if exit_code != 0:
-                                # Transient: ingester non-zero exit is often an upstream
+                                # UPSTREAM: ingester non-zero exit is often an upstream
                                 # API failure (500, rate limit), not a code bug.
-                                # Contrast with hooks where non-zero = PermanentError.
-                                return TransientError(f"Source exited with code {exit_code}")
+                                # Contrast with hooks where non-zero = HOOK_EXIT.
+                                return RuntimeFailure(
+                                    FailureKind.UPSTREAM,
+                                    f"Source exited with code {exit_code}",
+                                    exit_code=exit_code,
+                                )
         except Exception:
             pass
 
-        return PermanentError(f"Source failed: {failure_info}")
+        return RuntimeFailure(FailureKind.UNKNOWN, f"Source failed: {failure_info}")
 
     async def _cleanup_job(self, job_name: str, namespace: str) -> None:
         try:
