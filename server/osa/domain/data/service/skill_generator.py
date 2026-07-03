@@ -68,7 +68,7 @@ class SkillGeneratorService(Service):
                     row_count=records.row_count,
                 )
             )
-            author_docs = await self.read_store.get_author_docs(entry.id, entry.version)
+            author_docs = await self.read_store.get_author_docs(schema_id)
             if author_docs is not None:
                 docs.append(author_docs)
         return self.renderer.render_skill(
@@ -83,7 +83,7 @@ class SkillGeneratorService(Service):
         the schema resource). Unknown/reserved ids 404 via ``resolve_schema``."""
         schema_id = await self.catalog_service.resolve_schema(schema)
         manifest = await self.catalog_service.get_schema_manifest(schema_id)
-        docs = await self.read_store.get_author_docs(schema_id.id.root, schema_id.version.root)
+        docs = await self.read_store.get_author_docs(schema_id)
         sample_field = self.renderer.filter_example_field(manifest)
         sample: SampleValue | None = None
         if sample_field is not None:

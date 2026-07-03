@@ -35,7 +35,7 @@ def _manifest_no_features() -> SchemaManifest:
         id="orphan",
         version="1.0.0",
         srn="urn:osa:localhost:schema:orphan@1.0.0",
-        title=None,
+        title="Orphan Records",
         fields=[FieldSpec(name="species", type=FieldType.TEXT)],
         table_resources=[
             TableResource(
@@ -89,7 +89,9 @@ class TestOrphanSchema:
         assert "## When not to use" not in out
 
     def test_orphan_schema_still_in_datasets_table(self) -> None:
-        ds = DatasetEntry(schema_id="orphan", schema_ref="orphan@1.0.0", title=None, row_count=0)
+        ds = DatasetEntry(
+            schema_id="orphan", schema_ref="orphan@1.0.0", title="Orphan Records", row_count=0
+        )
         out = SkillRenderer().render_skill(node=_node(), base_url=BASE, datasets=[ds], docs=[])
         assert "| orphan@1.0.0 |" in out
 

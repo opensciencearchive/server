@@ -98,7 +98,7 @@ class TestGetAuthorDocs:
             pg_session, slug="compound-conv", purpose="Compound data.", created_at=datetime.now(UTC)
         )
         rs = PostgresCatalogReadStore(pg_session, Domain("localhost"))
-        docs = await rs.get_author_docs(SCHEMA.id.root, SCHEMA.version.root)
+        docs = await rs.get_author_docs(SCHEMA)
         assert docs is not None
         assert docs.purpose == "Compound data."
         assert len(docs.examples) == 1
@@ -116,7 +116,7 @@ class TestGetAuthorDocs:
             pg_session, slug="newer-conv", purpose="New purpose.", created_at=now
         )
         rs = PostgresCatalogReadStore(pg_session, Domain("localhost"))
-        docs = await rs.get_author_docs(SCHEMA.id.root, SCHEMA.version.root)
+        docs = await rs.get_author_docs(SCHEMA)
         assert docs is not None
         assert docs.purpose == "New purpose."
 
@@ -126,7 +126,7 @@ class TestGetAuthorDocs:
         await _setup_schema(pg_engine, pg_session)
         await pg_session.commit()
         rs = PostgresCatalogReadStore(pg_session, Domain("localhost"))
-        assert await rs.get_author_docs(SCHEMA.id.root, SCHEMA.version.root) is None
+        assert await rs.get_author_docs(SCHEMA) is None
 
 
 @pytest.mark.asyncio

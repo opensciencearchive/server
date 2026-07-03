@@ -11,19 +11,22 @@ at all (FR-013..016).
 
 from typing import Annotated
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import AfterValidator, Field, model_validator
 
 from osa.domain.shared.model.value import ValueObject
-
-NonEmptyStr = Annotated[str, Field(min_length=1)]
 
 MIN_DISTINCT_TRIGGER_QUESTIONS = 3
 
 
-def _require_stripped(value: str, field_name: str) -> str:
+def _require_non_blank(value: str) -> str:
     if not value.strip():
-        raise ValueError(f"{field_name} must not be empty or whitespace-only")
+        raise ValueError("must not be empty or whitespace-only")
     return value
+
+
+# Non-empty AND not whitespace-only; the ValidationError's ``loc`` names the
+# offending field, so the message itself stays field-agnostic.
+NonBlankStr = Annotated[str, Field(min_length=1), AfterValidator(_require_non_blank)]
 
 
 class Example(ValueObject):
@@ -33,38 +36,21 @@ class Example(ValueObject):
     verbatim into the reference doc.
     """
 
-    question: NonEmptyStr
-    query: NonEmptyStr
-    interpretation: NonEmptyStr
-
-    @field_validator("question", "query", "interpretation")
-    @classmethod
-    def _non_blank(cls, v: str, info) -> str:
-        return _require_stripped(v, info.field_name)
+    question: NonBlankStr
+    query: NonBlankStr
+    interpretation: NonBlankStr
 
 
 class ConventionDocs(ValueObject):
     """The author-semantics block attached to a Convention at deploy."""
 
-    purpose: NonEmptyStr
+    purpose: NonBlankStr
     # Trigger-only questions (no worked answer); may be empty when the worked
     # examples alone supply the required breadth.
-    example_questions: list[NonEmptyStr] = []
+    example_questions: list[NonBlankStr] = []
     examples: list[Example] = Field(min_length=1)
     when_not_to_use: str | None = None
     see_also: list[str] | None = None
-
-    @field_validator("purpose")
-    @classmethod
-    def _purpose_non_blank(cls, v: str) -> str:
-        return _require_stripped(v, "purpose")
-
-    @field_validator("example_questions")
-    @classmethod
-    def _questions_non_blank(cls, v: list[str]) -> list[str]:
-        for q in v:
-            _require_stripped(q, "example_questions entries")
-        return v
 
     @model_validator(mode="after")
     def _require_trigger_breadth(self) -> "ConventionDocs":

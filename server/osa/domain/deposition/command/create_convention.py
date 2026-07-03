@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from osa.domain.auth.model.principal import Principal
 from osa.domain.deposition.model.deploy import HookDeploy
@@ -9,6 +9,7 @@ from osa.domain.deposition.model.docs import (
     MIN_DISTINCT_TRIGGER_QUESTIONS,
     ConventionDocs,
     Example,
+    NonBlankStr,
 )
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.service.convention import ConventionService
@@ -87,16 +88,9 @@ class ExamplePayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    question: str = Field(min_length=1)
-    query: str = Field(min_length=1)
-    interpretation: str = Field(min_length=1)
-
-    @field_validator("question", "query", "interpretation")
-    @classmethod
-    def _non_blank(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("must not be empty or whitespace-only")
-        return v
+    question: NonBlankStr
+    query: NonBlankStr
+    interpretation: NonBlankStr
 
     def to_vo(self) -> Example:
         return Example(question=self.question, query=self.query, interpretation=self.interpretation)
@@ -112,25 +106,11 @@ class ConventionDocsPayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    purpose: str = Field(min_length=1)
-    example_questions: list[str] = []
+    purpose: NonBlankStr
+    example_questions: list[NonBlankStr] = []
     examples: list[ExamplePayload] = Field(min_length=1)
     when_not_to_use: str | None = None
     see_also: list[str] | None = None
-
-    @field_validator("purpose")
-    @classmethod
-    def _purpose_non_blank(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("purpose must not be empty or whitespace-only")
-        return v
-
-    @field_validator("example_questions")
-    @classmethod
-    def _questions_non_blank(cls, v: list[str]) -> list[str]:
-        if any(not q.strip() for q in v):
-            raise ValueError("example_questions entries must not be empty")
-        return v
 
     @model_validator(mode="after")
     def _require_trigger_breadth(self) -> "ConventionDocsPayload":

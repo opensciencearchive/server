@@ -114,12 +114,6 @@ class TestReferenceHeader:
     def test_header_line(self) -> None:
         assert _render().startswith("# Alloy Ductility Tests (alloy-tests@2.1.0)\n")
 
-    def test_header_falls_back_to_id_without_title(self) -> None:
-        manifest = _manifest()
-        manifest = manifest.model_copy(update={"title": None})
-        out = _render(manifest=manifest)
-        assert out.startswith("# alloy-tests (alloy-tests@2.1.0)\n")
-
     def test_purpose_paragraph_when_docs_exist(self) -> None:
         assert "\nTest-campaign results for structural alloys.\n" in _render()
 

@@ -29,7 +29,12 @@ from osa.domain.data.model.manifest import (
 from osa.domain.data.model.query_plan import TableKind
 from osa.domain.data.model.record_summary import RecordSummary
 from osa.domain.data.model.skill import AuthorDocs, SampleValue
-from osa.domain.semantics.model.value import FieldType
+from osa.domain.semantics.model.value import (
+    FieldDefinition,
+    FieldType,
+    NumberConstraints,
+    TermConstraints,
+)
 from osa.domain.shared.model.ids import RecordId
 from osa.domain.shared.model.srn import Domain, RecordSRN, SchemaId
 from osa.infrastructure.data.schema_feature_reader import SchemaFeatureReader
@@ -150,20 +155,30 @@ class PostgresCatalogReadStore:
         field_specs: list[FieldSpec] = []
         column_specs: list[ColumnSpec] = []
         for f in row["fields"]:
-            ftype = FieldType(f["type"])
+            # The blob IS a serialized FieldDefinition — validate it back into
+            # the domain model and read typed attributes, never raw dict keys.
+            fd = FieldDefinition.model_validate(f)
+            ontology_id: str | None = None
+            ontology_version: str | None = None
+            unit: str | None = None
+            if isinstance(fd.constraints, TermConstraints):
+                ontology_id = fd.constraints.ontology_srn.id.root
+                ontology_version = fd.constraints.ontology_srn.version.root
+            elif isinstance(fd.constraints, NumberConstraints):
+                # Hoisted for consumers; the constraints union stays internal.
+                unit = fd.constraints.unit
             field_specs.append(
                 FieldSpec(
-                    name=f["name"],
-                    type=ftype,
-                    ontology_id=f.get("ontology_id"),
-                    ontology_version=f.get("ontology_version"),
-                    description=f.get("description"),
-                    # Hoisted for consumers; the constraints union itself stays internal.
-                    unit=(f.get("constraints") or {}).get("unit"),
-                    examples=f.get("examples"),
+                    name=fd.name,
+                    type=fd.type,
+                    ontology_id=ontology_id,
+                    ontology_version=ontology_version,
+                    description=fd.description,
+                    unit=unit,
+                    examples=fd.examples,
                 )
             )
-            column_specs.append(ColumnSpec(name=f["name"], type=ftype))
+            column_specs.append(ColumnSpec(name=fd.name, type=fd.type))
 
         record_count = await self._records_count(schema_id)
         records_resource = TableResource(
@@ -208,14 +223,14 @@ class PostgresCatalogReadStore:
     # Skill surface projections (#151)
     # ------------------------------------------------------------------ #
 
-    async def get_author_docs(self, schema_id: str, version: str) -> AuthorDocs | None:
+    async def get_author_docs(self, schema_id: SchemaId) -> AuthorDocs | None:
         """Docs of the schema's owning convention — a read-model projection over
         the deposition-owned ``conventions`` table (latest deploy wins)."""
         stmt = (
             select(conventions_table.c.docs)
             .where(
-                conventions_table.c.schema_id == schema_id,
-                conventions_table.c.schema_version == version,
+                conventions_table.c.schema_id == schema_id.id.root,
+                conventions_table.c.schema_version == schema_id.version.root,
             )
             .order_by(conventions_table.c.created_at.desc())
             .limit(1)

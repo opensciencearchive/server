@@ -70,7 +70,7 @@ class TestColumnSpecEnrichment:
 
 
 class TestSchemaManifestEnrichment:
-    def test_accepts_title(self):
+    def test_carries_title(self):
         manifest = SchemaManifest(
             id="alloy-tests",
             version="2.1.0",
@@ -81,16 +81,19 @@ class TestSchemaManifestEnrichment:
         )
         assert manifest.title == "Alloy Ductility Tests"
 
-    def test_title_defaults_to_none(self):
-        manifest = SchemaManifest(
-            id="alloy-tests",
-            version="2.1.0",
-            srn="urn:osa:localhost:schema:alloy-tests@2.1.0",
-            fields=[],
-            table_resources=[],
-        )
-        assert manifest.title is None
-        assert "title" not in manifest.model_dump(exclude_none=True)
+    def test_title_is_required(self):
+        # schemas.title is NOT NULL — a title-less manifest is unrepresentable.
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            SchemaManifest(
+                id="alloy-tests",
+                version="2.1.0",
+                srn="urn:osa:localhost:schema:alloy-tests@2.1.0",
+                fields=[],
+                table_resources=[],
+            )  # type: ignore[call-arg]
 
 
 def test_manifest_route_omits_absent_attributes():

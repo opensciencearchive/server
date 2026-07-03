@@ -73,7 +73,7 @@ class SchemaManifest(BaseModel):
     id: str  # short schema id, e.g. "compound"
     version: str  # SemVer, e.g. "1.0.0"
     srn: str  # full schema SRN
-    title: str | None = None
+    title: str  # schemas.title is NOT NULL — every schema has one
     fields: list[FieldSpec]
     table_resources: list[TableResource]
 

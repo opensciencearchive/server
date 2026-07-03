@@ -40,11 +40,16 @@ class ExampleDoc(BaseModel):
 
 
 class AuthorDocs(BaseModel):
-    """Author semantics for one schema, projected from its owning convention."""
+    """Author semantics for one schema, projected from its owning convention.
+
+    ``examples`` is required — the persisted ``ConventionDocs`` guarantees ≥1
+    worked example, and this read DTO must not re-admit the state the write
+    side made unrepresentable.
+    """
 
     purpose: str
     example_questions: list[str] = []
-    examples: list[ExampleDoc] = []
+    examples: list[ExampleDoc]
     when_not_to_use: str | None = None
     see_also: list[str] | None = None
 
@@ -67,5 +72,5 @@ class DatasetEntry(BaseModel):
 
     schema_id: str  # bare short id, e.g. "alloy-tests" (reference link target)
     schema_ref: str  # "<id>@<version>"
-    title: str | None
+    title: str
     row_count: int

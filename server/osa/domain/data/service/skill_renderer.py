@@ -83,9 +83,8 @@ class SkillRenderer(Service):
             lines.append("| Schema | Title | Records | Reference |")
             lines.append("|---|---|---|---|")
             for ds in datasets:
-                title = ds.title or ""
                 lines.append(
-                    f"| {ds.schema_ref} | {title} | {ds.row_count} "
+                    f"| {ds.schema_ref} | {ds.title} | {ds.row_count} "
                     f"| {_reference_path(ds.schema_id)} |"
                 )
         else:
@@ -153,7 +152,7 @@ class SkillRenderer(Service):
         features = [t for t in manifest.table_resources if t.kind == TableKind.FEATURE]
 
         lines: list[str] = []
-        lines.append(f"# {manifest.title or manifest.id} ({schema_ref})")
+        lines.append(f"# {manifest.title} ({schema_ref})")
 
         if docs is not None:
             lines.append("")

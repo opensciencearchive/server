@@ -18,6 +18,7 @@ from osa.domain.data.query.skill import (
     GetSkillDocument,
     GetSkillDocumentHandler,
 )
+from osa.domain.shared.error import ConfigurationError
 
 MARKDOWN_MEDIA_TYPE = "text/markdown; charset=utf-8"
 
@@ -29,7 +30,12 @@ async def get_root_discovery(
     request: Request, handler: FromDishka[GetRootDiscoveryHandler]
 ) -> RootDiscovery:
     """Root discovery document: node identity + pointers for agents."""
-    return await handler.run(GetRootDiscovery(openapi_path=request.app.openapi_url or ""))
+    openapi_path = request.app.openapi_url
+    if openapi_path is None:
+        # The discovery document must not advertise a dead openapi_url; a node
+        # with OpenAPI disabled is misconfigured for the agent surface.
+        raise ConfigurationError("Root discovery requires the OpenAPI schema to be enabled")
+    return await handler.run(GetRootDiscovery(openapi_path=openapi_path))
 
 
 @router.get("/SKILL.md", operation_id="skill_get_skill_document")

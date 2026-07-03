@@ -57,7 +57,7 @@ class DataCatalogReadStore(Protocol):
         """Resolve a bare schema id to its latest published version. ``None`` if unknown."""
         ...
 
-    async def get_author_docs(self, schema_id: str, version: str) -> "AuthorDocs | None":
+    async def get_author_docs(self, schema_id: "SchemaId") -> "AuthorDocs | None":
         """Author docs from the schema's owning convention (latest deploy wins).
 
         Every convention carries docs (``NOT NULL``), so ``None`` means only

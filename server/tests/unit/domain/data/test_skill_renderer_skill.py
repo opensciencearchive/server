@@ -126,11 +126,6 @@ class TestRenderSkillParts:
         assert "questions like: q1? q2?\n" in out
         assert out.count("q1?") == 1
 
-    def test_dataset_without_title_renders_empty_cell(self) -> None:
-        ds = DatasetEntry(schema_id="orphan", schema_ref="orphan@1.0.0", title=None, row_count=0)
-        out = SkillRenderer().render_skill(node=_node(), base_url=BASE, datasets=[ds], docs=[])
-        assert "| orphan@1.0.0 |  | 0 | api/v1/data/orphan.md |" in out
-
     def test_when_not_to_use_omitted_without_author_content(self) -> None:
         out = SkillRenderer().render_skill(
             node=_node(), base_url=BASE, datasets=[_dataset()], docs=[]
@@ -141,6 +136,6 @@ class TestRenderSkillParts:
     def test_reference_links_are_percent_encoded(self) -> None:
         # Schema ids can never contain spaces, but the renderer encodes
         # defensively (research §11 belt-and-braces).
-        ds = DatasetEntry(schema_id="a b", schema_ref="a b@1.0.0", title=None, row_count=0)
+        ds = DatasetEntry(schema_id="a b", schema_ref="a b@1.0.0", title="A B", row_count=0)
         out = SkillRenderer().render_skill(node=_node(), base_url=BASE, datasets=[ds], docs=[])
         assert "api/v1/data/a%20b.md" in out
