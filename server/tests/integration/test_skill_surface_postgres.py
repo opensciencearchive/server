@@ -121,7 +121,7 @@ class TestSkillDocument:
         assert resp.headers["content-type"].startswith("text/markdown")
         body = resp.text
         assert body.startswith("---\nname: osa-data-localhost\n")
-        assert "| compound@1.0.0 | Compounds | 1 | api/v1/data/compound.md |" in body
+        assert "| compound@1.0.0 | Compounds | 1 | api/v1/data/compound@1.0.0.md |" in body
         assert "Compound reference data." in body
 
     async def test_zero_schema_skill_md(self, pg_session, client: AsyncClient):

@@ -62,7 +62,6 @@ class SkillGeneratorService(Service):
             records = next(t for t in manifest.table_resources if t.name == "records")
             datasets.append(
                 DatasetEntry(
-                    schema_id=entry.id,
                     schema_ref=f"{entry.id}@{entry.version}",
                     title=manifest.title,
                     row_count=records.row_count,

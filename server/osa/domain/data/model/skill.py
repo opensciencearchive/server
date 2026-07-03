@@ -68,9 +68,13 @@ class SampleValue(BaseModel):
 
 
 class DatasetEntry(BaseModel):
-    """One row of the SKILL.md datasets table."""
+    """One row of the SKILL.md datasets table.
 
-    schema_id: str  # bare short id, e.g. "alloy-tests" (reference link target)
+    ``schema_ref`` is the fully-qualified ``<id>@<version>`` — it is both the
+    row label and the reference-link target, so the link always resolves to
+    exactly the documented version (a bare id would resolve to *latest*).
+    """
+
     schema_ref: str  # "<id>@<version>"
     title: str
     row_count: int

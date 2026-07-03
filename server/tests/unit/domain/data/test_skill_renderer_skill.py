@@ -45,7 +45,6 @@ def _docs() -> AuthorDocs:
 
 def _dataset() -> DatasetEntry:
     return DatasetEntry(
-        schema_id="alloy-tests",
         schema_ref="alloy-tests@2.1.0",
         title="Alloy Ductility Tests",
         row_count=12480,
@@ -89,7 +88,7 @@ Test-campaign results for structural alloys.
 
 | Schema | Title | Records | Reference |
 |---|---|---|---|
-| alloy-tests@2.1.0 | Alloy Ductility Tests | 12480 | api/v1/data/alloy-tests.md |
+| alloy-tests@2.1.0 | Alloy Ductility Tests | 12480 | api/v1/data/alloy-tests@2.1.0.md |
 
 ## Access
 
@@ -135,7 +134,18 @@ class TestRenderSkillParts:
 
     def test_reference_links_are_percent_encoded(self) -> None:
         # Schema ids can never contain spaces, but the renderer encodes
-        # defensively (research §11 belt-and-braces).
-        ds = DatasetEntry(schema_id="a b", schema_ref="a b@1.0.0", title="A B", row_count=0)
+        # defensively (research §11 belt-and-braces). The `@` stays literal —
+        # it is valid in a path segment and the versioned form must stay
+        # copy-pasteable for agents.
+        ds = DatasetEntry(schema_ref="a b@1.0.0", title="A B", row_count=0)
         out = SkillRenderer().render_skill(node=_node(), base_url=BASE, datasets=[ds], docs=[])
-        assert "api/v1/data/a%20b.md" in out
+        assert "api/v1/data/a%20b@1.0.0.md" in out
+
+    def test_reference_links_pin_the_documented_version(self) -> None:
+        # A bare-id link resolves to *latest*, so an older schema version's
+        # row would point at incompatible docs (review: pinned-links drift).
+        out = SkillRenderer().render_skill(
+            node=_node(), base_url=BASE, datasets=[_dataset()], docs=[]
+        )
+        assert "api/v1/data/alloy-tests@2.1.0.md" in out
+        assert "api/v1/data/alloy-tests.md" not in out

@@ -44,8 +44,10 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
-def _reference_path(schema_id: str) -> str:
-    return quote(f"api/v1/data/{schema_id}.md", safe="/")
+def _reference_path(schema_ref: str) -> str:
+    # `@` stays literal: it is valid in a path segment and the versioned ref
+    # must remain copy-pasteable.
+    return quote(f"api/v1/data/{schema_ref}.md", safe="/@")
 
 
 class SkillRenderer(Service):
@@ -85,7 +87,7 @@ class SkillRenderer(Service):
             for ds in datasets:
                 lines.append(
                     f"| {ds.schema_ref} | {ds.title} | {ds.row_count} "
-                    f"| {_reference_path(ds.schema_id)} |"
+                    f"| {_reference_path(ds.schema_ref)} |"
                 )
         else:
             lines.append("No datasets yet.")
