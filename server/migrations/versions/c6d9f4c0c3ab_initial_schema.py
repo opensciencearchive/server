@@ -90,6 +90,8 @@ def upgrade() -> None:
         sa.Column("batches_failed", sa.Integer(), server_default=sa.text("0"), nullable=False),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("failure_reason", sa.Text(), nullable=True),
+        sa.Column("failure_kind", sa.String(length=32), nullable=True),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("idx_ingest_runs_convention", "ingest_runs", ["convention_id"], unique=False)

@@ -97,6 +97,13 @@ class IngestService(Service):
         )
         return ingest_run
 
+    async def get_ingestion(self, ingest_run_id: IngestRunId) -> IngestRun:
+        """Fetch an ingest run by id, raising NotFoundError if absent."""
+        ingest_run = await self.ingest_repo.get(ingest_run_id)
+        if ingest_run is None:
+            raise NotFoundError(f"Ingest run not found: {ingest_run_id}")
+        return ingest_run
+
     async def complete_batch(self, ingest_run_id: IngestRunId, published_count: int) -> None:
         """Account for a successfully processed batch.
 
