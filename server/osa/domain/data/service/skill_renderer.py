@@ -256,11 +256,15 @@ class SkillRenderer(Service):
         sample: SampleValue | None,
     ) -> list[str]:
         data_base = f"{base_url}/api/v1/data"
+        # Fully-qualified <id>@<version>: the doc may have been requested at a
+        # pinned version, and a bare id resolves to *latest* — the examples must
+        # target exactly the schema version this document describes.
+        schema_ref = f"{manifest.id}@{manifest.version}"
         lines = ["", "## Examples", ""]
         n = 1
         lines.append(f"{n}. Bulk dump (start here):")
         lines.append("")
-        lines.append(f"   GET {data_base}/{manifest.id}/records.csv.gz")
+        lines.append(f"   GET {data_base}/{schema_ref}/records.csv.gz")
         if sample_field is not None:
             n += 1
             value = sample.value if sample is not None else PLACEHOLDER_VALUE
@@ -278,7 +282,7 @@ class SkillRenderer(Service):
             lines.append("")
             lines.append(f"{n}. Filtered query (FilterExpr POST — use for large tables):")
             lines.append("")
-            lines.append(f"   POST {data_base}/{manifest.id}/records")
+            lines.append(f"   POST {data_base}/{schema_ref}/records")
             lines.append(f"   {body}")
         if features:
             n += 1
@@ -289,7 +293,7 @@ class SkillRenderer(Service):
                 f"`{feature.name}.record_srn` column to `records.srn`:"
             )
             lines.append("")
-            lines.append(f"   GET {data_base}/{manifest.id}/{feature.name}.csv.gz")
+            lines.append(f"   GET {data_base}/{schema_ref}/{feature.name}.csv.gz")
         n += 1
         lines.append("")
         lines.append(f"{n}. Single record:")

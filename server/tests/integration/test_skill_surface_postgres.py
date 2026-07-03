@@ -146,6 +146,9 @@ class TestSchemaReference:
         assert "Compound reference data." in ref.text
         # Sampled value reaches the FilterExpr example (research §9).
         assert '"value": "Homo sapiens"' in ref.text
+        # Example URLs are pinned to the documented version — a bare id would
+        # silently resolve to latest and drift from the doc being read.
+        assert "/api/v1/data/compound@1.0.0/records.csv.gz" in ref.text
         # Route-ordering regression: the JSON manifest still resolves.
         assert manifest.status_code == 200
         assert manifest.json()["id"] == "compound"

@@ -172,10 +172,13 @@ class TestMechanicalExamples:
         out = _render()
         examples = out[out.index("## Examples") :]
         assert examples.index("records.csv.gz") < examples.index("FilterExpr")
-        assert f"GET {BASE}/api/v1/data/alloy-tests/records.csv.gz" in examples
+        # Versioned, so the example targets exactly the documented schema version
+        # even when a newer latest exists (review: versioned-examples drift).
+        assert f"GET {BASE}/api/v1/data/alloy-tests@2.1.0/records.csv.gz" in examples
 
     def test_filter_example_uses_sampled_value_and_actual_field(self) -> None:
         out = _render()
+        assert f"POST {BASE}/api/v1/data/alloy-tests@2.1.0/records" in out
         assert (
             '{"filter": {"kind": "predicate", "field": "metadata.yield_strength", '
             '"op": "eq", "value": 512}}'
@@ -187,7 +190,7 @@ class TestMechanicalExamples:
 
     def test_join_recipe_spells_out_columns(self) -> None:
         out = _render()
-        assert f"GET {BASE}/api/v1/data/alloy-tests/ductility.csv.gz" in out
+        assert f"GET {BASE}/api/v1/data/alloy-tests@2.1.0/ductility.csv.gz" in out
         assert "`ductility.record_srn`" in out
 
     def test_single_record_fetch(self) -> None:
