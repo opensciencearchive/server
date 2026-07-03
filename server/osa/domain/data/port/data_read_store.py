@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from osa.domain.data.model.manifest import SchemaManifest
     from osa.domain.data.model.query_plan import QueryPlan
     from osa.domain.data.model.record_summary import RecordSummary
+    from osa.domain.data.model.skill import AuthorDocs, SampleValue
     from osa.domain.shared.model.ids import RecordId
     from osa.domain.shared.model.srn import SchemaId
 
@@ -54,4 +55,23 @@ class DataCatalogReadStore(Protocol):
 
     async def get_latest_schema_id(self, schema_short_id: str) -> "SchemaId | None":
         """Resolve a bare schema id to its latest published version. ``None`` if unknown."""
+        ...
+
+    async def get_author_docs(self, schema_id: str, version: str) -> "AuthorDocs | None":
+        """Author docs from the schema's owning convention (latest deploy wins).
+
+        Every convention carries docs (``NOT NULL``), so ``None`` means only
+        "no owning convention exists" — the renderer's sole degradation signal
+        (FR-023).
+        """
+        ...
+
+    async def sample_value(
+        self, schema_id: "SchemaId", table: str, column: str
+    ) -> "SampleValue | None":
+        """One non-null value from a column for example templating (research §9).
+
+        ``table`` is ``"records"`` (scoped to the schema's records) or a
+        feature-table name. ``None`` when the column has no non-null values.
+        """
         ...

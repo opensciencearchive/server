@@ -17,6 +17,7 @@ from osa.application.api.v1.routes.data import (
     features_table,
     records,
     records_table,
+    reference,
 )
 from osa.domain.data.model.catalog import NodeCatalog
 
@@ -39,9 +40,11 @@ tables_router = APIRouter(route_class=DishkaRoute)
 records_table.register(tables_router)
 features_table.register(tables_router)
 
-# Order matters: literal ``/records/{id}`` and the ``/{schema}/records*`` table
-# routes must precede the manifest's ``/{schema}`` catch-all so a record fetch
-# or table read isn't captured as a schema manifest lookup.
+# Order matters: literal ``/records/{id}``, the ``/{schema}/records*`` table
+# routes, and the ``/{schema}.md`` reference doc must precede the manifest's
+# ``/{schema}`` catch-all so a record fetch, table read, or reference render
+# isn't captured as a schema manifest lookup (longest-suffix-first, #151).
 router.include_router(records.router)
 router.include_router(tables_router)
+router.include_router(reference.router)
 router.include_router(catalog.manifest_router)
