@@ -7,7 +7,8 @@ from uuid import uuid4
 
 from typing import Any
 
-from osa.domain.shared.error import InfrastructureError, NotFoundError, OOMError
+from osa.domain.shared.error import NotFoundError
+from osa.domain.shared.failure import FailurePolicy, RuntimeFailure
 from osa.domain.shared.model.hook import HookIdentity, HookName
 from osa.domain.shared.model.srn import (
     ConventionSlug,
@@ -41,6 +42,7 @@ class ValidationService(Service):
     hook_runner: HookRunner
     hook_storage: HookStoragePort
     hook_registry: HookRegistryService
+    failure_policy: FailurePolicy
     node_domain: Domain
 
     async def create_run(
@@ -86,6 +88,7 @@ class ValidationService(Service):
         hook_service = HookService(
             hook_runner=self.hook_runner,
             hook_storage=self.hook_storage,
+            failure_policy=self.failure_policy,
         )
 
         # Resolve identity + live release per hook (snapshot).
@@ -110,18 +113,18 @@ class ValidationService(Service):
             except Exception as exc:
                 finished_at = datetime.now(timezone.utc)
                 # Record ANY failure as a terminal ERROR run. Capture the failed
-                # container's logs (typed on InfrastructureError, else the message)
+                # container's logs (typed on RuntimeFailure, else the message)
                 # to a tenant-scoped artifact so the ERROR is diagnosable (#145/#147).
                 text = (
                     exc.container_logs
-                    if isinstance(exc, InfrastructureError) and exc.container_logs
+                    if isinstance(exc, RuntimeFailure) and exc.container_logs
                     else str(exc)
                 )
                 log_ref = await self.hook_storage.write_hook_log(work_dir, text)
-                # run_hook re-raises OOMError carrying the real retry count after
-                # exhausting memory retries — record it, don't zero it (mirrors
-                # the batch path's HookExecution.failed). Non-OOM failures: 0.
-                oom_retries = exc.oom_retries or 0 if isinstance(exc, OOMError) else 0
+                # run_hook re-raises the OOM RuntimeFailure carrying the real bump
+                # count after exhausting memory retries — record it, don't zero it
+                # (mirrors the batch path's HookExecution.failed). Other errors: 0.
+                oom_retries = exc.oom_retries if isinstance(exc, RuntimeFailure) else 0
                 await self.hook_registry.record_run(
                     HookRun(
                         id=run_id,

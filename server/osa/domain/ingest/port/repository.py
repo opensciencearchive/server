@@ -1,9 +1,11 @@
 """IngestRunRepository port — persistence interface for ingest runs."""
 
 from abc import abstractmethod
+from datetime import datetime
 from typing import Protocol
 
 from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId
+from osa.domain.shared.failure import FailureKind
 from osa.domain.shared.port import Port
 
 
@@ -54,5 +56,34 @@ class IngestRunRepository(Port, Protocol):
 
         Returns the updated IngestRun with DB-authoritative counter values
         for completion condition checking.
+        """
+        ...
+
+    @abstractmethod
+    async def abort(
+        self,
+        id: IngestRunId,
+        *,
+        reason: str,
+        kind: FailureKind,
+        completed_at: datetime,
+    ) -> IngestRun | None:
+        """Atomically fail a run with its explanation, if it is not already terminal.
+
+        Sets status=FAILED, failure_reason/failure_kind, ingestion_finished and
+        completed_at in one guarded UPDATE so concurrent batch workers can race
+        to abort safely. Returns the updated run, or None if the run was
+        already COMPLETED/FAILED (idempotent no-op).
+        """
+        ...
+
+    @abstractmethod
+    async def record_failure(
+        self, id: IngestRunId, *, reason: str, kind: FailureKind | None
+    ) -> None:
+        """Record why ingestion stopped early, without changing run status.
+
+        Used when the ingester gives up but already-sourced batches may still
+        complete the run normally.
         """
         ...

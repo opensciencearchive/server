@@ -5,17 +5,26 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.ingest.event.events import HookBatchCompleted, IngesterBatchReady
+from osa.domain.ingest.model.ingest_run import IngestStatus
 from osa.domain.ingest.model.ingester_record import IngesterRecord
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.ingest.port.storage import IngestStoragePort
 from osa.domain.ingest.service.ingest import IngestService
 from osa.domain.shared.error import NotFoundError, TransientError
 from osa.domain.shared.event import EventHandler, EventId
+from osa.domain.shared.failure import (
+    AbortRun,
+    FailurePolicy,
+    PriorAttempts,
+    Retry,
+    RuntimeFailure,
+)
 from osa.domain.shared.model.hook import HookIdentity, HookName
 from osa.domain.shared.model.srn import ConventionSlug
 from osa.domain.shared.outbox import Outbox
 from osa.domain.validation.model.hook_input import HookRecord
 from osa.domain.validation.model.hook_release import HookRelease
+from osa.domain.validation.model.hook_result import HookExecution
 from osa.domain.validation.model.hook_run import HookRun, HookRunId, HookRunStatus
 from osa.domain.validation.port.hook_runner import HookInputs
 from osa.domain.validation.service.hook import HookService
@@ -36,6 +45,17 @@ def _hook_run_id(ingest_run_id: str, batch_index: int, hook_name: HookName) -> H
     return HookRunId(uuid5(_HOOK_RUN_NS, f"{ingest_run_id}:{batch_index}:{hook_name.root}"))
 
 
+def _failure_from(execution: HookExecution) -> RuntimeFailure:
+    """Rehydrate the observed failure facts from a failed execution."""
+    if execution.failure is None:
+        raise ValueError(f"hook {execution.hook_name!r} did not fail")
+    return RuntimeFailure(
+        execution.failure,
+        execution.error_message or "",
+        oom_retries=execution.oom_retries,
+    )
+
+
 class RunHooks(EventHandler[IngesterBatchReady]):
     """Runs hook containers on an ingester batch and emits HookBatchCompleted."""
 
@@ -49,11 +69,23 @@ class RunHooks(EventHandler[IngesterBatchReady]):
     hook_registry: HookRegistryService
     outbox: Outbox
     ingest_storage: IngestStoragePort
+    failure_policy: FailurePolicy
 
     async def handle(self, event: IngesterBatchReady) -> None:
         ingest_run = await self.ingest_repo.get(event.ingest_run_id)
         if ingest_run is None:
             raise NotFoundError(f"Ingest run not found: {event.ingest_run_id}")
+
+        # An aborted/finished run schedules no more work — drop redelivered
+        # batch events instead of grinding through them one by one (#152).
+        if ingest_run.status in (IngestStatus.COMPLETED, IngestStatus.FAILED):
+            log.warn(
+                "batch {batch_index} skipped — run is {status}",
+                batch_index=event.batch_index,
+                status=ingest_run.status.value,
+                ingest_run_id=event.ingest_run_id,
+            )
+            return
 
         convention = await self.convention_service.get_convention(
             ConventionSlug.parse(ingest_run.convention_id)
@@ -132,21 +164,63 @@ class RunHooks(EventHandler[IngesterBatchReady]):
                 ingest_run_id=event.ingest_run_id,
             )
 
-        # Any TRANSIENT failure → re-drive the whole batch. The UOW rolls back
-        # (nothing recorded this attempt), but each hook's filesystem checkpoint
-        # makes the re-run cheap — completed hooks return instantly without a
-        # container, and the deterministic id keeps the eventual insert dup-free.
-        pending = [e for e in executions if not e.is_terminal]
+        # Ask the policy what each failure means for this batch/run. The
+        # execution carries the observed facts; the decision matrix lives in
+        # ONE place — the injected FailurePolicy (#152).
+        decisions = [
+            (e, self.failure_policy.decide(_failure_from(e), PriorAttempts(e.oom_retries)))
+            for e in executions
+            if e.failure is not None
+        ]
+
+        # AbortRun: the failure recurs identically for every batch (unpullable
+        # image, RBAC, bad config) — record the facts, hard-stop the run, and
+        # do NOT emit completion or re-drive.
+        abort = next((d for _, d in decisions if isinstance(d, AbortRun)), None)
+        if abort is not None:
+            await self._record_provenance(event, executions, work_dirs)
+            await self.ingest_service.abort_run(
+                event.ingest_run_id, reason=abort.reason, kind=abort.kind
+            )
+            return
+
+        # Retry: re-drive the whole batch. The UOW rolls back (nothing recorded
+        # this attempt), but each hook's filesystem checkpoint makes the re-run
+        # cheap — completed hooks return instantly without a container, and the
+        # deterministic id keeps the eventual insert dup-free. The worker's
+        # delivery budget bounds the retries (on_exhausted → fail_batch).
+        pending = [e for e, d in decisions if isinstance(d, Retry)]
         if pending:
             names = ", ".join(e.hook_name.root for e in pending)
             raise TransientError(
                 f"batch {event.batch_index}: {len(pending)} hook(s) pending retry: {names}"
             )
 
-        # All hooks terminal → record provenance from each hook's OWN execution
-        # (its real window + status; a PERMANENT/OOM failure is a terminal ERROR
-        # run, not a batch failure — hooks are independent) and write run.json so
+        # All remaining failures are give-ups (incl. OOM with its bump budget
+        # already spent inside HookService) → record provenance from each hook's
+        # OWN execution (its real window + status; a terminal ERROR run, not a
+        # batch failure — hooks are independent) and write run.json so
         # InsertBatchFeatures can stamp feature.run_id. record_run is idempotent.
+        await self._record_provenance(event, executions, work_dirs)
+
+        # Emit HookBatchCompleted (committed by the UOW on return). PublishBatch
+        # publishes records that passed every hook; a given-up hook just means
+        # its records aren't complete, not that the batch failed.
+        await self.outbox.append(
+            HookBatchCompleted(
+                id=EventId(uuid4()),
+                ingest_run_id=event.ingest_run_id,
+                batch_index=event.batch_index,
+            )
+        )
+
+    async def _record_provenance(
+        self,
+        event: IngesterBatchReady,
+        executions: list[HookExecution],
+        work_dirs: dict[HookName, Path],
+    ) -> None:
+        """Record each hook's run row + run.json from its own execution."""
         for e in executions:
             run_id = _hook_run_id(event.ingest_run_id, event.batch_index, e.hook_name)
             status = (
@@ -177,17 +251,6 @@ class RunHooks(EventHandler[IngesterBatchReady]):
             await self.ingest_storage.write_run_ref(
                 work_dirs[e.hook_name], str(run_id), str(e.release_id)
             )
-
-        # Emit HookBatchCompleted (committed by the UOW on return). PublishBatch
-        # publishes records that passed every hook; a permanently-failed hook just
-        # means its records aren't complete, not that the batch failed.
-        await self.outbox.append(
-            HookBatchCompleted(
-                id=EventId(uuid4()),
-                ingest_run_id=event.ingest_run_id,
-                batch_index=event.batch_index,
-            )
-        )
 
     async def on_exhausted(self, event: IngesterBatchReady) -> None:
         """Called when transient retries are exhausted — account for the failed batch."""

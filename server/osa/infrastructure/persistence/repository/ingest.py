@@ -1,6 +1,7 @@
 """PostgreSQL implementation of IngestRunRepository."""
 
 import logging
+from datetime import datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.ingest.model.ingest_run import IngestRun, IngestStatus
 from osa.domain.ingest.port.repository import IngestRunRepository
+from osa.domain.shared.failure import FailureKind
 from osa.infrastructure.persistence.tables import ingest_runs_table
 
 logger = logging.getLogger(__name__)
@@ -34,6 +36,8 @@ class PostgresIngestRunRepository(IngestRunRepository):
             "record_limit": ingest_run.limit,
             "started_at": ingest_run.started_at,
             "completed_at": ingest_run.completed_at,
+            "failure_reason": ingest_run.failure_reason,
+            "failure_kind": ingest_run.failure_kind.value if ingest_run.failure_kind else None,
         }
         stmt = (
             insert(ingest_runs_table)
@@ -131,8 +135,53 @@ class PostgresIngestRunRepository(IngestRunRepository):
             raise NotFoundError(f"Ingest run not found: {id}")
         return _row_to_ingest_run(dict(row))
 
+    async def abort(
+        self,
+        id: str,
+        *,
+        reason: str,
+        kind: FailureKind,
+        completed_at: datetime,
+    ) -> IngestRun | None:
+        """Fail a non-terminal run with its explanation, in one guarded UPDATE."""
+        t = ingest_runs_table
+        stmt = (
+            update(t)
+            .where(t.c.id == id)
+            .where(t.c.status.in_([IngestStatus.PENDING.value, IngestStatus.RUNNING.value]))
+            .values(
+                status=IngestStatus.FAILED.value,
+                failure_reason=reason,
+                failure_kind=kind.value,
+                ingestion_finished=True,
+                completed_at=completed_at,
+            )
+            .returning(*t.c)
+        )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        row = result.mappings().first()
+        if row is None:
+            return None
+        return _row_to_ingest_run(dict(row))
+
+    async def record_failure(self, id: str, *, reason: str, kind: FailureKind | None) -> None:
+        """Record why ingestion stopped early, without touching run status."""
+        t = ingest_runs_table
+        stmt = (
+            update(t)
+            .where(t.c.id == id)
+            .values(
+                failure_reason=reason,
+                failure_kind=kind.value if kind else None,
+            )
+        )
+        await self._session.execute(stmt)
+        await self._session.flush()
+
 
 def _row_to_ingest_run(row: dict) -> IngestRun:
+    raw_kind = row.get("failure_kind")
     return IngestRun(
         id=row["id"],
         convention_id=row["convention_id"],
@@ -146,4 +195,6 @@ def _row_to_ingest_run(row: dict) -> IngestRun:
         limit=row.get("record_limit"),
         started_at=row["started_at"],
         completed_at=row.get("completed_at"),
+        failure_reason=row.get("failure_reason"),
+        failure_kind=FailureKind(raw_kind) if raw_kind else None,
     )

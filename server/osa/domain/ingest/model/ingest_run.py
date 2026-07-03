@@ -5,6 +5,7 @@ from enum import StrEnum
 from typing import NewType
 
 from osa.domain.shared.error import InvalidStateError
+from osa.domain.shared.failure import FailureKind
 from osa.domain.shared.model.aggregate import Aggregate
 
 IngestRunId = NewType("IngestRunId", str)
@@ -44,6 +45,10 @@ class IngestRun(Aggregate):
     limit: int | None = None  # Max total records (None = unlimited)
     started_at: datetime
     completed_at: datetime | None = None
+    # Why the run failed (or why ingestion stopped early), queryable via
+    # GET /ingestions/{id} (#152). None for healthy runs.
+    failure_reason: str | None = None
+    failure_kind: FailureKind | None = None
 
     def transition_to(self, new_status: IngestStatus) -> None:
         """Transition to a new status, enforcing valid transitions."""
@@ -54,9 +59,13 @@ class IngestRun(Aggregate):
     def mark_running(self) -> None:
         self.transition_to(IngestStatus.RUNNING)
 
-    def mark_failed(self, completed_at: datetime) -> None:
+    def mark_failed(self, completed_at: datetime, *, reason: str, kind: FailureKind) -> None:
+        """Fail the whole run with a queryable explanation; stops batch scheduling."""
         self.transition_to(IngestStatus.FAILED)
         self.completed_at = completed_at
+        self.failure_reason = reason
+        self.failure_kind = kind
+        self.ingestion_finished = True
 
     def mark_ingestion_finished(self) -> None:
         self.ingestion_finished = True

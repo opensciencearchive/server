@@ -9,8 +9,16 @@ from osa.domain.ingest.model.ingest_run import IngestStatus
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.ingest.port.storage import IngestStoragePort
 from osa.domain.ingest.service.ingest import IngestService
-from osa.domain.shared.error import NotFoundError, PermanentError
+from osa.domain.shared.error import NotFoundError, TransientError
 from osa.domain.shared.event import EventHandler, EventId
+from osa.domain.shared.failure import (
+    AbortRun,
+    FailurePolicy,
+    GiveUp,
+    PriorAttempts,
+    Retry,
+    RuntimeFailure,
+)
 from osa.domain.shared.model.srn import ConventionSlug
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.ingester_runner import IngesterInputs, IngesterRunner
@@ -33,11 +41,22 @@ class RunIngester(EventHandler[NextBatchRequested]):
     ingester_runner: IngesterRunner
     outbox: Outbox
     ingest_storage: IngestStoragePort
+    failure_policy: FailurePolicy
 
     async def handle(self, event: NextBatchRequested) -> None:
         ingest_run = await self.ingest_repo.get(event.ingest_run_id)
         if ingest_run is None:
             raise NotFoundError(f"Ingest run not found: {event.ingest_run_id}")
+
+        # An aborted/finished run pulls no more batches — drop redelivered
+        # events instead of sourcing work nobody will process (#152).
+        if ingest_run.status in (IngestStatus.COMPLETED, IngestStatus.FAILED):
+            log.warn(
+                "next-batch request skipped — run is {status}",
+                status=ingest_run.status.value,
+                ingest_run_id=event.ingest_run_id,
+            )
+            return
 
         # Backpressure: don't ingest if the cluster can't schedule more Jobs
         if not await self.ingester_runner.has_capacity():
@@ -108,15 +127,44 @@ class RunIngester(EventHandler[NextBatchRequested]):
                 files_dir=files_dir,
                 work_dir=work_dir,
             )
-        except PermanentError as e:
-            log.error(
-                "[{short_id}] ingester permanently failed: {error}",
-                short_id=event.ingest_run_id[:8],
-                error=str(e),
-                container_logs=e.container_logs or "",
-                ingest_run_id=event.ingest_run_id,
-            )
-            await self._fail_ingestion(event)
+        except RuntimeFailure as failure:
+            # The runner reports facts; the policy decides; we execute the verb.
+            # Ingester Jobs have no memory-bump lever, so PriorAttempts carries
+            # no bumps and an OOM decision degrades to a give-up below.
+            decision = self.failure_policy.decide(failure, PriorAttempts(memory_bumps=0))
+            match decision:
+                case AbortRun(reason=reason, kind=kind):
+                    log.error(
+                        "[{short_id}] ingester failed for the whole run ({kind}): {error}",
+                        short_id=event.ingest_run_id[:8],
+                        kind=kind.value,
+                        error=reason,
+                        container_logs=failure.container_logs or "",
+                        ingest_run_id=event.ingest_run_id,
+                    )
+                    await self.ingest_service.abort_run(
+                        event.ingest_run_id, reason=reason, kind=kind
+                    )
+                case Retry():
+                    # Re-raise for the worker's budgeted redelivery with backoff;
+                    # exhaustion lands in on_exhausted → fail_ingestion.
+                    raise TransientError(failure.detail) from failure
+                case GiveUp(reason=reason, kind=kind):
+                    log.error(
+                        "[{short_id}] ingester gave up ({kind}): {error}",
+                        short_id=event.ingest_run_id[:8],
+                        kind=kind.value,
+                        error=reason,
+                        container_logs=failure.container_logs or "",
+                        ingest_run_id=event.ingest_run_id,
+                    )
+                    await self.ingest_service.fail_ingestion(
+                        event.ingest_run_id, reason=reason, kind=kind
+                    )
+                case _:  # RetryWithMoreMemory — not executable for ingester Jobs
+                    await self.ingest_service.fail_ingestion(
+                        event.ingest_run_id, reason=failure.detail, kind=failure.kind
+                    )
             return
 
         await self.ingest_storage.write_records(event.ingest_run_id, batch_index, output.records)
@@ -171,8 +219,6 @@ class RunIngester(EventHandler[NextBatchRequested]):
             "ingester retries exhausted",
             ingest_run_id=event.ingest_run_id,
         )
-        await self._fail_ingestion(event)
-
-    async def _fail_ingestion(self, event: NextBatchRequested) -> None:
-        """Account for a permanently failed ingester pull."""
-        await self.ingest_service.fail_ingestion(event.ingest_run_id)
+        await self.ingest_service.fail_ingestion(
+            event.ingest_run_id, reason="ingester retries exhausted", kind=None
+        )

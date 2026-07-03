@@ -15,7 +15,7 @@ from osa.domain.shared.model.hook import (
 )
 from osa.domain.shared.model.srn import DepositionSRN, Domain
 from osa.domain.validation.model import RunStatus
-from osa.domain.shared.error import OOMError, PermanentError
+from osa.domain.shared.failure import FailureKind, FailurePolicy, RuntimeFailure
 from osa.domain.validation.model.hook import Hook
 from osa.domain.validation.model.hook_release import HookRelease, HookReleaseId
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
@@ -99,6 +99,7 @@ def _make_service(
         hook_runner=hook_runner or AsyncMock(),
         hook_storage=hs,
         hook_registry=hook_registry or _make_registry(["pocket_detect"]),
+        failure_policy=FailurePolicy(),
         node_domain=Domain("localhost"),
     )
 
@@ -171,8 +172,11 @@ class TestValidationServiceRunHooks:
     @pytest.mark.asyncio
     async def test_hook_failed_halts_pipeline(self):
         hook_runner = AsyncMock()
-        hook_runner.run.side_effect = PermanentError(
-            "Hook exited with code 1", container_logs="traceback: boom"
+        hook_runner.run.side_effect = RuntimeFailure(
+            FailureKind.HOOK_EXIT,
+            "Hook exited with code 1",
+            exit_code=1,
+            container_logs="traceback: boom",
         )
         registry = _make_registry(["pocket_detect"])
         service = _make_service(hook_runner=hook_runner, hook_registry=registry)
@@ -248,10 +252,8 @@ class TestValidationServiceRunHooks:
     @pytest.mark.asyncio
     async def test_validation_service_halts_on_oom(self):
         """REGRESSION: OOM with exhausted retries should halt pipeline as FAILED."""
-        from osa.domain.validation.service.hook import MAX_OOM_RETRIES
-
         hook_runner = AsyncMock()
-        hook_runner.run.side_effect = OOMError("Hook killed by OOM")
+        hook_runner.run.side_effect = RuntimeFailure(FailureKind.OOM, "Hook killed by OOM")
         registry = _make_registry(["pocket_detect"])
         service = _make_service(hook_runner=hook_runner, hook_registry=registry)
         run = await service.create_run(inputs=_make_inputs())
@@ -265,10 +267,11 @@ class TestValidationServiceRunHooks:
 
         assert run.status == RunStatus.FAILED
         # The real OOM-retry count must reach provenance — not a hardcoded 0.
-        # run_hook re-raises OOMError(oom_retries=...) after exhausting retries.
+        # run_hook re-raises the OOM failure with oom_retries after exhausting
+        # the policy's memory-bump budget (default 3).
         recorded_run = registry.record_run.await_args.args[0]
         assert recorded_run.status == HookRunStatus.ERROR
-        assert recorded_run.oom_retries == MAX_OOM_RETRIES
+        assert recorded_run.oom_retries == 3
 
     @pytest.mark.asyncio
     async def test_validation_service_retries_on_oom(self):
@@ -279,7 +282,7 @@ class TestValidationServiceRunHooks:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise OOMError("Hook killed by OOM")
+                raise RuntimeFailure(FailureKind.OOM, "Hook killed by OOM")
             return HookResult(
                 hook_name=hook.name.root,
                 status=HookStatus.PASSED,

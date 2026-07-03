@@ -7,7 +7,7 @@ from enum import StrEnum
 
 from pydantic import Field
 
-from osa.domain.shared.error import InfrastructureError, OOMError, TransientError
+from osa.domain.shared.failure import FailureKind, RuntimeFailure
 from osa.domain.shared.model.hook import HookIdentity, HookName
 from osa.domain.shared.model.value import ValueObject
 from osa.domain.validation.model.hook_release import HookRelease, HookReleaseId
@@ -41,23 +41,16 @@ class HookResult(ValueObject):
     ``hook_runs`` provenance record."""
 
 
-class FailureKind(StrEnum):
-    """Why a hook's batch run failed — drives the batch's retry/complete fate."""
-
-    TRANSIENT = "transient"  # re-drivable (worker retries the batch)
-    PERMANENT = "permanent"  # give up; record as a terminal ERROR
-    OOM_EXHAUSTED = "oom_exhausted"  # give up after memory retries; partial output is valid
-
-
 class HookExecution(ValueObject):
     """One hook's **total** outcome from a batch run, with its own wall-clock window (#145).
 
     Every hook produces exactly one of these — passed, rejected, or errored
-    (with a :class:`FailureKind`) — instead of a failure unwinding the batch loop
-    and discarding sibling hooks' results. ``started_at``/``finished_at`` bracket
-    *this* hook's run (hooks run sequentially, so a shared batch window would
-    misdate every hook after the first). A ``TRANSIENT`` failure is the only
-    non-terminal outcome: it re-drives the batch.
+    (with the observed :class:`FailureKind`) — instead of a failure unwinding
+    the batch loop and discarding sibling hooks' results. The kind is a fact
+    (what happened); what to do about it is the FailurePolicy's call in the
+    handler. ``started_at``/``finished_at`` bracket *this* hook's run (hooks run
+    sequentially, so a shared batch window would misdate every hook after the
+    first).
     """
 
     hook_name: HookName
@@ -74,11 +67,6 @@ class HookExecution(ValueObject):
     (#145/#147). The ingestion handler persists this to a tenant-scoped artifact
     and records the locator as ``HookRun.log_ref``. ``None`` for passed hooks or
     when log capture itself failed."""
-
-    @property
-    def is_terminal(self) -> bool:
-        """Terminal = anything except a transient (re-drivable) failure."""
-        return self.failure is not FailureKind.TRANSIENT
 
     @classmethod
     def completed(
@@ -106,19 +94,11 @@ class HookExecution(ValueObject):
         cls,
         hook: HookIdentity,
         release: HookRelease,
-        exc: InfrastructureError,
+        failure: RuntimeFailure,
         started_at: datetime,
         finished_at: datetime,
     ) -> HookExecution:
-        # The batch wrapper only catches InfrastructureError subclasses, so
-        # ``container_logs`` is a typed field here — no getattr needed.
-        # OOMError is a subclass of PermanentError, so check it first.
-        if isinstance(exc, OOMError):
-            kind, oom_retries = FailureKind.OOM_EXHAUSTED, exc.oom_retries or 0
-        elif isinstance(exc, TransientError):
-            kind, oom_retries = FailureKind.TRANSIENT, 0
-        else:
-            kind, oom_retries = FailureKind.PERMANENT, 0
+        # The failure already carries the observed facts — no isinstance tree.
         return cls(
             hook_name=hook.name,
             release_id=release.id,
@@ -126,8 +106,8 @@ class HookExecution(ValueObject):
             started_at=started_at,
             finished_at=finished_at,
             duration_s=(finished_at - started_at).total_seconds(),
-            oom_retries=oom_retries,
-            failure=kind,
-            error_message=str(exc),
-            log_text=exc.container_logs,
+            oom_retries=failure.oom_retries,
+            failure=failure.kind,
+            error_message=str(failure),
+            log_text=failure.container_logs,
         )

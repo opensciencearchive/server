@@ -116,3 +116,73 @@ class TestStartIngest:
             await service.start_ingest(
                 convention_id="test-conv",
             )
+
+
+class TestAbortRun:
+    """abort_run — the AbortRun verb's executor (#152): hard-stop the whole run."""
+
+    @pytest.mark.asyncio
+    async def test_aborts_via_atomic_repo_update(self) -> None:
+        from datetime import UTC, datetime
+
+        from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId
+        from osa.domain.shared.failure import FailureKind
+
+        service = _make_service()
+        service.ingest_repo.abort.return_value = IngestRun(
+            id=IngestRunId("run-1"),
+            convention_id="test-conv",
+            status=IngestStatus.FAILED,
+            failure_reason="Image pull failed: 401",
+            failure_kind=FailureKind.IMAGE_PULL,
+            started_at=datetime.now(UTC),
+        )
+
+        await service.abort_run(
+            IngestRunId("run-1"), reason="Image pull failed: 401", kind=FailureKind.IMAGE_PULL
+        )
+
+        kwargs = service.ingest_repo.abort.await_args.kwargs
+        assert service.ingest_repo.abort.await_args.args[0] == "run-1"
+        assert kwargs["reason"] == "Image pull failed: 401"
+        assert kwargs["kind"] is FailureKind.IMAGE_PULL
+        assert kwargs["completed_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_abort_is_idempotent_when_run_already_terminal(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+        from osa.domain.shared.failure import FailureKind
+
+        service = _make_service()
+        # Repo returns None when the run was already terminal — no-op, no error.
+        service.ingest_repo.abort.return_value = None
+
+        await service.abort_run(IngestRunId("run-1"), reason="rbac denied", kind=FailureKind.RBAC)
+
+
+class TestFailIngestionRecordsReason:
+    """fail_ingestion must leave a queryable explanation on the run (#152)."""
+
+    @pytest.mark.asyncio
+    async def test_records_failure_reason_and_kind(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+        from osa.domain.shared.failure import FailureKind
+
+        service = _make_service()
+        run = MagicMock()
+        run.check_completion.return_value = False
+        service.ingest_repo.increment_failed.return_value = run
+
+        await service.fail_ingestion(
+            IngestRunId("run-1"), reason="Source exited with code 3", kind=FailureKind.UPSTREAM
+        )
+
+        kwargs = service.ingest_repo.record_failure.await_args.kwargs
+        assert service.ingest_repo.record_failure.await_args.args[0] == "run-1"
+        assert kwargs["reason"] == "Source exited with code 3"
+        assert kwargs["kind"] is FailureKind.UPSTREAM
+        # Existing accounting is preserved: no more batches + one failed batch.
+        service.ingest_repo.increment_batches_ingested.assert_awaited_once_with(
+            "run-1", set_ingestion_finished=True
+        )
+        service.ingest_repo.increment_failed.assert_awaited_once_with("run-1")

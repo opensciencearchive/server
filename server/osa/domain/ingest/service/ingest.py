@@ -9,6 +9,7 @@ from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId, IngestSta
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.shared.error import ConflictError, NotFoundError
 from osa.domain.shared.event import EventId
+from osa.domain.shared.failure import FailureKind
 from osa.domain.shared.model.srn import ConventionSlug, Domain
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
@@ -116,20 +117,55 @@ class IngestService(Service):
         ingest_run = await self.ingest_repo.increment_failed(ingest_run_id)
         await self._check_completion(ingest_run)
 
-    async def fail_ingestion(self, ingest_run_id: IngestRunId) -> None:
-        """Account for a failed ingester pull.
+    async def fail_ingestion(
+        self, ingest_run_id: IngestRunId, *, reason: str, kind: FailureKind | None
+    ) -> None:
+        """Account for a failed ingester pull, recording why (#152).
 
         The batch was never sourced, so we mark ingestion as finished
         (no more batches coming) and increment batches_failed. The
         completion condition can then fire based on whatever batches
-        were already sourced.
+        were already sourced. The reason/kind land on the run so an
+        operator sees the explanation without log archaeology.
         """
         await self.ingest_repo.increment_batches_ingested(
             ingest_run_id,
             set_ingestion_finished=True,
         )
         ingest_run = await self.ingest_repo.increment_failed(ingest_run_id)
+        await self.ingest_repo.record_failure(ingest_run_id, reason=reason, kind=kind)
         await self._check_completion(ingest_run)
+
+    async def abort_run(
+        self, ingest_run_id: IngestRunId, *, reason: str, kind: FailureKind
+    ) -> None:
+        """Hard-stop a run on a deterministic environmental failure (#152).
+
+        The failure would recur identically for every batch (unpullable image,
+        RBAC, bad config), so the run is failed immediately with a queryable
+        explanation and no further batches are scheduled. Idempotent: a run
+        that is already terminal is left untouched (concurrent batch workers
+        may race to abort).
+        """
+        ingest_run = await self.ingest_repo.abort(
+            ingest_run_id,
+            reason=reason,
+            kind=kind,
+            completed_at=datetime.now(UTC),
+        )
+        if ingest_run is None:
+            log.info(
+                "abort no-op — run already terminal",
+                ingest_run_id=ingest_run_id,
+            )
+            return
+        log.error(
+            "[{short_id}] run ABORTED ({kind}): {reason}",
+            short_id=str(ingest_run_id)[:8],
+            kind=kind.value,
+            reason=reason,
+            ingest_run_id=ingest_run_id,
+        )
 
     async def _check_completion(self, ingest_run: IngestRun) -> None:
         """Transition to COMPLETED and emit IngestCompleted if all batches are accounted for."""
