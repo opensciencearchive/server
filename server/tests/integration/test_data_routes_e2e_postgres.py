@@ -31,6 +31,7 @@ from osa.infrastructure.persistence.repository.schema import (
 from osa.infrastructure.persistence.tables import conventions_table
 
 from tests.integration.conftest import seed_hook_run, seed_record
+from tests.factories import make_convention_docs_dict
 
 # create_app() reads Config() at import/call time; localhost domain needs a base URL.
 os.environ.setdefault("OSA_BASE_URL", "http://localhost:8000")
@@ -105,6 +106,7 @@ async def _seed_feature(
             file_requirements={},
             hooks=[HOOK],
             source=None,
+            docs=make_convention_docs_dict(),
             created_at=datetime.now(UTC),
         )
     )

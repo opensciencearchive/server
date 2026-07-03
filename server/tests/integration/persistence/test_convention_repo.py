@@ -26,6 +26,8 @@ from osa.infrastructure.persistence.repository.convention import (
     PostgresConventionRepository,
 )
 
+from tests.factories import make_convention_docs
+
 
 def _make_convention(
     *,
@@ -48,6 +50,7 @@ def _make_convention(
         ),
         hooks=hooks or [],
         ingester=ingester,
+        docs=make_convention_docs(),
         created_at=datetime.now(UTC),
     )
 

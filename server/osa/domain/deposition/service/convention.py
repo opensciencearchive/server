@@ -4,6 +4,7 @@ from uuid import uuid4
 from osa.domain.deposition.event.convention_registered import ConventionRegistered
 from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.deploy import HookDeploy
+from osa.domain.deposition.model.docs import ConventionDocs
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.port.convention_repository import ConventionRepository
 from osa.domain.metadata.service.metadata import MetadataService
@@ -43,6 +44,7 @@ class ConventionService(Service):
         schema_version: str,
         schema_fields: list[FieldDefinition],
         description: str,
+        docs: ConventionDocs,
         hooks: list[HookDeploy] | None = None,
         ingester: IngesterDefinition | None = None,
         built_by: str | None = None,
@@ -99,6 +101,7 @@ class ConventionService(Service):
             file_requirements=file_requirements,
             hooks=[spec.identity.name for spec in hooks],
             ingester=ingester,
+            docs=docs,
             created_at=datetime.now(UTC),
         )
         await self.convention_repo.save(convention)

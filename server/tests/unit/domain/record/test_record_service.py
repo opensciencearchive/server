@@ -23,6 +23,8 @@ from osa.domain.shared.model.srn import (
 )
 from osa.domain.shared.outbox import Outbox
 
+from tests.factories import make_convention_docs
+
 
 def _make_conv_slug() -> ConventionSlug:
     return ConventionSlug("test")
@@ -40,6 +42,7 @@ def _make_convention() -> Convention:
         schema_id=_make_schema_id(),
         file_requirements=FileRequirements(accepted_types=[], max_count=0, max_file_size=0),
         hooks=[],
+        docs=make_convention_docs(),
         created_at=datetime.now(UTC),
     )
 

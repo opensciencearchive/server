@@ -39,6 +39,7 @@ from osa.infrastructure.persistence.repository.schema import (
 from osa.infrastructure.persistence.tables import conventions_table
 
 from tests.integration.conftest import seed_hook_run, seed_record
+from tests.factories import make_convention_docs_dict
 
 SCHEMA = SchemaId.parse("compound@1.0.0")
 SCHEMA_B = SchemaId.parse("protein@1.0.0")
@@ -100,6 +101,7 @@ async def _register_hook(
             file_requirements={},
             hooks=[hook_name],
             source=None,
+            docs=make_convention_docs_dict(),
             created_at=datetime.now(UTC),
         )
     )

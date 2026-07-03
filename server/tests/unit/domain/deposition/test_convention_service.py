@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
+from tests.factories import make_convention_docs
 
 from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.deploy import HookDeploy
@@ -103,6 +104,7 @@ async def _deploy(service: ConventionService, **overrides) -> Convention:
         schema_version="1.0.0",
         schema_fields=_make_field_defs(),
         hooks=None,
+        docs=make_convention_docs(),
     )
     kwargs.update(overrides)
     return await service.deploy(**kwargs)
@@ -179,6 +181,7 @@ class TestConventionServiceGet:
             description="A test convention",
             schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
+            docs=make_convention_docs(),
             created_at=datetime.now(UTC),
         )
         conv_repo = AsyncMock()
@@ -207,6 +210,7 @@ class TestConventionServiceList:
             description="A test convention",
             schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
+            docs=make_convention_docs(),
             created_at=datetime.now(UTC),
         )
         conv_repo = AsyncMock()

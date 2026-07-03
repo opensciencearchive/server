@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from osa.domain.deposition.model.docs import ConventionDocs
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.shared.model.aggregate import Aggregate
 from osa.domain.shared.model.hook import HookName
@@ -23,4 +24,6 @@ class Convention(Aggregate):
     file_requirements: FileRequirements
     hooks: list[HookName] = []
     ingester: IngesterDefinition | None = None
+    # Author semantics — required: there is no docs-less convention state (#151).
+    docs: ConventionDocs
     created_at: datetime

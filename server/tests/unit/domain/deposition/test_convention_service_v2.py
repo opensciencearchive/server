@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from tests.factories import make_convention_docs
 
 from osa.domain.deposition.event.convention_registered import ConventionRegistered
 from osa.domain.deposition.model.deploy import HookDeploy
@@ -114,6 +115,7 @@ async def _deploy(service: ConventionService, **overrides):
         schema_version="1.0.0",
         schema_fields=_make_field_defs(),
         hooks=None,
+        docs=make_convention_docs(),
     )
     kwargs.update(overrides)
     return await service.deploy(**kwargs)

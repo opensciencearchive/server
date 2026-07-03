@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from osa.domain.deposition.model.docs import ConventionDocs
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.shared.authorization.gate import public
@@ -21,6 +22,7 @@ class ConventionDetail(Result):
     file_requirements: FileRequirements
     hooks: list[HookName]
     ingester: IngesterDefinition | None = None
+    docs: ConventionDocs
     created_at: datetime
 
 
@@ -38,5 +40,6 @@ class GetConventionHandler(QueryHandler[GetConvention, ConventionDetail]):
             file_requirements=conv.file_requirements,
             hooks=list(conv.hooks),
             ingester=conv.ingester,
+            docs=conv.docs,
             created_at=conv.created_at,
         )
