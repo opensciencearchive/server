@@ -17,7 +17,6 @@ from osa.domain.shared.failure import (
     FailurePolicy,
     PriorAttempts,
     Retry,
-    RuntimeFailure,
 )
 from osa.domain.shared.model.hook import HookIdentity, HookName
 from osa.domain.shared.model.srn import ConventionSlug
@@ -43,17 +42,6 @@ _HOOK_RUN_NS = uuid5(NAMESPACE_URL, "osa:hook_run")
 def _hook_run_id(ingest_run_id: str, batch_index: int, hook_name: HookName) -> HookRunId:
     """Deterministic hook_run id for one hook in one batch — stable across retries."""
     return HookRunId(uuid5(_HOOK_RUN_NS, f"{ingest_run_id}:{batch_index}:{hook_name.root}"))
-
-
-def _failure_from(execution: HookExecution) -> RuntimeFailure:
-    """Rehydrate the observed failure facts from a failed execution."""
-    if execution.failure is None:
-        raise ValueError(f"hook {execution.hook_name!r} did not fail")
-    return RuntimeFailure(
-        execution.failure,
-        execution.error_message or "",
-        oom_retries=execution.oom_retries,
-    )
 
 
 class RunHooks(EventHandler[IngesterBatchReady]):
@@ -168,7 +156,12 @@ class RunHooks(EventHandler[IngesterBatchReady]):
         # execution carries the observed facts; the decision matrix lives in
         # ONE place — the injected FailurePolicy (#152).
         decisions = [
-            (e, self.failure_policy.decide(_failure_from(e), PriorAttempts(e.oom_retries)))
+            (
+                e,
+                self.failure_policy.decide(
+                    e.as_failure(), PriorAttempts(memory_bumps=e.oom_retries)
+                ),
+            )
             for e in executions
             if e.failure is not None
         ]

@@ -111,3 +111,21 @@ class HookExecution(ValueObject):
             error_message=str(failure),
             log_text=failure.container_logs,
         )
+
+    def as_failure(self) -> RuntimeFailure:
+        """Rehydrate the observed failure facts, so the FailurePolicy can decide.
+
+        The inverse of :meth:`failed`: an errored execution flattened a
+        :class:`RuntimeFailure` into value-object fields for provenance; this
+        reconstructs the facts the policy consults (kind + detail + bump count).
+        ``container_logs`` and ``exit_code`` are not round-tripped — the policy
+        never reads them, and the ingest hook path discards the resulting
+        give-up reason (provenance uses ``error_message``).
+        """
+        if self.failure is None:
+            raise ValueError(f"hook {self.hook_name!r} did not error — no failure to rehydrate")
+        return RuntimeFailure(
+            self.failure,
+            self.error_message or "",
+            oom_retries=self.oom_retries,
+        )
