@@ -1,6 +1,7 @@
 """RunIngester — runs ingester container on NextBatchRequested."""
 
 from datetime import UTC, datetime, timedelta
+from typing import assert_never
 from uuid import uuid4
 
 from osa.domain.deposition.service.convention import ConventionService
@@ -17,6 +18,7 @@ from osa.domain.shared.failure import (
     GiveUp,
     PriorAttempts,
     Retry,
+    RetryWithMoreMemory,
     RuntimeFailure,
 )
 from osa.domain.shared.model.srn import ConventionSlug
@@ -161,10 +163,24 @@ class RunIngester(EventHandler[NextBatchRequested]):
                     await self.ingest_service.fail_ingestion(
                         event.ingest_run_id, reason=reason, kind=kind
                     )
-                case _:  # RetryWithMoreMemory — not executable for ingester Jobs
+                case RetryWithMoreMemory():
+                    # Ingester Jobs have no memory-bump lever (unlike hooks, which
+                    # retry inside HookService), so an OOM can't be remediated —
+                    # degrade to a give-up carrying the original OOM facts.
+                    log.error(
+                        "[{short_id}] ingester OOM, no memory-bump lever: {error}",
+                        short_id=event.ingest_run_id[:8],
+                        error=failure.detail,
+                        container_logs=failure.container_logs or "",
+                        ingest_run_id=event.ingest_run_id,
+                    )
                     await self.ingest_service.fail_ingestion(
                         event.ingest_run_id, reason=failure.detail, kind=failure.kind
                     )
+                case _:
+                    # Every Decision variant is handled above; a new one added to
+                    # the union will fail `ty` here (and raise at runtime).
+                    assert_never(decision)
             return
 
         await self.ingest_storage.write_records(event.ingest_run_id, batch_index, output.records)
