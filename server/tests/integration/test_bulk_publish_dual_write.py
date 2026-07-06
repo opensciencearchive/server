@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from tests.factories import make_convention_docs
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -91,6 +92,7 @@ async def _register_convention(
         schema_slug=SchemaIdentifier(slug),
         schema_version="1.0.0",
         schema_fields=_fields(),
+        docs=make_convention_docs(),
     )
     await pg_session.commit()
     return convention_service

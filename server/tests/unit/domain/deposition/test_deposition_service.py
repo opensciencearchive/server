@@ -23,6 +23,8 @@ from osa.domain.deposition.service.deposition import DepositionService
 from osa.domain.shared.error import NotFoundError, ValidationError
 from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN, Domain, SchemaId
 
+from tests.factories import make_convention_docs
+
 
 def _make_dep_srn(id: str = "test-dep") -> DepositionSRN:
     return DepositionSRN.parse(f"urn:osa:localhost:dep:{id}")
@@ -54,6 +56,7 @@ def _make_convention(**overrides) -> Convention:
         description="A test convention",
         schema_id=_make_schema_id(),
         file_requirements=_make_file_reqs(),
+        docs=make_convention_docs(),
         created_at=datetime.now(UTC),
     )
     defaults.update(overrides)

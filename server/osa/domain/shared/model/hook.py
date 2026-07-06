@@ -125,6 +125,8 @@ class ColumnDef(ValueObject):
     json_type: Literal["string", "number", "integer", "boolean", "array", "object"]
     format: str | None = None
     required: bool
+    description: str | None = None
+    unit: str | None = None
 
 
 # ── Runtime variants ──

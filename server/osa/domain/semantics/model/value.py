@@ -78,3 +78,4 @@ class FieldDefinition(ValueObject):
     cardinality: Cardinality
     description: str | None = None
     constraints: FieldConstraints | None = None
+    examples: list[str] | None = None

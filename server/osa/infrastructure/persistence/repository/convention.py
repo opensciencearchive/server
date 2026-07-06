@@ -5,6 +5,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.deposition.model.convention import Convention
+from osa.domain.deposition.model.docs import ConventionDocs
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.port.convention_repository import ConventionRepository
 from osa.domain.shared.model.source import IngesterDefinition
@@ -22,6 +23,7 @@ def _convention_to_row(convention: Convention) -> dict[str, Any]:
         "file_requirements": convention.file_requirements.model_dump(),
         "hooks": [name.root for name in convention.hooks],  # hook-name registry refs
         "source": convention.ingester.model_dump() if convention.ingester else None,
+        "docs": convention.docs.model_dump(mode="json"),
         "created_at": convention.created_at,
     }
 
@@ -39,6 +41,7 @@ def _row_to_convention(row: dict[str, Any]) -> Convention:
         file_requirements=FileRequirements.model_validate(row["file_requirements"]),
         hooks=list(row.get("hooks") or []),
         ingester=IngesterDefinition.model_validate(source_data) if source_data else None,
+        docs=ConventionDocs.model_validate(row["docs"]),
         created_at=row["created_at"],
     )
 
@@ -63,6 +66,7 @@ class PostgresConventionRepository(ConventionRepository):
                 "file_requirements": stmt.excluded.file_requirements,
                 "hooks": stmt.excluded.hooks,
                 "source": stmt.excluded.source,
+                "docs": stmt.excluded.docs,
             },
         )
         await self.session.execute(stmt)

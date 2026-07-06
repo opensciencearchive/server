@@ -22,6 +22,9 @@ class FieldSpec(BaseModel):
     type: FieldType
     ontology_id: str | None = None  # required iff type == TERM
     ontology_version: str | None = None  # required iff type == TERM
+    description: str | None = None
+    unit: str | None = None  # hoisted from NumberConstraints.unit
+    examples: list[str] | None = None
 
 
 class ColumnSpec(BaseModel):
@@ -29,6 +32,9 @@ class ColumnSpec(BaseModel):
 
     name: str
     type: FieldType
+    format: str | None = None
+    description: str | None = None
+    unit: str | None = None
 
 
 # Implicit columns present on every records-table response, in wire order,
@@ -67,6 +73,7 @@ class SchemaManifest(BaseModel):
     id: str  # short schema id, e.g. "compound"
     version: str  # SemVer, e.g. "1.0.0"
     srn: str  # full schema SRN
+    title: str  # schemas.title is NOT NULL — every schema has one
     fields: list[FieldSpec]
     table_resources: list[TableResource]
 

@@ -1,10 +1,16 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from osa.domain.auth.model.principal import Principal
 from osa.domain.deposition.model.deploy import HookDeploy
+from osa.domain.deposition.model.docs import (
+    MIN_DISTINCT_TRIGGER_QUESTIONS,
+    ConventionDocs,
+    Example,
+    NonBlankStr,
+)
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.semantics.model.value import FieldDefinition
@@ -74,6 +80,60 @@ class DeployConventionHook(BaseModel):
         )
 
 
+class ExamplePayload(BaseModel):
+    """Edge mirror of the ``Example`` VO — a worked example, rendered verbatim.
+
+    ``query`` is opaque: never parsed, executed, or validated (FR-011).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    question: NonBlankStr
+    query: NonBlankStr
+    interpretation: NonBlankStr
+
+    def to_vo(self) -> Example:
+        return Example(question=self.question, query=self.query, interpretation=self.interpretation)
+
+
+class ConventionDocsPayload(BaseModel):
+    """Edge mirror of the ``ConventionDocs`` VO (#151).
+
+    The mandatory-docs minimum is repeated here so violations surface as a 422
+    whose field-level errors name each gap, regardless of client (FR-015/016).
+    There is no bypass flag.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    purpose: NonBlankStr
+    example_questions: list[NonBlankStr] = []
+    examples: list[ExamplePayload] = Field(min_length=1)
+    when_not_to_use: str | None = None
+    see_also: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _require_trigger_breadth(self) -> "ConventionDocsPayload":
+        distinct = {q.strip() for q in self.example_questions}
+        distinct |= {e.question.strip() for e in self.examples}
+        if len(distinct) < MIN_DISTINCT_TRIGGER_QUESTIONS:
+            raise ValueError(
+                f"need at least {MIN_DISTINCT_TRIGGER_QUESTIONS} distinct trigger "
+                f"questions across example_questions and worked-example questions, "
+                f"got {len(distinct)}"
+            )
+        return self
+
+    def to_vo(self) -> ConventionDocs:
+        return ConventionDocs(
+            purpose=self.purpose,
+            example_questions=self.example_questions,
+            examples=[e.to_vo() for e in self.examples],
+            when_not_to_use=self.when_not_to_use,
+            see_also=self.see_also,
+        )
+
+
 class DeployConvention(Command):
     """Bundled deploy: schema + hooks (+ first releases) + convention, atomically.
 
@@ -95,6 +155,8 @@ class DeployConvention(Command):
     schema_block: DeployConventionSchema = Field(alias="schema")
     hooks: list[DeployConventionHook] = []
     ingester: IngesterDefinition | None = None
+    # Author semantics — required; documentation is mandatory (#151, FR-015).
+    docs: ConventionDocsPayload
 
 
 class ConventionCreated(Result):
@@ -126,6 +188,7 @@ class DeployConventionHandler(CommandHandler[DeployConvention, ConventionCreated
             schema_fields=cmd.schema_block.fields,
             hooks=[h.to_deploy() for h in cmd.hooks],
             ingester=cmd.ingester,
+            docs=cmd.docs.to_vo(),
             built_by=built_by,
         )
         return ConventionCreated(

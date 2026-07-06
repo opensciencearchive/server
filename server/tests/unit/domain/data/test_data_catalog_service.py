@@ -38,6 +38,7 @@ MANIFEST = SchemaManifest(
     id="compound",
     version="1.0.0",
     srn="urn:osa:localhost:schema:compound@1.0.0",
+    title="compound",
     fields=[],
     table_resources=[
         TableResource(

@@ -27,6 +27,7 @@ from osa.application.api.v1.routes import (
     validation,
 )
 from osa.application.api.v1.routes import data as data_routes
+from osa.application.api.rest import skill as skill_routes
 from osa.application.api.v1.routes.data._limiter import limiter
 from osa.application.di import create_container
 from osa.config import DEV_JWT_SECRET, Config
@@ -204,6 +205,10 @@ def create_app(
     app_instance.include_router(ingestions.router, prefix="/api/v1")
     app_instance.include_router(validation.router, prefix="/api/v1")
     app_instance.include_router(data_routes.router, prefix="/api/v1")
+
+    # Unversioned root surface — GET / and GET /SKILL.md (#151). Included
+    # after the /api/v1 routers so nothing shadows the API prefix.
+    app_instance.include_router(skill_routes.router)
 
     # POST /data/* rate limiting (slowapi). The shared limiter is attached to
     # app state and its 429 handler registered; GET routes are not limited.

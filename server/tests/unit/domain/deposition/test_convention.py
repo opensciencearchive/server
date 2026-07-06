@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from osa.domain.deposition.model.convention import Convention
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.shared.model.srn import ConventionSlug, SchemaId
+from tests.factories import make_convention_docs
 
 
 def _make_conv_slug(slug: str = "test-conv") -> ConventionSlug:
@@ -32,6 +33,7 @@ class TestConventionCreation:
             description="A test convention",
             schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
+            docs=make_convention_docs(),
             created_at=datetime.now(UTC),
         )
         assert conv.title == "scRNA-seq Submission"
@@ -45,6 +47,7 @@ class TestConventionCreation:
             description="A test convention",
             schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
+            docs=make_convention_docs(),
             created_at=datetime.now(UTC),
         )
         assert conv.description == "A test convention"
@@ -57,6 +60,7 @@ class TestConventionCreation:
             schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
             hooks=[],
+            docs=make_convention_docs(),
             created_at=datetime.now(UTC),
         )
         assert conv.hooks == []
@@ -71,6 +75,7 @@ class TestConventionIdentity:
             description="A test convention",
             schema_id=_make_schema_id(),
             file_requirements=_make_file_reqs(),
+            docs=make_convention_docs(),
             created_at=datetime.now(UTC),
         )
         assert conv.id.root == "my-conv"

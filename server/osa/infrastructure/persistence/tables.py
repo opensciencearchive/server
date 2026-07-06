@@ -289,6 +289,7 @@ conventions_table = Table(
     Column("file_requirements", JSON, nullable=False),  # FileRequirements as dict
     Column("hooks", JSON, nullable=False, default=[]),  # List of hook names (str) — registry refs
     Column("source", JSON, nullable=True),  # IngesterDefinition as dict
+    Column("docs", JSONB, nullable=False),  # ConventionDocs as dict — mandatory (#151)
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 

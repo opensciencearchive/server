@@ -32,7 +32,11 @@ async def get_node_catalog(handler: FromDishka[GetNodeCatalogHandler]) -> NodeCa
 
 
 @manifest_router.get(
-    "/{schema}", operation_id="data_get_schema_manifest", response_model=SchemaManifest
+    "/{schema}",
+    operation_id="data_get_schema_manifest",
+    response_model=SchemaManifest,
+    # Absent metadata is omitted, never emitted as null keys (FR-019/AS-2).
+    response_model_exclude_none=True,
 )
 async def get_schema_manifest(
     schema: str, handler: FromDishka[GetSchemaManifestHandler]

@@ -28,7 +28,13 @@ from osa.domain.data.model.manifest import (
 )
 from osa.domain.data.model.query_plan import TableKind
 from osa.domain.data.model.record_summary import RecordSummary
-from osa.domain.semantics.model.value import FieldType
+from osa.domain.data.model.skill import AuthorDocs, SampleValue
+from osa.domain.semantics.model.value import (
+    FieldDefinition,
+    FieldType,
+    NumberConstraints,
+    TermConstraints,
+)
 from osa.domain.shared.model.ids import RecordId
 from osa.domain.shared.model.srn import Domain, RecordSRN, SchemaId
 from osa.infrastructure.data.schema_feature_reader import SchemaFeatureReader
@@ -36,7 +42,11 @@ from osa.infrastructure.persistence.feature_table import (
     FeatureSchema,
     build_feature_table,
 )
-from osa.infrastructure.persistence.tables import records_table, schemas_table
+from osa.infrastructure.persistence.tables import (
+    conventions_table,
+    records_table,
+    schemas_table,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +143,7 @@ class PostgresCatalogReadStore:
         return NodeCatalog(node_domain=self.node_domain.root, schemas=entries)
 
     async def get_schema_manifest(self, schema_id: SchemaId) -> SchemaManifest | None:
-        stmt = select(schemas_table.c.fields).where(
+        stmt = select(schemas_table.c.title, schemas_table.c.fields).where(
             schemas_table.c.id == schema_id.id.root,
             schemas_table.c.version == schema_id.version.root,
         )
@@ -145,16 +155,30 @@ class PostgresCatalogReadStore:
         field_specs: list[FieldSpec] = []
         column_specs: list[ColumnSpec] = []
         for f in row["fields"]:
-            ftype = FieldType(f["type"])
+            # The blob IS a serialized FieldDefinition — validate it back into
+            # the domain model and read typed attributes, never raw dict keys.
+            fd = FieldDefinition.model_validate(f)
+            ontology_id: str | None = None
+            ontology_version: str | None = None
+            unit: str | None = None
+            if isinstance(fd.constraints, TermConstraints):
+                ontology_id = fd.constraints.ontology_srn.id.root
+                ontology_version = fd.constraints.ontology_srn.version.root
+            elif isinstance(fd.constraints, NumberConstraints):
+                # Hoisted for consumers; the constraints union stays internal.
+                unit = fd.constraints.unit
             field_specs.append(
                 FieldSpec(
-                    name=f["name"],
-                    type=ftype,
-                    ontology_id=f.get("ontology_id"),
-                    ontology_version=f.get("ontology_version"),
+                    name=fd.name,
+                    type=fd.type,
+                    ontology_id=ontology_id,
+                    ontology_version=ontology_version,
+                    description=fd.description,
+                    unit=unit,
+                    examples=fd.examples,
                 )
             )
-            column_specs.append(ColumnSpec(name=f["name"], type=ftype))
+            column_specs.append(ColumnSpec(name=fd.name, type=fd.type))
 
         record_count = await self._records_count(schema_id)
         records_resource = TableResource(
@@ -171,6 +195,7 @@ class PostgresCatalogReadStore:
             id=schema_id.id.root,
             version=schema_id.version.root,
             srn=schema_id.to_srn(self.node_domain).render(),
+            title=row["title"],
             fields=field_specs,
             table_resources=[records_resource, *feature_resources],
         )
@@ -193,6 +218,80 @@ class PostgresCatalogReadStore:
                 )
             )
         return resources
+
+    # ------------------------------------------------------------------ #
+    # Skill surface projections (#151)
+    # ------------------------------------------------------------------ #
+
+    async def get_author_docs(self, schema_id: SchemaId) -> AuthorDocs | None:
+        """Docs of the schema's owning convention — a read-model projection over
+        the deposition-owned ``conventions`` table (latest deploy wins)."""
+        stmt = (
+            select(conventions_table.c.docs)
+            .where(
+                conventions_table.c.schema_id == schema_id.id.root,
+                conventions_table.c.schema_version == schema_id.version.root,
+            )
+            .order_by(conventions_table.c.created_at.desc())
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        row = result.first()
+        if row is None:
+            return None
+        return AuthorDocs.model_validate(row[0])
+
+    async def sample_value(
+        self, schema_id: SchemaId, table: str, column: str
+    ) -> SampleValue | None:
+        """One non-null value for example templating (research §9).
+
+        Records sampling extracts the JSONB metadata element (bound parameter,
+        no identifier interpolation); feature tables go through the existing
+        quoted dynamic-table machinery. ``None`` on empty/unknown columns.
+        """
+        if table == "records":
+            t = records_table
+            element = t.c.metadata[column]
+            stmt = (
+                select(element)
+                .where(
+                    t.c.schema_id == schema_id.id.root,
+                    t.c.schema_version == schema_id.version.root,
+                    # ->> is SQL NULL for both a missing key and a JSON null.
+                    t.c.metadata[column].astext.isnot(None),
+                )
+                .limit(1)
+            )
+        else:
+            fschema = next(
+                (
+                    fs
+                    for name, fs in await self._features.feature_tables(schema_id)
+                    if name == table
+                ),
+                None,
+            )
+            if fschema is None:
+                return None
+            ft = build_feature_table(table, fschema)
+            if column not in ft.c:
+                return None
+            stmt = (
+                select(ft.c[column])
+                .select_from(ft.join(records_table, records_table.c.srn == ft.c.record_srn))
+                .where(
+                    records_table.c.schema_id == schema_id.id.root,
+                    records_table.c.schema_version == schema_id.version.root,
+                    ft.c[column].isnot(None),
+                )
+                .limit(1)
+            )
+        result = await self.session.execute(stmt)
+        row = result.first()
+        if row is None or not isinstance(row[0], (str, int, float, bool)):
+            return None
+        return SampleValue(value=row[0])
 
     async def get_latest_schema_id(self, schema_short_id: str) -> SchemaId | None:
         stmt = select(schemas_table.c.version).where(schemas_table.c.id == schema_short_id)
@@ -220,6 +319,12 @@ class PostgresCatalogReadStore:
     def _feature_column_specs(fschema: FeatureSchema) -> list[ColumnSpec]:
         """Map a feature table's declared columns to manifest ColumnSpecs."""
         return [
-            ColumnSpec(name=c.name, type=_JSON_TYPE_TO_FIELD_TYPE[c.json_type])
+            ColumnSpec(
+                name=c.name,
+                type=_JSON_TYPE_TO_FIELD_TYPE[c.json_type],
+                format=c.format,
+                description=c.description,
+                unit=c.unit,
+            )
             for c in fschema.columns
         ]

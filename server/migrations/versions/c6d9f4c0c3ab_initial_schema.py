@@ -35,6 +35,7 @@ def upgrade() -> None:
         sa.Column("file_requirements", sa.JSON(), nullable=False),
         sa.Column("hooks", sa.JSON(), nullable=False),
         sa.Column("source", sa.JSON(), nullable=True),
+        sa.Column("docs", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
