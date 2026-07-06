@@ -166,11 +166,17 @@ class PostgresIngestRunRepository(IngestRunRepository):
         return _row_to_ingest_run(dict(row))
 
     async def record_failure(self, id: str, *, reason: str, kind: FailureKind | None) -> None:
-        """Record why ingestion stopped early, without touching run status."""
+        """Record why a run failed / ingestion stopped early, without touching status.
+
+        First-writer-wins: the ``failure_reason IS NULL`` guard means a run
+        abort (which sets the reason via :meth:`abort`) is never clobbered by a
+        later per-batch give-up that races in behind it (#152).
+        """
         t = ingest_runs_table
         stmt = (
             update(t)
             .where(t.c.id == id)
+            .where(t.c.failure_reason.is_(None))
             .values(
                 failure_reason=reason,
                 failure_kind=kind.value if kind else None,

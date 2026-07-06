@@ -47,9 +47,11 @@ class TestPublishBatchOnExhausted:
 
         await handler.on_exhausted(event)
 
-        handler.ingest_service.fail_batch.assert_called_once_with(
-            IngestRunId("run-1"),
-        )
+        handler.ingest_service.fail_batch.assert_awaited_once()
+        call = handler.ingest_service.fail_batch.await_args
+        assert call.args[0] == IngestRunId("run-1")
+        assert "publish" in call.kwargs["reason"] and "exhausted" in call.kwargs["reason"]
+        assert call.kwargs["kind"] is None
 
     @pytest.mark.asyncio
     async def test_on_exhausted_exists(self) -> None:

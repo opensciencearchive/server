@@ -186,3 +186,59 @@ class TestFailIngestionRecordsReason:
             "run-1", set_ingestion_finished=True
         )
         service.ingest_repo.increment_failed.assert_awaited_once_with("run-1")
+
+
+class TestFailBatchRecordsReason:
+    """A permanently-failed batch records a queryable reason (#152)."""
+
+    @pytest.mark.asyncio
+    async def test_records_reason_via_record_failure(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+
+        service = _make_service()
+        run = MagicMock()
+        run.check_completion.return_value = False
+        service.ingest_repo.increment_failed.return_value = run
+
+        await service.fail_batch(
+            IngestRunId("run-1"), reason="batch 3: hook retries exhausted", kind=None
+        )
+
+        service.ingest_repo.increment_failed.assert_awaited_once_with("run-1")
+        kwargs = service.ingest_repo.record_failure.await_args.kwargs
+        assert kwargs["reason"] == "batch 3: hook retries exhausted"
+        assert kwargs["kind"] is None
+
+    @pytest.mark.asyncio
+    async def test_record_failure_runs_after_completion_save(self) -> None:
+        """If the batch completes the run, _check_completion saves the aggregate
+        (stale failure_reason=None). record_failure must run AFTER that save, or
+        the reason gets clobbered."""
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+
+        service = _make_service()
+        run = MagicMock(id="run-1", published_count=0)
+        run.check_completion.return_value = True  # run completes in this call
+        service.ingest_repo.increment_failed.return_value = run
+
+        await service.fail_batch(IngestRunId("run-1"), reason="boom", kind=None)
+
+        names = [c[0] for c in service.ingest_repo.mock_calls if c[0]]
+        assert names.index("save") < names.index("record_failure")
+
+    @pytest.mark.asyncio
+    async def test_fail_ingestion_records_reason_after_completion_save(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+        from osa.domain.shared.failure import FailureKind
+
+        service = _make_service()
+        run = MagicMock(id="run-1", published_count=0)
+        run.check_completion.return_value = True
+        service.ingest_repo.increment_failed.return_value = run
+
+        await service.fail_ingestion(
+            IngestRunId("run-1"), reason="source gave up", kind=FailureKind.UNKNOWN
+        )
+
+        names = [c[0] for c in service.ingest_repo.mock_calls if c[0]]
+        assert names.index("save") < names.index("record_failure")

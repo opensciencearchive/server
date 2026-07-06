@@ -20,8 +20,10 @@ These exceptions drive worker retry policy, not HTTP responses, so
 ``InfrastructureError`` tree.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import assert_never
 
 from osa.domain.shared.error import OSAError
 
@@ -106,6 +108,33 @@ class AbortRun:
 
 
 Decision = Retry | RetryWithMoreMemory | GiveUp | AbortRun
+
+
+def _precedence(decision: Decision) -> int:
+    """Rank a decision by blast radius, so several can be reduced to the one that wins."""
+    match decision:
+        case AbortRun():
+            return 3  # kills the whole run
+        case Retry():
+            return 2  # re-drive the batch
+        case RetryWithMoreMemory():
+            return 1  # remediation; terminal at batch level (bump lever is HookService's)
+        case GiveUp():
+            return 0  # record this unit and move on
+    assert_never(decision)
+
+
+def most_severe(decisions: Iterable[Decision]) -> Decision | None:
+    """The decision that dominates when one batch yields several.
+
+    When a batch runs N hooks, each failed hook produces a decision; the batch's
+    fate is the most severe among them (:func:`_precedence`): an ``AbortRun``
+    dominates a ``Retry`` dominates the terminal per-hook verbs. Lets a handler
+    pick one action without a chain of ``isinstance`` checks. Returns ``None``
+    for a batch that produced no decision (nothing failed); ties keep the
+    first-seen decision.
+    """
+    return max(decisions, key=_precedence, default=None)
 
 
 @dataclass(frozen=True)

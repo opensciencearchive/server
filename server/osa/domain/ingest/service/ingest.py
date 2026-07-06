@@ -115,14 +115,20 @@ class IngestService(Service):
         )
         await self._check_completion(ingest_run)
 
-    async def fail_batch(self, ingest_run_id: IngestRunId) -> None:
-        """Account for a batch that permanently failed hook processing.
+    async def fail_batch(
+        self, ingest_run_id: IngestRunId, *, reason: str, kind: FailureKind | None = None
+    ) -> None:
+        """Account for a batch that permanently failed hook/publish processing (#152).
 
-        Increments batches_failed and completes the run if all batches
-        are now accounted for (completed + failed >= ingested).
+        Increments batches_failed, completes the run if all batches are now
+        accounted for (completed + failed >= ingested), and records why so an
+        operator sees the explanation on the run. ``record_failure`` runs LAST:
+        a completing run's aggregate save (in ``_check_completion``) would
+        otherwise clobber the reason with the aggregate's stale null.
         """
         ingest_run = await self.ingest_repo.increment_failed(ingest_run_id)
         await self._check_completion(ingest_run)
+        await self.ingest_repo.record_failure(ingest_run_id, reason=reason, kind=kind)
 
     async def fail_ingestion(
         self, ingest_run_id: IngestRunId, *, reason: str, kind: FailureKind | None
@@ -130,18 +136,19 @@ class IngestService(Service):
         """Account for a failed ingester pull, recording why (#152).
 
         The batch was never sourced, so we mark ingestion as finished
-        (no more batches coming) and increment batches_failed. The
-        completion condition can then fire based on whatever batches
-        were already sourced. The reason/kind land on the run so an
-        operator sees the explanation without log archaeology.
+        (no more batches coming) and increment batches_failed. The completion
+        condition can then fire based on whatever batches were already sourced.
+        The reason/kind land on the run so an operator sees the explanation
+        without log archaeology. ``record_failure`` runs LAST for the same
+        reason as ``fail_batch`` — so a completing run's save can't clobber it.
         """
         await self.ingest_repo.increment_batches_ingested(
             ingest_run_id,
             set_ingestion_finished=True,
         )
         ingest_run = await self.ingest_repo.increment_failed(ingest_run_id)
-        await self.ingest_repo.record_failure(ingest_run_id, reason=reason, kind=kind)
         await self._check_completion(ingest_run)
+        await self.ingest_repo.record_failure(ingest_run_id, reason=reason, kind=kind)
 
     async def abort_run(
         self, ingest_run_id: IngestRunId, *, reason: str, kind: FailureKind

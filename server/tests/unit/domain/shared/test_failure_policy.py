@@ -21,6 +21,7 @@ from osa.domain.shared.failure import (
     Retry,
     RetryWithMoreMemory,
     RuntimeFailure,
+    most_severe,
 )
 
 FRESH = PriorAttempts(memory_bumps=0)
@@ -135,3 +136,38 @@ class TestRuntimeFailureFacts:
 
         assert isinstance(failure, OSAError)
         assert not isinstance(failure, InfrastructureError)
+
+
+class TestMostSevere:
+    """most_severe reduces one batch's per-hook decisions to the verb that wins.
+
+    Precedence follows blast radius: AbortRun (kills the run) dominates Retry
+    (re-drive the batch) dominates the terminal per-hook verbs. This is what lets
+    a batch handler pick a single action without a chain of isinstance checks.
+    """
+
+    _GIVE = GiveUp(reason="hook exited 2", kind=FailureKind.HOOK_EXIT)
+    _ABORT = AbortRun(reason="bad image", kind=FailureKind.IMAGE_PULL)
+
+    def test_empty_batch_yields_none(self) -> None:
+        assert most_severe([]) is None
+
+    def test_single_decision_passes_through(self) -> None:
+        assert most_severe([self._GIVE]) is self._GIVE
+
+    def test_retry_dominates_give_up(self) -> None:
+        assert most_severe([self._GIVE, Retry()]) == Retry()
+
+    def test_retry_with_more_memory_ranks_above_give_up(self) -> None:
+        assert most_severe([self._GIVE, RetryWithMoreMemory()]) == RetryWithMoreMemory()
+
+    def test_abort_dominates_everything(self) -> None:
+        assert most_severe([Retry(), self._GIVE, self._ABORT]) == self._ABORT
+
+    def test_order_independent(self) -> None:
+        assert most_severe([self._ABORT, Retry(), self._GIVE]) == self._ABORT
+
+    def test_ties_keep_the_first_seen(self) -> None:
+        first = AbortRun(reason="first", kind=FailureKind.RBAC)
+        second = AbortRun(reason="second", kind=FailureKind.IMAGE_PULL)
+        assert most_severe([first, second]) is first

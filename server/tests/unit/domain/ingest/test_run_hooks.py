@@ -297,3 +297,38 @@ class TestTerminalRunGuard:
         handler.hook_service.run_hooks_for_batch.assert_not_called()
         assert _emitted(handler) == []
         handler.hook_registry.record_run.assert_not_called()
+
+
+class TestDecisionPrecedence:
+    """The batch's fate is the most severe decision across its hooks (#152)."""
+
+    @pytest.mark.asyncio
+    async def test_abort_dominates_retry_in_a_mixed_batch(self) -> None:
+        # hook_a wants a transient retry; hook_b hit an unpullable image.
+        execs = [
+            _failed_exec("hook_a", FailureKind.TIMEOUT),
+            _failed_exec("hook_b", FailureKind.IMAGE_PULL, offset=10),
+        ]
+        handler = _make_handler(hook_names=("hook_a", "hook_b"), executions=execs)
+
+        await handler.handle(_make_event())
+
+        # Abort wins: the run is hard-stopped, the batch is NOT re-driven or completed.
+        handler.ingest_service.abort_run.assert_awaited_once()
+        assert not any(isinstance(e, HookBatchCompleted) for e in _emitted(handler))
+
+
+class TestBatchExhaustionRecordsReason:
+    """A batch whose transient retries run out must leave a queryable reason (#152)."""
+
+    @pytest.mark.asyncio
+    async def test_on_exhausted_records_reason_and_batch(self) -> None:
+        handler = _make_handler(executions=[_passed_exec("pockets")])
+
+        await handler.on_exhausted(_make_event(batch_index=3))
+
+        call = handler.ingest_service.fail_batch.await_args
+        assert call.args[0] == "run-1"
+        assert "exhausted" in call.kwargs["reason"]
+        assert "3" in call.kwargs["reason"]
+        assert call.kwargs["kind"] is None
