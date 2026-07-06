@@ -238,3 +238,4 @@ web/.turbo/
 .env
 !.env.example
 server/osa.yaml
+.gstack/
