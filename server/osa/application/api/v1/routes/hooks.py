@@ -7,8 +7,6 @@ payload (the hook is identified by the path). All business logic lives in
 centrally in ``application/api/v1/errors.py``.
 """
 
-from __future__ import annotations
-
 from typing import Any
 from uuid import UUID
 
