@@ -6,8 +6,6 @@ before the ``/{schema}`` manifest catch-all (longest-suffix-first);
 resolution reuses ``resolve_schema`` (unknown/reserved ids → 404).
 """
 
-from __future__ import annotations
-
 from dishka.integrations.fastapi import DishkaRoute, FromDishka
 from fastapi import APIRouter, Response
 

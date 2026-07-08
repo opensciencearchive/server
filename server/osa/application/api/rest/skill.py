@@ -6,8 +6,6 @@ on the versioned data surface. Thin routes: handler → JSON / markdown
 Response — no business logic here.
 """
 
-from __future__ import annotations
-
 from dishka.integrations.fastapi import DishkaRoute, FromDishka
 from fastapi import APIRouter, Request, Response
 
