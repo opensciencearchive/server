@@ -117,6 +117,16 @@ class Worker:
         """Current worker state."""
         return self._state
 
+    @property
+    def is_alive(self) -> bool:
+        """True when the worker's background task is running (started, not done).
+
+        Distinguishes a started-and-healthy worker from an un-started one (task
+        is None) or a crashed one (task finished). Consumed by the ``/ready``
+        readiness check.
+        """
+        return self._task is not None and not self._task.done()
+
     def set_container(self, container: AsyncContainer) -> None:
         """Set the DI container for scoped dependency resolution."""
         self._container = container

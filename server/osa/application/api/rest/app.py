@@ -21,6 +21,7 @@ from osa.application.api.v1.routes import (
     hooks,
     ingestions,
     health,
+    metrics,
     ontologies,
     schemas,
     stats,
@@ -159,7 +160,9 @@ def create_app(
     logfire.instrument_httpx()
     logfire.instrument_fastapi(
         app_instance,
-        excluded_urls="/api/v1/health",
+        # Probes and the scrape endpoint are high-frequency and uninteresting as
+        # traces; the OTel FastAPI instrumentor takes a comma-separated regex list.
+        excluded_urls="/api/v1/health,/api/v1/ready,/metrics",
     )
 
     # Setup dependency injection
@@ -184,9 +187,11 @@ def create_app(
     app_instance.include_router(validation.router, prefix="/api/v1")
     app_instance.include_router(data_routes.router, prefix="/api/v1")
 
-    # Unversioned root surface — GET / and GET /SKILL.md (#151). Included
-    # after the /api/v1 routers so nothing shadows the API prefix.
+    # Unversioned root surface — GET / and GET /SKILL.md (#151), plus GET
+    # /metrics (#158, Prometheus convention). Included after the /api/v1
+    # routers so nothing shadows the API prefix.
     app_instance.include_router(skill_routes.router)
+    app_instance.include_router(metrics.router)
 
     # POST /data/* rate limiting (slowapi). The shared limiter is attached to
     # app state and its 429 handler registered; GET routes are not limited.
