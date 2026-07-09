@@ -27,6 +27,20 @@ from osa.domain.validation.model.hook_run import HookRunStatus
 _T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
+class RecordingHookInstrumentation:
+    """Records HookInstrumentation calls for assertion (no MagicMock indirection)."""
+
+    def __init__(self) -> None:
+        self.runs_finished: list[tuple] = []
+        self.failures_decided: list[tuple] = []
+
+    def run_finished(self, *, hook, status, duration_s, oom_retries) -> None:  # noqa: ANN001
+        self.runs_finished.append((hook, status, duration_s, oom_retries))
+
+    def run_failure_decided(self, *, hook, kind, decision) -> None:  # noqa: ANN001
+        self.failures_decided.append((hook, kind, decision))
+
+
 def _make_release(name: str = "pockets") -> HookRelease:
     return HookRelease(
         id=HookReleaseId(uuid4()),
@@ -130,6 +144,7 @@ def _make_handler(*, hook_names: tuple[str, ...] = ("pockets",), executions=None
         outbox=AsyncMock(),
         ingest_storage=ingest_storage,
         failure_policy=FailurePolicy(),
+        instrumentation=RecordingHookInstrumentation(),
     )
 
 
@@ -332,3 +347,71 @@ class TestBatchExhaustionRecordsReason:
         assert "exhausted" in call.kwargs["reason"]
         assert "3" in call.kwargs["reason"]
         assert call.kwargs["kind"] is None
+
+
+class TestHookMetricsEmission:
+    """RunHooks emits one run_finished per recorded execution and one
+    run_failure_decided per (execution, decision)."""
+
+    @pytest.mark.asyncio
+    async def test_run_finished_emitted_per_execution(self) -> None:
+        execs = [
+            _passed_exec("hook_a", offset=0),
+            _failed_exec("hook_b", FailureKind.HOOK_EXIT, offset=10),
+        ]
+        handler = _make_handler(hook_names=("hook_a", "hook_b"), executions=execs)
+
+        await handler.handle(_make_event())
+
+        inst = handler.instrumentation
+        by_hook = {h.root: (status, dur, oom) for h, status, dur, oom in inst.runs_finished}
+        assert by_hook["hook_a"] == (HookRunStatus.PASSED, 5.0, 0)
+        assert by_hook["hook_b"] == (HookRunStatus.ERROR, 2.0, 0)
+
+    @pytest.mark.asyncio
+    async def test_failure_decided_emitted_for_failed_hook(self) -> None:
+        from osa.domain.shared.failure import DecisionKind
+
+        # HOOK_EXIT → GiveUp; the batch still completes.
+        handler = _make_handler(executions=[_failed_exec("pockets", FailureKind.HOOK_EXIT)])
+
+        await handler.handle(_make_event())
+
+        inst = handler.instrumentation
+        assert len(inst.failures_decided) == 1
+        hook, kind, decision = inst.failures_decided[0]
+        assert hook.root == "pockets"
+        assert kind is FailureKind.HOOK_EXIT
+        assert decision is DecisionKind.GIVE_UP
+
+    @pytest.mark.asyncio
+    async def test_passed_only_batch_decides_no_failures(self) -> None:
+        handler = _make_handler(executions=[_passed_exec("pockets")])
+
+        await handler.handle(_make_event())
+
+        assert handler.instrumentation.failures_decided == []
+        assert len(handler.instrumentation.runs_finished) == 1
+
+    @pytest.mark.asyncio
+    async def test_abort_records_run_finished_and_decision(self) -> None:
+        from osa.domain.shared.failure import DecisionKind
+
+        # IMAGE_PULL → AbortRun; provenance is still recorded (run_finished fires).
+        handler = _make_handler(executions=[_failed_exec("pockets", FailureKind.IMAGE_PULL)])
+
+        await handler.handle(_make_event())
+
+        inst = handler.instrumentation
+        assert len(inst.runs_finished) == 1
+        assert inst.runs_finished[0][1] == HookRunStatus.ERROR
+        assert inst.failures_decided[0][2] is DecisionKind.ABORT_RUN
+
+    @pytest.mark.asyncio
+    async def test_oom_run_finished_carries_retry_count(self) -> None:
+        handler = _make_handler(executions=[_failed_exec("pockets", FailureKind.OOM)])
+
+        await handler.handle(_make_event())
+
+        # _failed_exec sets oom_retries=3 for OOM.
+        assert handler.instrumentation.runs_finished[0][3] == 3

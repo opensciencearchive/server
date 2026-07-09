@@ -43,6 +43,7 @@ class TestWorkerOnExhaustedErrorSafety:
         delivery.id = "delivery-1"
         delivery.event = event
         delivery.retry_count = 100  # exceeds __max_retries__
+        delivery.trace_context = None  # no origin span to link
 
         claim_result = MagicMock()
         claim_result.deliveries = [delivery]
@@ -51,9 +52,17 @@ class TestWorkerOnExhaustedErrorSafety:
         outbox.claim.return_value = claim_result
 
         # Wire up the DI scope mock
+        from osa.domain.shared.port.instrumentation import OutboxInstrumentation
+
+        class _NullOutboxInstrumentation:
+            def delivery_completed(self, **kwargs: Any) -> None:
+                pass
+
         async def mock_get(t: type) -> Any:
             if t is RunIngester:
                 return handler
+            if t is OutboxInstrumentation:
+                return _NullOutboxInstrumentation()
             return outbox
 
         scope = AsyncMock()

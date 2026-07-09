@@ -36,6 +36,7 @@ from osa.domain.shared.error import OSAError
 from osa.domain.shared.event import EventHandler
 from osa.infrastructure.event.worker import WorkerPool
 from osa.infrastructure.persistence.seed import ensure_system_user
+from osa.infrastructure.telemetry.api import ApiInstrumentation
 from osa.infrastructure.telemetry.setup import bootstrap
 from osa.util.di.fastapi import setup_dishka
 
@@ -215,6 +216,14 @@ def create_app(
             request.method,
             request.url.path,
         )
+        # Count the unhandled error for observability. A telemetry failure must
+        # never mask the 500 response, so resolution + emission is guarded and
+        # only logged.
+        try:
+            instrumentation = await request.app.state.dishka_container.get(ApiInstrumentation)
+            instrumentation.unhandled_error()
+        except Exception:
+            logger.warning("Failed to record unhandled-error metric", exc_info=True)
         return JSONResponse(
             status_code=500,
             content={"detail": "Internal server error"},

@@ -30,6 +30,7 @@ from osa.domain.validation.model.hook_release import HookRelease
 from osa.domain.validation.model.hook_result import HookExecution
 from osa.domain.validation.model.hook_run import HookRun, HookRunId, HookRunStatus
 from osa.domain.validation.port.hook_runner import HookInputs
+from osa.domain.validation.port.instrumentation import HookInstrumentation
 from osa.domain.validation.service.hook import HookService
 from osa.domain.validation.service.hook_registry import HookRegistryService
 from osa.infrastructure.logging import get_logger
@@ -62,6 +63,7 @@ class RunHooks(EventHandler[IngesterBatchReady]):
     outbox: Outbox
     ingest_storage: IngestStoragePort
     failure_policy: FailurePolicy
+    instrumentation: HookInstrumentation
 
     async def handle(self, event: IngesterBatchReady) -> None:
         ingest_run = await self.ingest_repo.get(event.ingest_run_id)
@@ -171,6 +173,16 @@ class RunHooks(EventHandler[IngesterBatchReady]):
             if e.failure is not None
         ]
 
+        # One metric per observed failure + the policy verb it earned. ``kind`` is
+        # a fact the execution already carries (``as_failure`` never raises here —
+        # ``decided`` holds only errored executions).
+        for e, decision in decided:
+            self.instrumentation.run_failure_decided(
+                hook=e.hook_name,
+                kind=e.as_failure().kind,
+                decision=decision.kind_label,
+            )
+
         verdict = most_severe(d for _, d in decided)
         match verdict:
             case AbortRun(reason=reason, kind=kind):
@@ -246,6 +258,14 @@ class RunHooks(EventHandler[IngesterBatchReady]):
             )
             await self.ingest_storage.write_run_ref(
                 work_dirs[e.hook_name], str(run_id), str(e.release_id)
+            )
+            # ``duration_s`` is a required field on every HookExecution (both the
+            # completed and failed constructors set it), so it is never None here.
+            self.instrumentation.run_finished(
+                hook=e.hook_name,
+                status=status,
+                duration_s=e.duration_s,
+                oom_retries=e.oom_retries,
             )
 
     async def on_exhausted(self, event: IngesterBatchReady) -> None:

@@ -15,12 +15,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from osa.domain.shared.event import (
     ClaimResult,
     Delivery,
+    DeliveryStatus,
     Event,
     EventHandler,
     EventId,
     WorkerStatus,
 )
 from osa.domain.shared.outbox import Outbox
+from osa.domain.shared.port.instrumentation import OutboxInstrumentation
+
+
+class RecordingOutboxInstrumentation:
+    """Records delivery_completed calls for assertion (no MagicMock indirection)."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, DeliveryStatus, int, float]] = []
+
+    def delivery_completed(self, *, consumer_group, status, retry_count, duration_s) -> None:  # noqa: ANN001
+        self.calls.append((consumer_group, status, retry_count, duration_s))
 
 
 class DummyEvent(Event):
@@ -53,21 +65,27 @@ def make_mock_container(
     outbox: AsyncMock,
     session: AsyncMock | None = None,
     handler: EventHandler | None = None,
+    instrumentation: RecordingOutboxInstrumentation | None = None,
 ):
     """Create a mock DI container that provides scoped dependencies.
 
-    Creates a container mock that returns Outbox, AsyncSession, and handler
-    when called as an async context manager with scope parameter.
+    Creates a container mock that returns Outbox, AsyncSession, handler, and
+    OutboxInstrumentation when called as an async context manager with scope.
     """
     if session is None:
         session = AsyncMock(spec=AsyncSession)
         session.commit = AsyncMock()
         session.rollback = AsyncMock()
 
+    if instrumentation is None:
+        instrumentation = RecordingOutboxInstrumentation()
+
     async def get_dependency(cls):
         """Return the appropriate dependency based on the requested class."""
         if cls == Outbox:
             return outbox
+        if cls == OutboxInstrumentation:
+            return instrumentation
         if cls == AsyncSession:
             return session
         if handler is not None and (cls is type(handler) or issubclass(cls, EventHandler)):
@@ -367,3 +385,205 @@ class TestWorkerStartStop:
         assert call_args[1]["deliver_after"] is not None
         assert worker.state.failed_count == 1
         assert worker.state.error is not None
+
+
+# Two distinct, valid, sampled W3C traceparents (flags=01).
+_TP1 = "00-11111111111111111111111111111111-2222222222222222-01"
+_TP2 = "00-33333333333333333333333333333333-4444444444444444-01"
+
+
+class TestLinksFromDeliveries:
+    """Worker._links_from_deliveries turns claimed traceparents into span links."""
+
+    def test_valid_traceparents_become_links(self):
+        from osa.infrastructure.event.worker import Worker
+
+        worker = Worker(DummyHandler)
+        d1 = Delivery(id="del-1", event=None, trace_context=_TP1)  # type: ignore[arg-type]
+        d2 = Delivery(id="del-2", event=None, trace_context=_TP2)  # type: ignore[arg-type]
+
+        links = worker._links_from_deliveries([d1, d2])
+
+        assert len(links) == 2
+        (sc1, attrs1), (sc2, attrs2) = links
+        assert sc1.trace_id == int("1" * 32, 16)
+        assert sc2.trace_id == int("3" * 32, 16)
+        assert attrs1 == {"delivery.id": "del-1"}
+        assert attrs2 == {"delivery.id": "del-2"}
+
+    def test_malformed_traceparent_is_skipped_with_warning(self, monkeypatch):
+        import osa.infrastructure.event.worker as worker_module
+        from osa.infrastructure.event.worker import Worker
+
+        fake_logger = MagicMock()
+        monkeypatch.setattr(worker_module, "logger", fake_logger)
+
+        worker = Worker(DummyHandler)
+        good = Delivery(id="ok", event=None, trace_context=_TP1)  # type: ignore[arg-type]
+        bad = Delivery(id="bad", event=None, trace_context="garbage")  # type: ignore[arg-type]
+
+        links = worker._links_from_deliveries([good, bad])
+
+        # The good one still links; the bad one is dropped, not fatal.
+        assert len(links) == 1
+        assert links[0][1] == {"delivery.id": "ok"}
+        assert fake_logger.warn.call_count == 1
+
+    def test_none_trace_context_skipped_silently(self, monkeypatch):
+        import osa.infrastructure.event.worker as worker_module
+        from osa.infrastructure.event.worker import Worker
+
+        fake_logger = MagicMock()
+        monkeypatch.setattr(worker_module, "logger", fake_logger)
+
+        worker = Worker(DummyHandler)
+        d = Delivery(id="del-1", event=None, trace_context=None)  # type: ignore[arg-type]
+
+        links = worker._links_from_deliveries([d])
+
+        assert links == []
+        fake_logger.warn.assert_not_called()
+
+
+class TestDispatchSpan:
+    """Dispatch is wrapped in a worker.dispatch span whose _links come from the batch."""
+
+    @pytest.mark.asyncio
+    async def test_dispatch_span_receives_batch_links(self, monkeypatch):
+        import osa.infrastructure.event.worker as worker_module
+        from osa.infrastructure.event.worker import Worker
+
+        captured: dict = {}
+
+        class _FakeSpan:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def fake_span(msg, **kwargs):
+            captured["msg"] = msg
+            captured["kwargs"] = kwargs
+            return _FakeSpan()
+
+        monkeypatch.setattr(worker_module.logfire, "span", fake_span)
+
+        event = DummyEvent(id=EventId(uuid4()), data="event1")
+        claim_result = ClaimResult(
+            deliveries=[Delivery(id="del-1", event=event, trace_context=_TP1)],
+            claimed_at=datetime.now(UTC),
+        )
+        outbox = AsyncMock(spec=Outbox)
+        outbox.claim.return_value = claim_result
+        outbox.mark_delivered = AsyncMock()
+
+        handler = DummyHandler(processed_events=[])
+        container = make_mock_container(outbox, handler=handler)
+
+        worker = Worker(DummyHandler)
+        worker.set_container(container)
+
+        await worker._poll_once()
+
+        assert captured["msg"] == "worker.dispatch {consumer_group}"
+        assert captured["kwargs"]["consumer_group"] == "DummyHandler"
+        assert captured["kwargs"]["batch_size"] == 1
+        links = captured["kwargs"]["_links"]
+        assert len(links) == 1
+        assert links[0][1] == {"delivery.id": "del-1"}
+
+
+class TestDeliveryMetrics:
+    """Worker emits delivery_completed per delivery in each terminal branch."""
+
+    @pytest.mark.asyncio
+    async def test_success_emits_delivered(self):
+        from osa.infrastructure.event.worker import Worker
+
+        event = DummyEvent(id=EventId(uuid4()), data="e")
+        claim_result = ClaimResult(
+            deliveries=[Delivery(id="del-1", event=event, retry_count=2)],
+            claimed_at=datetime.now(UTC),
+        )
+        outbox = AsyncMock(spec=Outbox)
+        outbox.claim.return_value = claim_result
+        outbox.mark_delivered = AsyncMock()
+
+        instrumentation = RecordingOutboxInstrumentation()
+        handler = DummyHandler(processed_events=[])
+        container = make_mock_container(outbox, handler=handler, instrumentation=instrumentation)
+
+        worker = Worker(DummyHandler)
+        worker.set_container(container)
+
+        await worker._poll_once()
+
+        assert len(instrumentation.calls) == 1
+        cg, status, retry_count, duration = instrumentation.calls[0]
+        assert cg == "DummyHandler"
+        assert status == DeliveryStatus.DELIVERED
+        assert retry_count == 2
+        assert duration >= 0.0
+
+    @pytest.mark.asyncio
+    async def test_skip_emits_skipped_and_delivered(self):
+        from osa.domain.shared.error import SkippedEvents
+        from osa.infrastructure.event.worker import Worker
+
+        keep = DummyEvent(id=EventId(uuid4()), data="keep")
+        drop = DummyEvent(id=EventId(uuid4()), data="drop")
+        claim_result = ClaimResult(
+            deliveries=[
+                Delivery(id="del-keep", event=keep),
+                Delivery(id="del-drop", event=drop),
+            ],
+            claimed_at=datetime.now(UTC),
+        )
+        outbox = AsyncMock(spec=Outbox)
+        outbox.claim.return_value = claim_result
+        outbox.mark_delivered = AsyncMock()
+        outbox.mark_skipped = AsyncMock()
+
+        class SkipHandler(EventHandler[DummyEvent]):
+            __batch_size__: ClassVar[int] = 10
+
+            async def handle_batch(self, events):
+                raise SkippedEvents(event_ids=[drop.id], reason="dupe")
+
+        instrumentation = RecordingOutboxInstrumentation()
+        handler = SkipHandler()
+        container = make_mock_container(outbox, handler=handler, instrumentation=instrumentation)
+
+        worker = Worker(SkipHandler)
+        worker.set_container(container)
+
+        await worker._poll_once()
+
+        emitted = sorted(c[1].value for c in instrumentation.calls)
+        assert emitted == sorted([DeliveryStatus.DELIVERED.value, DeliveryStatus.SKIPPED.value])
+
+    @pytest.mark.asyncio
+    async def test_failure_emits_failed(self):
+        from osa.infrastructure.event.worker import Worker
+
+        event = DummyEvent(id=EventId(uuid4()), data="e")
+        claim_result = ClaimResult(
+            deliveries=[Delivery(id="del-1", event=event)],
+            claimed_at=datetime.now(UTC),
+        )
+        outbox = AsyncMock(spec=Outbox)
+        outbox.claim.return_value = claim_result
+        outbox.mark_failed_with_retry = AsyncMock()
+
+        instrumentation = RecordingOutboxInstrumentation()
+        handler = FailingHandler()
+        container = make_mock_container(outbox, handler=handler, instrumentation=instrumentation)
+
+        worker = Worker(FailingHandler)
+        worker.set_container(container)
+
+        await worker._poll_once()
+
+        assert len(instrumentation.calls) == 1
+        assert instrumentation.calls[0][1] == DeliveryStatus.FAILED

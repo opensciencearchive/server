@@ -19,6 +19,14 @@ from osa.domain.shared.event import (
     EventId,
 )
 from osa.domain.shared.outbox import Outbox
+from osa.domain.shared.port.instrumentation import OutboxInstrumentation
+
+
+class _NullOutboxInstrumentation:
+    """No-op OutboxInstrumentation for tests that don't assert on metrics."""
+
+    def delivery_completed(self, *, consumer_group, status, retry_count, duration_s) -> None:  # noqa: ANN001
+        pass
 
 
 class DummyEvent(Event):
@@ -42,6 +50,8 @@ def make_mock_container(
     async def get_dependency(cls):
         if cls == Outbox:
             return outbox
+        if cls == OutboxInstrumentation:
+            return _NullOutboxInstrumentation()
         if cls == AsyncSession:
             return session
         if handler is not None and (cls is type(handler) or issubclass(cls, EventHandler)):
