@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import Any, Literal, Annotated
 
 import yaml
-from pydantic import BaseModel, BeforeValidator, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 from typing_extensions import Self
 
@@ -296,6 +303,34 @@ class DataConfig(BaseModel):
     max_page_limit: int = 1000  # page-size ceiling; over-large requests are clamped, not 422d
 
 
+class ObservabilityConfig(BaseModel):
+    """Telemetry export configuration (metrics, logs, traces).
+
+    Controls how the node exports OpenTelemetry signals (built on the bundled
+    Logfire pipeline). All fields are overridable via the nested-delimiter env
+    vars (``OSA_OBSERVABILITY__*``):
+
+    - ``OSA_OBSERVABILITY__OTLP_ENDPOINT`` — base OTLP/HTTP endpoint. When set,
+      metrics, logs, and traces are pushed to ``{endpoint}/v1/{signal}``. When
+      ``None`` (the default), push export is disabled.
+    - ``OSA_OBSERVABILITY__OTLP_TOKEN`` — bearer token sent as the
+      ``Authorization: Bearer <token>`` header on OTLP exports.
+    - ``OSA_OBSERVABILITY__PROMETHEUS_ENABLED`` — serve ``GET /metrics`` for
+      Prometheus pull scraping (default ``true``).
+    - ``OSA_OBSERVABILITY__TRACE_SAMPLE_RATE`` — head sampling rate in
+      ``[0.0, 1.0]`` (default ``1.0`` = sample everything).
+
+    Node identity resource attributes (e.g. ``service.namespace``, node domain)
+    are *not* configured here: they ride the standard ``OTEL_RESOURCE_ATTRIBUTES``
+    env var, which the telemetry pipeline reads at configure time.
+    """
+
+    otlp_endpoint: str | None = None  # base OTLP/HTTP endpoint; None disables push export
+    otlp_token: SecretStr | None = None  # bearer token sent as Authorization header
+    prometheus_enabled: bool = True  # serve GET /metrics (Prometheus pull)
+    trace_sample_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
 class Config(BaseSettings):
     # Archive identity (promoted from Server model)
     name: str = "Open Science Archive"
@@ -320,6 +355,9 @@ class Config(BaseSettings):
     auth: AuthConfig = AuthConfig()  # Defaults are dev-safe; boot check enforces prod-correctness
     runner: RunnerConfig = RunnerConfig()
     data: DataConfig = DataConfig()  # /data/ read-surface filter-tree bounds
+    observability: ObservabilityConfig = (
+        ObservabilityConfig()
+    )  # telemetry export (OSA_OBSERVABILITY__*)
     host_data_dir: str | None = None  # Host path for OSA_DATA_DIR (sibling container mounts)
 
     model_config = {
