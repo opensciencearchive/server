@@ -10,7 +10,14 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId, IngestStatus
+from osa.domain.ingest.model.ingest_run import (
+    Applied,
+    IngestRun,
+    IngestRunId,
+    IngestStatus,
+    RunClosed,
+)
+from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.failure import FailureKind
 from osa.infrastructure.persistence.repository.ingest import PostgresIngestRunRepository
 
@@ -63,7 +70,7 @@ class TestFailureSurfacing:
             kind=FailureKind.IMAGE_PULL,
             completed_at=datetime.now(UTC),
         )
-        assert aborted is not None
+        assert isinstance(aborted, Applied)
 
         # A batch that was mid-retry exhausts after the abort and records its own reason.
         await repo.record_failure(
@@ -76,3 +83,62 @@ class TestFailureSurfacing:
         assert fetched.failure_reason == "Image pull failed: 401"
         assert fetched.failure_kind is FailureKind.IMAGE_PULL
         assert fetched.status is IngestStatus.FAILED
+
+
+@pytest.mark.asyncio
+class TestTerminalRunGuard:
+    """Counter increments are no-ops once a run is terminal (#152).
+
+    A stale in-flight batch that exhausts after abort_run must not accumulate
+    failed/completed counts on the closed run — the atomic UPDATE is guarded on
+    non-terminal status, mirroring `abort`.
+    """
+
+    async def test_increment_failed_is_noop_on_terminal_run(self, pg_session: AsyncSession):
+        repo = PostgresIngestRunRepository(pg_session)
+        await repo.save(_make_run("ing-tf"))
+        await repo.abort(
+            "ing-tf",
+            reason="bad image",
+            kind=FailureKind.IMAGE_PULL,
+            completed_at=datetime.now(UTC),
+        )
+
+        result = await repo.increment_failed("ing-tf")
+
+        assert isinstance(result, RunClosed)  # guarded — the closed run is not mutated
+        fetched = await repo.get(IngestRunId("ing-tf"))
+        assert fetched is not None
+        assert fetched.batches_failed == 0
+        assert fetched.status is IngestStatus.FAILED
+
+    async def test_increment_completed_is_noop_on_terminal_run(self, pg_session: AsyncSession):
+        repo = PostgresIngestRunRepository(pg_session)
+        await repo.save(_make_run("ing-tc"))
+        await repo.abort(
+            "ing-tc", reason="rbac", kind=FailureKind.RBAC, completed_at=datetime.now(UTC)
+        )
+
+        result = await repo.increment_completed("ing-tc", published_count=5)
+
+        assert isinstance(result, RunClosed)
+        fetched = await repo.get(IngestRunId("ing-tc"))
+        assert fetched is not None
+        assert fetched.batches_completed == 0
+        assert fetched.published_count == 0
+
+    async def test_increment_still_works_on_a_running_run(self, pg_session: AsyncSession):
+        """Sanity: the guard doesn't break the normal (non-terminal) path."""
+        repo = PostgresIngestRunRepository(pg_session)
+        await repo.save(_make_run("ing-live"))
+
+        result = await repo.increment_failed("ing-live")
+
+        assert isinstance(result, Applied)
+        assert result.run.batches_failed == 1
+
+    async def test_increment_on_missing_run_raises(self, pg_session: AsyncSession):
+        """A genuinely-missing run is exceptional — not a RunClosed no-op."""
+        repo = PostgresIngestRunRepository(pg_session)
+        with pytest.raises(NotFoundError):
+            await repo.increment_failed("does-not-exist")

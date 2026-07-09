@@ -4,7 +4,7 @@ from abc import abstractmethod
 from datetime import datetime
 from typing import Protocol
 
-from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId
+from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId, RunUpdate
 from osa.domain.shared.failure import FailureKind
 from osa.domain.shared.port import Port
 
@@ -35,27 +35,29 @@ class IngestRunRepository(Port, Protocol):
     @abstractmethod
     async def increment_batches_ingested(
         self, id: IngestRunId, *, set_ingestion_finished: bool = False
-    ) -> IngestRun:
-        """Atomically increment batches_ingested and optionally set ingestion_finished.
+    ) -> RunUpdate:
+        """Atomically increment batches_ingested while the run is non-terminal.
 
-        Returns the updated IngestRun with DB-authoritative counter values.
+        Returns ``Applied`` (with the updated run), or ``RunClosed`` when the run
+        is already terminal; raises ``NotFoundError`` if the run is missing.
         """
         ...
 
     @abstractmethod
-    async def increment_failed(self, id: IngestRunId) -> IngestRun:
-        """Atomically increment batches_failed.
+    async def increment_failed(self, id: IngestRunId) -> RunUpdate:
+        """Atomically increment batches_failed while the run is non-terminal.
 
-        Returns the updated IngestRun for completion condition checking.
+        ``Applied`` (with the run) for completion checking, ``RunClosed`` when
+        already terminal; raises ``NotFoundError`` if missing.
         """
         ...
 
     @abstractmethod
-    async def increment_completed(self, id: IngestRunId, published_count: int) -> IngestRun:
-        """Atomically increment batches_completed and published_count.
+    async def increment_completed(self, id: IngestRunId, published_count: int) -> RunUpdate:
+        """Atomically increment batches_completed and published_count, non-terminal only.
 
-        Returns the updated IngestRun with DB-authoritative counter values
-        for completion condition checking.
+        ``Applied`` (with the run) for completion checking, ``RunClosed`` when
+        already terminal; raises ``NotFoundError`` if missing.
         """
         ...
 
@@ -67,13 +69,13 @@ class IngestRunRepository(Port, Protocol):
         reason: str,
         kind: FailureKind,
         completed_at: datetime,
-    ) -> IngestRun | None:
+    ) -> RunUpdate:
         """Atomically fail a run with its explanation, if it is not already terminal.
 
         Sets status=FAILED, failure_reason/failure_kind, ingestion_finished and
         completed_at in one guarded UPDATE so concurrent batch workers can race
-        to abort safely. Returns the updated run, or None if the run was
-        already COMPLETED/FAILED (idempotent no-op).
+        to abort safely. Returns ``Applied`` (with the updated run), or
+        ``RunClosed`` if the run was already COMPLETED/FAILED (idempotent no-op).
         """
         ...
 

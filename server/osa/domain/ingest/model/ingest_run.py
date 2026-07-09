@@ -1,5 +1,6 @@
 """IngestRun aggregate — lean summary tracking a bulk ingestion execution."""
 
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from typing import NewType
@@ -100,3 +101,25 @@ class IngestRun(Aggregate):
             self.completed_at = completed_at
             return True
         return False
+
+
+# ── Guarded-mutation outcome ─────────────────────────────────────────────────
+# Counter/state mutations only apply while a run is non-terminal (#152). The
+# repo reports which happened via this sum type instead of an ambiguous None: a
+# genuinely-missing run raises NotFoundError (exceptional); an already-terminal
+# run is an expected concurrent no-op (RunClosed).
+
+
+@dataclass(frozen=True)
+class Applied:
+    """The guarded mutation landed; carries the DB-authoritative run."""
+
+    run: IngestRun
+
+
+@dataclass(frozen=True)
+class RunClosed:
+    """The run was already terminal — the mutation was a deliberate no-op."""
+
+
+RunUpdate = Applied | RunClosed

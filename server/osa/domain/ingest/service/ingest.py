@@ -5,7 +5,13 @@ from uuid import uuid4
 
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.ingest.event.events import IngestCompleted, IngestRunStarted, NextBatchRequested
-from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId, IngestStatus
+from osa.domain.ingest.model.ingest_run import (
+    Applied,
+    IngestRun,
+    IngestRunId,
+    IngestStatus,
+    RunClosed,
+)
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.shared.error import ConflictError, NotFoundError
 from osa.domain.shared.event import EventId
@@ -110,10 +116,20 @@ class IngestService(Service):
         Increments batches_completed and published_count atomically,
         then checks the completion condition.
         """
-        ingest_run = await self.ingest_repo.increment_completed(
+        match await self.ingest_repo.increment_completed(
             ingest_run_id, published_count=published_count
-        )
-        await self._check_completion(ingest_run)
+        ):
+            case RunClosed():
+                # A late/stale batch reached a closed run — expected under
+                # concurrency, but logged so it's never silent when we're
+                # chasing "why is a counter off / a record missing".
+                log.warn(
+                    "complete_batch no-op — run already terminal",
+                    ingest_run_id=ingest_run_id,
+                    published_count=published_count,
+                )
+            case Applied(run):
+                await self._check_completion(run)
 
     async def fail_batch(
         self, ingest_run_id: IngestRunId, *, reason: str, kind: FailureKind | None = None
@@ -126,9 +142,16 @@ class IngestService(Service):
         a completing run's aggregate save (in ``_check_completion``) would
         otherwise clobber the reason with the aggregate's stale null.
         """
-        ingest_run = await self.ingest_repo.increment_failed(ingest_run_id)
-        await self._check_completion(ingest_run)
-        await self.ingest_repo.record_failure(ingest_run_id, reason=reason, kind=kind)
+        match await self.ingest_repo.increment_failed(ingest_run_id):
+            case RunClosed():
+                log.warn(
+                    "fail_batch no-op — run already terminal",
+                    ingest_run_id=ingest_run_id,
+                    reason=reason,
+                )
+            case Applied(run):
+                await self._check_completion(run)
+                await self.ingest_repo.record_failure(ingest_run_id, reason=reason, kind=kind)
 
     async def fail_ingestion(
         self, ingest_run_id: IngestRunId, *, reason: str, kind: FailureKind | None
@@ -142,13 +165,29 @@ class IngestService(Service):
         without log archaeology. ``record_failure`` runs LAST for the same
         reason as ``fail_batch`` — so a completing run's save can't clobber it.
         """
-        await self.ingest_repo.increment_batches_ingested(
+        match await self.ingest_repo.increment_batches_ingested(
             ingest_run_id,
             set_ingestion_finished=True,
-        )
-        ingest_run = await self.ingest_repo.increment_failed(ingest_run_id)
-        await self._check_completion(ingest_run)
-        await self.ingest_repo.record_failure(ingest_run_id, reason=reason, kind=kind)
+        ):
+            case RunClosed():
+                log.warn(
+                    "fail_ingestion no-op — run already terminal",
+                    ingest_run_id=ingest_run_id,
+                    reason=reason,
+                )
+                return
+            case Applied():
+                pass
+        match await self.ingest_repo.increment_failed(ingest_run_id):
+            case RunClosed():
+                log.warn(
+                    "fail_ingestion no-op — run terminalized concurrently",
+                    ingest_run_id=ingest_run_id,
+                    reason=reason,
+                )
+            case Applied(run):
+                await self._check_completion(run)
+                await self.ingest_repo.record_failure(ingest_run_id, reason=reason, kind=kind)
 
     async def abort_run(
         self, ingest_run_id: IngestRunId, *, reason: str, kind: FailureKind
@@ -161,25 +200,25 @@ class IngestService(Service):
         that is already terminal is left untouched (concurrent batch workers
         may race to abort).
         """
-        ingest_run = await self.ingest_repo.abort(
+        match await self.ingest_repo.abort(
             ingest_run_id,
             reason=reason,
             kind=kind,
             completed_at=datetime.now(UTC),
-        )
-        if ingest_run is None:
-            log.info(
-                "abort no-op — run already terminal",
-                ingest_run_id=ingest_run_id,
-            )
-            return
-        log.error(
-            "[{short_id}] run ABORTED ({kind}): {reason}",
-            short_id=str(ingest_run_id)[:8],
-            kind=kind.value,
-            reason=reason,
-            ingest_run_id=ingest_run_id,
-        )
+        ):
+            case RunClosed():
+                log.warn(
+                    "abort no-op — run already terminal",
+                    ingest_run_id=ingest_run_id,
+                )
+            case Applied():
+                log.error(
+                    "[{short_id}] run ABORTED ({kind}): {reason}",
+                    short_id=str(ingest_run_id)[:8],
+                    kind=kind.value,
+                    reason=reason,
+                    ingest_run_id=ingest_run_id,
+                )
 
     async def _check_completion(self, ingest_run: IngestRun) -> None:
         """Transition to COMPLETED and emit IngestCompleted if all batches are accounted for."""

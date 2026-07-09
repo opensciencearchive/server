@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from osa.domain.ingest.model.ingest_run import IngestStatus
+from osa.domain.ingest.model.ingest_run import Applied, IngestStatus, RunClosed
 from osa.domain.ingest.service.ingest import IngestService
 from osa.domain.shared.error import ConflictError, NotFoundError
 from osa.domain.shared.model.source import IngesterDefinition
@@ -129,13 +129,15 @@ class TestAbortRun:
         from osa.domain.shared.failure import FailureKind
 
         service = _make_service()
-        service.ingest_repo.abort.return_value = IngestRun(
-            id=IngestRunId("run-1"),
-            convention_id="test-conv",
-            status=IngestStatus.FAILED,
-            failure_reason="Image pull failed: 401",
-            failure_kind=FailureKind.IMAGE_PULL,
-            started_at=datetime.now(UTC),
+        service.ingest_repo.abort.return_value = Applied(
+            run=IngestRun(
+                id=IngestRunId("run-1"),
+                convention_id="test-conv",
+                status=IngestStatus.FAILED,
+                failure_reason="Image pull failed: 401",
+                failure_kind=FailureKind.IMAGE_PULL,
+                started_at=datetime.now(UTC),
+            )
         )
 
         await service.abort_run(
@@ -154,8 +156,8 @@ class TestAbortRun:
         from osa.domain.shared.failure import FailureKind
 
         service = _make_service()
-        # Repo returns None when the run was already terminal — no-op, no error.
-        service.ingest_repo.abort.return_value = None
+        # Repo returns RunClosed when the run was already terminal — no-op, no error.
+        service.ingest_repo.abort.return_value = RunClosed()
 
         await service.abort_run(IngestRunId("run-1"), reason="rbac denied", kind=FailureKind.RBAC)
 
@@ -171,7 +173,8 @@ class TestFailIngestionRecordsReason:
         service = _make_service()
         run = MagicMock()
         run.check_completion.return_value = False
-        service.ingest_repo.increment_failed.return_value = run
+        service.ingest_repo.increment_batches_ingested.return_value = Applied(run=run)
+        service.ingest_repo.increment_failed.return_value = Applied(run=run)
 
         await service.fail_ingestion(
             IngestRunId("run-1"), reason="Source exited with code 3", kind=FailureKind.UPSTREAM
@@ -198,7 +201,7 @@ class TestFailBatchRecordsReason:
         service = _make_service()
         run = MagicMock()
         run.check_completion.return_value = False
-        service.ingest_repo.increment_failed.return_value = run
+        service.ingest_repo.increment_failed.return_value = Applied(run=run)
 
         await service.fail_batch(
             IngestRunId("run-1"), reason="batch 3: hook retries exhausted", kind=None
@@ -219,7 +222,7 @@ class TestFailBatchRecordsReason:
         service = _make_service()
         run = MagicMock(id="run-1", published_count=0)
         run.check_completion.return_value = True  # run completes in this call
-        service.ingest_repo.increment_failed.return_value = run
+        service.ingest_repo.increment_failed.return_value = Applied(run=run)
 
         await service.fail_batch(IngestRunId("run-1"), reason="boom", kind=None)
 
@@ -234,7 +237,8 @@ class TestFailBatchRecordsReason:
         service = _make_service()
         run = MagicMock(id="run-1", published_count=0)
         run.check_completion.return_value = True
-        service.ingest_repo.increment_failed.return_value = run
+        service.ingest_repo.increment_batches_ingested.return_value = Applied(run=run)
+        service.ingest_repo.increment_failed.return_value = Applied(run=run)
 
         await service.fail_ingestion(
             IngestRunId("run-1"), reason="source gave up", kind=FailureKind.UNKNOWN
@@ -242,3 +246,47 @@ class TestFailBatchRecordsReason:
 
         names = [c[0] for c in service.ingest_repo.mock_calls if c[0]]
         assert names.index("save") < names.index("record_failure")
+
+
+class TestTerminalRunAccountingIsFrozen:
+    """A terminal run is immutable: late/stale batch accounting is a no-op (#152).
+
+    After abort_run marks a run FAILED, in-flight batch deliveries can still
+    reach on_exhausted; the guarded repo increments report the run as terminal
+    (RunClosed) and the service must not mutate it further.
+    """
+
+    @pytest.mark.asyncio
+    async def test_fail_batch_is_noop_when_run_is_terminal(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+
+        service = _make_service()
+        service.ingest_repo.increment_failed.return_value = RunClosed()  # guard: run terminal
+
+        await service.fail_batch(IngestRunId("run-1"), reason="late batch", kind=None)
+
+        service.ingest_repo.record_failure.assert_not_awaited()
+        service.outbox.append.assert_not_awaited()  # no IngestCompleted re-fired
+
+    @pytest.mark.asyncio
+    async def test_complete_batch_is_noop_when_run_is_terminal(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+
+        service = _make_service()
+        service.ingest_repo.increment_completed.return_value = RunClosed()
+
+        await service.complete_batch(IngestRunId("run-1"), published_count=5)
+
+        service.outbox.append.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_fail_ingestion_is_noop_when_run_is_terminal(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+
+        service = _make_service()
+        service.ingest_repo.increment_batches_ingested.return_value = RunClosed()
+
+        await service.fail_ingestion(IngestRunId("run-1"), reason="late pull", kind=None)
+
+        service.ingest_repo.increment_failed.assert_not_awaited()
+        service.ingest_repo.record_failure.assert_not_awaited()
