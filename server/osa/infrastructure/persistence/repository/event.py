@@ -5,17 +5,20 @@ from datetime import UTC, datetime, timedelta
 from typing import TypeVar
 from uuid import uuid4
 
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from sqlalchemy import CursorResult, func, insert, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.shared.error import InfrastructureError
-from osa.domain.shared.event import ClaimResult, Delivery, Event, EventId
+from osa.domain.shared.event import ClaimResult, Delivery, DeliveryStatus, Event, EventId
 from osa.domain.shared.port.event_repository import EventRepository
 from osa.infrastructure.persistence.tables import deliveries_table, events_table
 
 logger = logging.getLogger(__name__)
 
 E = TypeVar("E", bound=Event)
+
+_PROPAGATOR = TraceContextTextMapPropagator()
 
 
 class SQLAlchemyEventRepository(EventRepository):
@@ -27,6 +30,20 @@ class SQLAlchemyEventRepository(EventRepository):
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    @staticmethod
+    def _capture_traceparent() -> str | None:
+        """Serialize the current span context as a W3C ``traceparent``.
+
+        Returns the traceparent of the operation that is appending the
+        event, or None for non-instrumented contexts (CLI/cron, or any
+        code path without an active recording+sampled span). The value is
+        opaque and stored verbatim on the events row so worker dispatch
+        spans can later link back to the originating operation.
+        """
+        carrier: dict[str, str] = {}
+        _PROPAGATOR.inject(carrier)  # implicit current context
+        return carrier.get("traceparent")  # None when no active recording span
 
     async def save_with_deliveries(
         self,
@@ -43,6 +60,7 @@ class SQLAlchemyEventRepository(EventRepository):
             event_type=type(event).__name__,
             payload=event.model_dump(mode="json"),
             created_at=now,
+            trace_context=self._capture_traceparent(),
         )
         await self._session.execute(event_stmt)
 
@@ -52,7 +70,7 @@ class SQLAlchemyEventRepository(EventRepository):
                 id=str(uuid4()),
                 event_id=str(event.id),
                 consumer_group=group,
-                status="pending",
+                status=DeliveryStatus.PENDING.value,
                 retry_count=0,
                 deliver_after=deliver_after,
                 updated_at=now,
@@ -199,11 +217,12 @@ class SQLAlchemyEventRepository(EventRepository):
                 deliveries_table.c.retry_count,
                 events_table.c.event_type,
                 events_table.c.payload,
+                events_table.c.trace_context,
             )
             .join(events_table, deliveries_table.c.event_id == events_table.c.id)
             .where(
                 deliveries_table.c.consumer_group == consumer_group,
-                deliveries_table.c.status == "pending",
+                deliveries_table.c.status == DeliveryStatus.PENDING.value,
                 events_table.c.event_type.in_(event_types),
                 deliver_after_eligible,
             )
@@ -223,17 +242,24 @@ class SQLAlchemyEventRepository(EventRepository):
         update_stmt = (
             update(deliveries_table)
             .where(deliveries_table.c.id.in_(delivery_ids))
-            .values(status="claimed", claimed_at=now, updated_at=now)
+            .values(status=DeliveryStatus.CLAIMED.value, claimed_at=now, updated_at=now)
         )
         await self._session.execute(update_stmt)
 
         # Deserialize events and wrap in Delivery envelopes
         deliveries: list[Delivery] = []
         for row in rows:
-            delivery_id, retry_count, event_type, payload = row
+            delivery_id, retry_count, event_type, payload, trace_context = row
             event = self._deserialize(event_type, payload)
             if event is not None:
-                deliveries.append(Delivery(id=delivery_id, event=event, retry_count=retry_count))
+                deliveries.append(
+                    Delivery(
+                        id=delivery_id,
+                        event=event,
+                        retry_count=retry_count,
+                        trace_context=trace_context,
+                    )
+                )
 
         return ClaimResult(deliveries=deliveries, claimed_at=now)
 
@@ -249,7 +275,7 @@ class SQLAlchemyEventRepository(EventRepository):
             "status": status,
             "updated_at": now,
         }
-        if status == "delivered":
+        if status == DeliveryStatus.DELIVERED.value:
             values["delivered_at"] = now
         if error is not None:
             values["delivery_error"] = error
@@ -264,11 +290,11 @@ class SQLAlchemyEventRepository(EventRepository):
         stmt = (
             update(deliveries_table)
             .where(
-                deliveries_table.c.status == "claimed",
+                deliveries_table.c.status == DeliveryStatus.CLAIMED.value,
                 deliveries_table.c.claimed_at < cutoff,
             )
             .values(
-                status="pending",
+                status=DeliveryStatus.PENDING.value,
                 claimed_at=None,
                 updated_at=datetime.now(UTC),
             )
@@ -317,7 +343,7 @@ class SQLAlchemyEventRepository(EventRepository):
                 update(deliveries_table)
                 .where(deliveries_table.c.id == delivery_id)
                 .values(
-                    status="failed",
+                    status=DeliveryStatus.FAILED.value,
                     delivery_error=error,
                     retry_count=new_retry_count,
                     deliver_after=None,
@@ -331,7 +357,7 @@ class SQLAlchemyEventRepository(EventRepository):
                 update(deliveries_table)
                 .where(deliveries_table.c.id == delivery_id)
                 .values(
-                    status="pending",
+                    status=DeliveryStatus.PENDING.value,
                     delivery_error=error,
                     retry_count=new_retry_count,
                     deliver_after=deliver_after,

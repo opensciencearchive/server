@@ -45,6 +45,7 @@ def upgrade() -> None:
         sa.Column("event_type", sa.String(length=128), nullable=False),
         sa.Column("payload", sa.JSON(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("trace_context", sa.String(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
