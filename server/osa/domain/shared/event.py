@@ -1,6 +1,7 @@
 """Domain events, event handlers, scheduled tasks, and worker infrastructure."""
 
 from abc import ABC, ABCMeta, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum, StrEnum
@@ -154,6 +155,27 @@ class Delivery:
     event: "Event"
     retry_count: int = 0
     trace_context: str | None = None
+
+
+@dataclass(frozen=True)
+class DeliveryStats:
+    """Snapshot of outbox delivery health, used for telemetry gauges.
+
+    Attributes:
+        counts: Row count per ``(consumer_group, status)`` pair across the
+            whole deliveries table — the raw material for per-group,
+            per-status gauges.
+        oldest_pending_created_at: The ``events.created_at`` of the oldest
+            *eligible* pending delivery, or None when no work is currently
+            claimable. "Eligible pending" means
+            ``status = 'pending' AND (deliver_after IS NULL OR deliver_after <= now)``
+            — i.e. work a worker could claim right now. Deliveries scheduled
+            for later (a future ``deliver_after``) are excluded so they never
+            inflate outbox-lag measurements. Timezone-aware (UTC).
+    """
+
+    counts: Mapping[tuple[str, DeliveryStatus], int]
+    oldest_pending_created_at: datetime | None
 
 
 @dataclass(frozen=True)

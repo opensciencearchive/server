@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Protocol, TypeVar
 
-from osa.domain.shared.event import ClaimResult, Event, EventId
+from osa.domain.shared.event import ClaimResult, DeliveryStats, Event, EventId
 
 E = TypeVar("E", bound=Event)
 
@@ -118,6 +118,17 @@ class EventRepository(Protocol):
 
         Returns:
             Number of deliveries reset.
+        """
+        ...
+
+    async def delivery_stats(self) -> DeliveryStats:
+        """Aggregate delivery counts by (consumer_group, status) and the oldest eligible pending event time.
+
+        Returns:
+            A DeliveryStats snapshot: per-``(consumer_group, status)`` row
+            counts, and the ``events.created_at`` of the oldest *eligible*
+            pending delivery (``deliver_after`` NULL or already elapsed), or
+            None when nothing is currently claimable.
         """
         ...
 

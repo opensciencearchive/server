@@ -10,7 +10,14 @@ from sqlalchemy import CursorResult, func, insert, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.shared.error import InfrastructureError
-from osa.domain.shared.event import ClaimResult, Delivery, DeliveryStatus, Event, EventId
+from osa.domain.shared.event import (
+    ClaimResult,
+    Delivery,
+    DeliveryStats,
+    DeliveryStatus,
+    Event,
+    EventId,
+)
 from osa.domain.shared.port.event_repository import EventRepository
 from osa.infrastructure.persistence.tables import deliveries_table, events_table
 
@@ -307,6 +314,57 @@ class SQLAlchemyEventRepository(EventRepository):
         if count > 0:
             logger.info(f"Reset {count} stale deliveries (older than {timeout_seconds}s)")
         return count
+
+    async def delivery_stats(self) -> DeliveryStats:
+        """Aggregate delivery counts and the oldest eligible pending event time.
+
+        Two index-friendly queries:
+        1. ``GROUP BY consumer_group, status`` over ``deliveries`` for the
+           per-pair counts (covered by ``idx_deliveries_claim``).
+        2. ``min(events.created_at)`` over pending deliveries whose
+           ``deliver_after`` is NULL or already elapsed — the oldest work a
+           worker could claim right now.
+        """
+        counts: dict[tuple[str, DeliveryStatus], int] = {}
+        count_stmt = select(
+            deliveries_table.c.consumer_group,
+            deliveries_table.c.status,
+            func.count(),
+        ).group_by(deliveries_table.c.consumer_group, deliveries_table.c.status)
+        result = await self._session.execute(count_stmt)
+        for consumer_group, status, row_count in result.all():
+            try:
+                delivery_status = DeliveryStatus(status)
+            except ValueError:
+                logger.warning(
+                    f"Unknown delivery status '{status}' for group '{consumer_group}' - skipping"
+                )
+                continue
+            counts[(consumer_group, delivery_status)] = row_count
+
+        eligible_pending = or_(
+            deliveries_table.c.deliver_after.is_(None),
+            deliveries_table.c.deliver_after <= func.now(),
+        )
+        oldest_stmt = (
+            select(func.min(events_table.c.created_at))
+            .select_from(
+                deliveries_table.join(
+                    events_table, deliveries_table.c.event_id == events_table.c.id
+                )
+            )
+            .where(
+                deliveries_table.c.status == DeliveryStatus.PENDING.value,
+                eligible_pending,
+            )
+        )
+        oldest = (await self._session.execute(oldest_stmt)).scalar()
+        # SQLite (unit tests) returns naive datetimes from timezone-aware
+        # columns; normalize so the return type is consistently UTC-aware.
+        if oldest is not None and oldest.tzinfo is None:
+            oldest = oldest.replace(tzinfo=UTC)
+
+        return DeliveryStats(counts=counts, oldest_pending_created_at=oldest)
 
     async def mark_failed_with_retry(
         self,
