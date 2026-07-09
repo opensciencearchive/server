@@ -1,6 +1,7 @@
 from dishka import provide
 
 from osa.config import Config
+from osa.domain.shared.failure import FailurePolicy
 from osa.domain.shared.model.srn import Domain
 from osa.domain.validation.command.create_release import CreateReleaseHandler
 from osa.domain.validation.command.set_live import SetLiveHandler
@@ -39,3 +40,8 @@ class ValidationProvider(Provider):
     @provide(scope=Scope.UOW)
     def get_node_domain(self, config: Config) -> Domain:
         return Domain(config.domain)
+
+    @provide(scope=Scope.APP)
+    def get_failure_policy(self) -> FailurePolicy:
+        """The one place runtime-failure disposition rules live (#152)."""
+        return FailurePolicy()

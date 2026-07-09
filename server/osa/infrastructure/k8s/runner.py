@@ -9,12 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from osa.config import K8sConfig
-from osa.domain.shared.error import (
-    InfrastructureError,
-    OOMError,
-    PermanentError,
-    TransientError,
-)
+from osa.domain.shared.failure import FailureKind, RuntimeFailure
 from osa.domain.shared.model.hook import HookIdentity
 from osa.domain.validation.model.hook_release import HookRelease
 from osa.domain.validation.model.hook_result import HookResult, HookStatus
@@ -170,7 +165,7 @@ class K8sHookRunner(HookRunner):
 
             return await self._parse_hook_result(hook, work_dir, start_time)
 
-        except InfrastructureError as e:
+        except RuntimeFailure as e:
             # Capture logs before cleanup destroys the pod
             if job_name_to_watch:
                 logs = await self._capture_pod_logs(job_name_to_watch, namespace)
@@ -409,7 +404,10 @@ class K8sHookRunner(HookRunner):
                 # Check for eviction
                 if phase == "Failed":
                     reason = getattr(pod.status, "reason", None) or "Unknown"
-                    raise TransientError(f"Pod evicted or failed during scheduling: {reason}")
+                    raise RuntimeFailure(
+                        FailureKind.RUNTIME,
+                        f"Pod evicted or failed during scheduling: {reason}",
+                    )
 
                 # Check for image pull errors
                 if phase == "Pending" and pod.status.container_statuses:
@@ -417,14 +415,20 @@ class K8sHookRunner(HookRunner):
                         waiting = getattr(cs.state, "waiting", None)
                         if waiting and waiting.reason in ("ImagePullBackOff", "ErrImagePull"):
                             message = getattr(waiting, "message", "")
-                            raise PermanentError(f"Image pull failed: {waiting.reason}: {message}")
+                            raise RuntimeFailure(
+                                FailureKind.IMAGE_PULL,
+                                f"Image pull failed: {waiting.reason}: {message}",
+                            )
 
                 if phase in ("Running", "Succeeded", "Failed"):
                     return  # Pod scheduled
 
             await asyncio.sleep(poll_interval)
 
-        raise TransientError(f"Pod scheduling timeout after {timeout_seconds}s for Job {job_name}")
+        raise RuntimeFailure(
+            FailureKind.TIMEOUT,
+            f"Pod scheduling timeout after {timeout_seconds}s for Job {job_name}",
+        )
 
     async def _wait_for_completion(
         self,
@@ -467,7 +471,9 @@ class K8sHookRunner(HookRunner):
         except Exception:
             pass
 
-        raise TransientError(f"Watch timeout waiting for Job {job_name} completion")
+        raise RuntimeFailure(
+            FailureKind.TIMEOUT, f"Watch timeout waiting for Job {job_name} completion"
+        )
 
     async def _capture_pod_logs(self, job_name: str, namespace: str) -> str:
         """Capture tail logs from a Job's pod. Returns empty if unavailable."""
@@ -489,10 +495,10 @@ class K8sHookRunner(HookRunner):
         job_name: str,
         namespace: str,
         failure_info: str,
-    ) -> InfrastructureError:
-        """Inspect pod status, capture logs, and return the appropriate exception."""
+    ) -> RuntimeFailure:
+        """Inspect pod status and return the observed failure facts."""
         if "DeadlineExceeded" in failure_info:
-            return TransientError("Hook timed out (deadline exceeded)")
+            return RuntimeFailure(FailureKind.TIMEOUT, "Hook timed out (deadline exceeded)")
 
         try:
             label_selector = f"job-name={job_name}"
@@ -505,14 +511,18 @@ class K8sHookRunner(HookRunner):
                         terminated = getattr(cs.state, "terminated", None)
                         if terminated:
                             if getattr(terminated, "reason", None) == "OOMKilled":
-                                return OOMError("Hook killed by OOM")
+                                return RuntimeFailure(FailureKind.OOM, "Hook killed by OOM")
                             exit_code = getattr(terminated, "exit_code", -1)
                             if exit_code != 0:
-                                return PermanentError(f"Hook exited with code {exit_code}")
+                                return RuntimeFailure(
+                                    FailureKind.HOOK_EXIT,
+                                    f"Hook exited with code {exit_code}",
+                                    exit_code=exit_code,
+                                )
         except Exception:
             pass
 
-        return PermanentError(f"Hook failed: {failure_info}")
+        return RuntimeFailure(FailureKind.UNKNOWN, f"Hook failed: {failure_info}")
 
     async def _cleanup_job(
         self,

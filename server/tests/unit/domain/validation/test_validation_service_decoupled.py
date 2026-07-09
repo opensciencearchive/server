@@ -19,6 +19,7 @@ from osa.domain.shared.model.hook import (
     OciConfig,
     TableFeatureSpec,
 )
+from osa.domain.shared.failure import FailurePolicy
 from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN, Domain
 from osa.domain.validation.model import RunStatus
 from osa.domain.validation.model.hook import Hook
@@ -111,6 +112,7 @@ class TestDecoupledValidationService:
             hook_runner=hook_runner,
             hook_storage=hook_storage,
             hook_registry=_make_registry("pocketeer"),
+            failure_policy=FailurePolicy(),
             node_domain=Domain("localhost"),
         )
 

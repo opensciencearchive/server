@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 
-from osa.domain.shared.error import OOMError, PermanentError, TransientError
+from osa.domain.shared.failure import FailureKind, RuntimeFailure
 from osa.domain.shared.model.hook import (
     ColumnDef,
     HookIdentity,
@@ -251,9 +251,11 @@ class TestContainerLifecycle:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        with pytest.raises(PermanentError, match="[Ee]xit") as exc_info:
+        with pytest.raises(RuntimeFailure, match="[Ee]xit") as exc_info:
             await runner.run(hook, release, inputs, output_dir)
 
+        assert exc_info.value.kind is FailureKind.HOOK_EXIT
+        assert exc_info.value.exit_code == 1
         # Logs ride on the typed container_logs field, not embedded in the
         # message — the message must not leak tenant output to operator logs.
         assert exc_info.value.container_logs == "Error: something went wrong"
@@ -279,9 +281,10 @@ class TestContainerLifecycle:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        with pytest.raises(OOMError, match="[Oo][Oo][Mm]") as exc_info:
+        with pytest.raises(RuntimeFailure, match="[Oo][Oo][Mm]") as exc_info:
             await runner.run(hook, release, inputs, output_dir)
 
+        assert exc_info.value.kind is FailureKind.OOM
         # OOM logs are captured to the typed field for the tenant-scoped artifact.
         assert exc_info.value.container_logs == "killed: out of memory"
 
@@ -311,8 +314,9 @@ class TestContainerLifecycle:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        with pytest.raises(TransientError, match="[Tt]imed out"):
+        with pytest.raises(RuntimeFailure, match="[Tt]imed out") as exc_info:
             await runner.run(hook, release, inputs, output_dir)
+        assert exc_info.value.kind is FailureKind.TIMEOUT
 
     @pytest.mark.asyncio
     async def test_rejection_via_progress(self, tmp_path: Path):
@@ -503,5 +507,6 @@ class TestContainerConfig:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
 
-        with pytest.raises(TransientError, match="Docker error"):
+        with pytest.raises(RuntimeFailure, match="Docker error") as exc_info:
             await runner.run(hook, release, inputs, output_dir)
+        assert exc_info.value.kind is FailureKind.RUNTIME

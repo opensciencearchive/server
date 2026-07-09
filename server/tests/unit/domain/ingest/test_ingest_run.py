@@ -6,6 +6,7 @@ import pytest
 
 from osa.domain.ingest.model.ingest_run import IngestRun, IngestStatus
 from osa.domain.shared.error import InvalidStateError
+from osa.domain.shared.failure import FailureKind
 
 
 def _make_run(**overrides) -> IngestRun:
@@ -32,14 +33,24 @@ class TestStatusTransitions:
 
     def test_running_to_failed(self) -> None:
         run = _make_run(status=IngestStatus.RUNNING)
-        run.mark_failed(datetime.now(UTC))
+        run.mark_failed(datetime.now(UTC), reason="image pull failed", kind=FailureKind.IMAGE_PULL)
         assert run.status == IngestStatus.FAILED
         assert run.completed_at is not None
+        # The queryable explanation (#152): a failed run says why.
+        assert run.failure_reason == "image pull failed"
+        assert run.failure_kind is FailureKind.IMAGE_PULL
+        # No more batches will be scheduled for a failed run.
+        assert run.ingestion_finished is True
 
     def test_pending_to_failed(self) -> None:
         run = _make_run()
-        run.mark_failed(datetime.now(UTC))
+        run.mark_failed(datetime.now(UTC), reason="rbac denied", kind=FailureKind.RBAC)
         assert run.status == IngestStatus.FAILED
+
+    def test_failure_fields_default_to_none(self) -> None:
+        run = _make_run()
+        assert run.failure_reason is None
+        assert run.failure_kind is None
 
     def test_completed_to_running_rejected(self) -> None:
         run = _make_run(status=IngestStatus.COMPLETED)

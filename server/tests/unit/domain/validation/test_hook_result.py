@@ -115,3 +115,54 @@ def test_hook_result_serialization_roundtrip():
     data = result.model_dump()
     restored = HookResult.model_validate(data)
     assert restored == result
+
+
+def _errored_execution(**overrides):
+    """A failed HookExecution built directly (no runner scaffolding)."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from osa.domain.shared.failure import FailureKind
+    from osa.domain.validation.model.hook_release import HookReleaseId
+    from osa.domain.validation.model.hook_result import HookExecution
+
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    fields = {
+        "hook_name": "detect_pockets",
+        "release_id": HookReleaseId(uuid4()),
+        "status": None,
+        "started_at": t0,
+        "finished_at": t0,
+        "duration_s": 2.0,
+        "oom_retries": 0,
+        "failure": FailureKind.HOOK_EXIT,
+        "error_message": "Hook exited with code 2",
+    }
+    fields.update(overrides)
+    return HookExecution(**fields)
+
+
+def test_hook_execution_as_failure_rehydrates_facts():
+    """as_failure() is the inverse of failed(): kind, detail, and bump count survive."""
+    from osa.domain.shared.failure import FailureKind
+
+    execution = _errored_execution(
+        failure=FailureKind.OOM, error_message="OOM after 3 retries", oom_retries=3
+    )
+
+    failure = execution.as_failure()
+
+    assert failure.kind is FailureKind.OOM
+    assert failure.detail == "OOM after 3 retries"
+    assert failure.oom_retries == 3
+
+
+def test_hook_execution_as_failure_rejects_a_non_errored_execution():
+    from osa.domain.validation.model.hook_result import HookStatus
+
+    passed = _errored_execution(status=HookStatus.PASSED, failure=None, error_message=None)
+
+    import pytest
+
+    with pytest.raises(ValueError, match="did not error"):
+        passed.as_failure()

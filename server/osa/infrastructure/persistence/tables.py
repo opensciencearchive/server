@@ -365,6 +365,10 @@ ingest_runs_table = Table(
     Column("batches_failed", Integer, nullable=False, server_default=text("0")),
     Column("started_at", DateTime(timezone=True), nullable=False),
     Column("completed_at", DateTime(timezone=True), nullable=True),
+    # Why the run failed / ingestion stopped early (#152): human reason +
+    # machine FailureKind, exposed via GET /ingestions/{id}.
+    Column("failure_reason", Text, nullable=True),
+    Column("failure_kind", String(32), nullable=True),
 )
 
 Index("idx_ingest_runs_convention", ingest_runs_table.c.convention_id)

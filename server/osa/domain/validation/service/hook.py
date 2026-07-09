@@ -1,7 +1,8 @@
 """HookService — executes hooks with OOM retry and checkpointing.
 
 Handles both single-record (deposition) and multi-record (ingestion) batches.
-On OOM, retries with doubled memory up to MAX_OOM_RETRIES times.
+On OOM, the injected FailurePolicy decides whether to retry with doubled
+memory or give up (#152) — the budget lives in the policy, not here.
 Checkpoints partial progress so crash recovery skips completed records.
 
 Sorting assumption: hooks process records in input order and write output
@@ -14,7 +15,13 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from osa.domain.shared.error import OOMError, PermanentError, TransientError
+from osa.domain.shared.failure import (
+    FailureKind,
+    FailurePolicy,
+    PriorAttempts,
+    RetryWithMoreMemory,
+    RuntimeFailure,
+)
 from osa.domain.shared.model.hook import HookIdentity, HookName
 from osa.domain.shared.service import Service
 from osa.domain.validation.model.hook_release import HookRelease
@@ -31,14 +38,13 @@ from osa.infrastructure.logging import get_logger
 
 log = get_logger(__name__)
 
-MAX_OOM_RETRIES = 3
-
 
 class HookService(Service):
     """Executes a hook with OOM retry, checkpointing, and finalization."""
 
     hook_runner: HookRunner
     hook_storage: HookStoragePort
+    failure_policy: FailurePolicy
 
     async def run_hook(
         self,
@@ -50,8 +56,9 @@ class HookService(Service):
         """Run a single hook against a batch of records, retrying on OOM.
 
         Returns the final HookResult. On success or non-OOM failure, returns
-        after the first attempt. On OOM, retries with doubled memory up to
-        MAX_OOM_RETRIES times, checkpointing partial progress between attempts.
+        after the first attempt. On OOM, consults the FailurePolicy: retry with
+        doubled memory while the bump budget lasts, checkpointing partial
+        progress between attempts; then give up with the real bump count.
         """
         records = inputs.records
         if not records:
@@ -78,7 +85,7 @@ class HookService(Service):
         total_duration = 0.0
         oom_retries = 0
 
-        for attempt in range(1 + MAX_OOM_RETRIES):
+        while True:
             attempt_inputs = HookInputs(
                 records=remaining,
                 run_id=inputs.run_id,
@@ -88,7 +95,11 @@ class HookService(Service):
 
             try:
                 result = await self.hook_runner.run(hook, current_release, attempt_inputs, work_dir)
-            except OOMError as exc:
+            except RuntimeFailure as exc:
+                if exc.kind is not FailureKind.OOM:
+                    # Non-OOM failures propagate; disposition is decided upstream.
+                    raise
+
                 # Read any partial output written before OOM
                 new_outcomes = _read_output_dir(work_dir)
                 for rid, outcome in new_outcomes.items():
@@ -102,37 +113,37 @@ class HookService(Service):
                 if not remaining:
                     break
 
-                if attempt < MAX_OOM_RETRIES:
+                decision = self.failure_policy.decide(exc, PriorAttempts(memory_bumps=oom_retries))
+                if isinstance(decision, RetryWithMoreMemory):
                     current_release = current_release.with_doubled_memory()
                     oom_retries += 1
                     log.info(
                         "OOM retry {attempt}/{max_retries} for hook={hook_name}, memory={memory}, remaining={remaining} records",
-                        attempt=attempt + 1,
-                        max_retries=MAX_OOM_RETRIES,
+                        attempt=oom_retries,
+                        max_retries=self.failure_policy.max_memory_bumps,
                         hook_name=hook.name,
                         memory=current_release.runtime.limits.memory,
                         remaining=len(remaining),
                     )
                     continue
-                else:
-                    # Exhausted retries — mark remaining as errored
-                    for r in remaining:
-                        outcomes[HookRecordId(r.id)] = BatchRecordOutcome(
-                            record_id=HookRecordId(r.id),
-                            status=OutcomeStatus.ERRORED,
-                            error=f"OOM after {MAX_OOM_RETRIES} retries (last limit: {current_release.runtime.limits.memory})",
-                        )
-                    await self.hook_storage.write_batch_outcomes(work_dir, outcomes)
-                    # Surface the real retry count so the batch wrapper can record
-                    # it on the failed execution's provenance.
-                    raise OOMError(
-                        f"OOM after {oom_retries} retries "
-                        f"(last limit: {current_release.runtime.limits.memory})",
-                        oom_retries=oom_retries,
-                        container_logs=exc.container_logs,
+
+                # Bump budget spent — mark remaining as errored and give up.
+                for r in remaining:
+                    outcomes[HookRecordId(r.id)] = BatchRecordOutcome(
+                        record_id=HookRecordId(r.id),
+                        status=OutcomeStatus.ERRORED,
+                        error=f"OOM after {oom_retries} retries (last limit: {current_release.runtime.limits.memory})",
                     )
-            # Non-OOM exceptions (TransientError, PermanentError, etc.)
-            # propagate uncaught to the worker layer
+                await self.hook_storage.write_batch_outcomes(work_dir, outcomes)
+                # Surface the real retry count so the batch wrapper can record
+                # it on the failed execution's provenance.
+                raise RuntimeFailure(
+                    FailureKind.OOM,
+                    f"OOM after {oom_retries} retries "
+                    f"(last limit: {current_release.runtime.limits.memory})",
+                    oom_retries=oom_retries,
+                    container_logs=exc.container_logs,
+                )
 
             total_duration += result.duration_seconds
 
@@ -179,9 +190,10 @@ class HookService(Service):
         this run (snapshot, R8). work_dirs maps hook_name → output directory.
 
         Errors are **values, not control flow**: a hook that raises is caught and
-        recorded as a failed :class:`HookExecution` (with its FailureKind) rather
-        than aborting the batch — so a failing hook never discards its siblings'
-        outcomes. Each execution carries *its own* wall-clock window.
+        recorded as a failed :class:`HookExecution` (with its observed cause
+        FailureKind) rather than aborting the batch — so a failing hook never
+        discards its siblings' outcomes. Each execution carries *its own*
+        wall-clock window.
         """
         executions: list[HookExecution] = []
         for hook, release in hook_releases:
@@ -193,7 +205,7 @@ class HookService(Service):
                 executions.append(
                     HookExecution.completed(hook, release, result, started_at, finished_at)
                 )
-            except (OOMError, TransientError, PermanentError) as exc:
+            except RuntimeFailure as exc:
                 finished_at = datetime.now(UTC)
                 executions.append(HookExecution.failed(hook, release, exc, started_at, finished_at))
         return executions

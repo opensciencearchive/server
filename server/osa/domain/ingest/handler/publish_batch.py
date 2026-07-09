@@ -157,13 +157,17 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
         await self.ingest_service.complete_batch(event.ingest_run_id, published_count)
 
     async def on_exhausted(self, event: HookBatchCompleted) -> None:
-        """Called when publish retries are exhausted — account for the failed batch."""
+        """Publish retries exhausted — fail the batch with a queryable reason (#152)."""
         log.error(
             "batch {batch_index} publish retries exhausted",
             batch_index=event.batch_index,
             ingest_run_id=event.ingest_run_id,
         )
-        await self.ingest_service.fail_batch(event.ingest_run_id)
+        await self.ingest_service.fail_batch(
+            event.ingest_run_id,
+            reason=f"batch {event.batch_index}: publish retries exhausted",
+            kind=None,
+        )
 
 
 async def _get_passed_records(

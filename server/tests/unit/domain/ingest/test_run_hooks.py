@@ -16,11 +16,12 @@ from osa.domain.ingest.event.events import HookBatchCompleted, IngesterBatchRead
 from osa.domain.ingest.handler.run_hooks import RunHooks, _hook_run_id
 from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId, IngestStatus
 from osa.domain.shared.error import TransientError
+from osa.domain.shared.failure import FailureKind, FailurePolicy
 from osa.domain.shared.event import EventId
 from osa.domain.shared.model.hook import HookName, OciConfig, OciLimits, TableFeatureSpec
 from osa.domain.validation.model.hook import Hook
 from osa.domain.validation.model.hook_release import HookRelease, HookReleaseId
-from osa.domain.validation.model.hook_result import FailureKind, HookExecution, HookStatus
+from osa.domain.validation.model.hook_result import HookExecution, HookStatus
 from osa.domain.validation.model.hook_run import HookRunStatus
 
 _T0 = datetime(2026, 1, 1, tzinfo=UTC)
@@ -69,7 +70,7 @@ def _failed_exec(
         started_at=start,
         finished_at=start + timedelta(seconds=2),
         duration_s=2.0,
-        oom_retries=3 if kind == FailureKind.OOM_EXHAUSTED else 0,
+        oom_retries=3 if kind == FailureKind.OOM else 0,
         failure=kind,
         error_message="boom",
         log_text=log_text,
@@ -128,6 +129,7 @@ def _make_handler(*, hook_names: tuple[str, ...] = ("pockets",), executions=None
         hook_registry=_make_registry(hook_names),
         outbox=AsyncMock(),
         ingest_storage=ingest_storage,
+        failure_policy=FailurePolicy(),
     )
 
 
@@ -144,7 +146,7 @@ class TestContinueOnError:
     async def test_failed_hook_does_not_discard_passing_sibling(self) -> None:
         execs = [
             _passed_exec("hook_a", offset=0),
-            _failed_exec("hook_b", FailureKind.PERMANENT, offset=10),
+            _failed_exec("hook_b", FailureKind.HOOK_EXIT, offset=10),
         ]
         handler = _make_handler(hook_names=("hook_a", "hook_b"), executions=execs)
 
@@ -169,7 +171,7 @@ class TestContinueOnError:
 class TestLogRefCapture:
     @pytest.mark.asyncio
     async def test_failed_hook_with_logs_records_log_ref(self) -> None:
-        execs = [_failed_exec("pockets", FailureKind.PERMANENT, log_text="traceback...")]
+        execs = [_failed_exec("pockets", FailureKind.HOOK_EXIT, log_text="traceback...")]
         handler = _make_handler(executions=execs)
         handler.ingest_storage.write_hook_log.return_value = "/data/.../output/hook.log"
 
@@ -207,7 +209,7 @@ class TestDeterministicRunId:
 class TestTransientRetry:
     @pytest.mark.asyncio
     async def test_transient_hook_raises_and_does_not_emit(self) -> None:
-        handler = _make_handler(executions=[_failed_exec("pockets", FailureKind.TRANSIENT)])
+        handler = _make_handler(executions=[_failed_exec("pockets", FailureKind.TIMEOUT)])
 
         with pytest.raises(TransientError):
             await handler.handle(_make_event())
@@ -221,7 +223,7 @@ class TestTransientRetry:
 class TestTerminalFailurePolicy:
     @pytest.mark.asyncio
     async def test_permanent_failure_completes_batch(self) -> None:
-        handler = _make_handler(executions=[_failed_exec("pockets", FailureKind.PERMANENT)])
+        handler = _make_handler(executions=[_failed_exec("pockets", FailureKind.HOOK_EXIT)])
 
         await handler.handle(_make_event())
 
@@ -231,7 +233,7 @@ class TestTerminalFailurePolicy:
 
     @pytest.mark.asyncio
     async def test_oom_exhaustion_completes_with_retry_count(self) -> None:
-        handler = _make_handler(executions=[_failed_exec("pockets", FailureKind.OOM_EXHAUSTED)])
+        handler = _make_handler(executions=[_failed_exec("pockets", FailureKind.OOM)])
 
         await handler.handle(_make_event())
 
@@ -239,3 +241,94 @@ class TestTerminalFailurePolicy:
         assert run.status == HookRunStatus.ERROR and run.oom_retries == 3
         assert any(isinstance(e, HookBatchCompleted) for e in _emitted(handler))
         handler.ingest_service.fail_batch.assert_not_called()
+
+
+class TestAbortOnEnvironmentalFailure:
+    """An unpullable image / RBAC / config failure dooms every batch — the
+    handler must abort the whole run instead of grinding through (#152)."""
+
+    @pytest.mark.asyncio
+    async def test_image_pull_failure_aborts_run(self) -> None:
+        handler = _make_handler(executions=[_failed_exec("pockets", FailureKind.IMAGE_PULL)])
+
+        await handler.handle(_make_event())
+
+        kwargs = handler.ingest_service.abort_run.await_args.kwargs
+        assert handler.ingest_service.abort_run.await_args.args[0] == "run-1"
+        assert kwargs["kind"] is FailureKind.IMAGE_PULL
+        assert kwargs["reason"] == "boom"
+        # The batch is neither completed nor re-driven.
+        assert not any(isinstance(e, HookBatchCompleted) for e in _emitted(handler))
+        handler.ingest_service.fail_batch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_abort_still_records_provenance(self) -> None:
+        """The failed hook's ERROR run is recorded before the abort — facts survive."""
+        execs = [
+            _passed_exec("hook_a"),
+            _failed_exec("hook_b", FailureKind.IMAGE_PULL, offset=10),
+        ]
+        handler = _make_handler(hook_names=("hook_a", "hook_b"), executions=execs)
+
+        await handler.handle(_make_event())
+
+        statuses = sorted(r.status for r in _recorded_runs(handler))
+        assert statuses == sorted([HookRunStatus.PASSED, HookRunStatus.ERROR])
+        handler.ingest_service.abort_run.assert_awaited_once()
+
+
+class TestTerminalRunGuard:
+    """Once a run is aborted, redelivered batch events must be dropped —
+    that is what actually stops the scheduled work (#152)."""
+
+    @pytest.mark.asyncio
+    async def test_batch_for_failed_run_is_skipped(self) -> None:
+        handler = _make_handler(executions=[_passed_exec("pockets")])
+        handler.ingest_repo.get.return_value = IngestRun(
+            id=IngestRunId("run-1"),
+            convention_id="test-conv",
+            status=IngestStatus.FAILED,
+            batch_size=100,
+            started_at=_T0,
+        )
+
+        await handler.handle(_make_event())
+
+        handler.hook_service.run_hooks_for_batch.assert_not_called()
+        assert _emitted(handler) == []
+        handler.hook_registry.record_run.assert_not_called()
+
+
+class TestDecisionPrecedence:
+    """The batch's fate is the most severe decision across its hooks (#152)."""
+
+    @pytest.mark.asyncio
+    async def test_abort_dominates_retry_in_a_mixed_batch(self) -> None:
+        # hook_a wants a transient retry; hook_b hit an unpullable image.
+        execs = [
+            _failed_exec("hook_a", FailureKind.TIMEOUT),
+            _failed_exec("hook_b", FailureKind.IMAGE_PULL, offset=10),
+        ]
+        handler = _make_handler(hook_names=("hook_a", "hook_b"), executions=execs)
+
+        await handler.handle(_make_event())
+
+        # Abort wins: the run is hard-stopped, the batch is NOT re-driven or completed.
+        handler.ingest_service.abort_run.assert_awaited_once()
+        assert not any(isinstance(e, HookBatchCompleted) for e in _emitted(handler))
+
+
+class TestBatchExhaustionRecordsReason:
+    """A batch whose transient retries run out must leave a queryable reason (#152)."""
+
+    @pytest.mark.asyncio
+    async def test_on_exhausted_records_reason_and_batch(self) -> None:
+        handler = _make_handler(executions=[_passed_exec("pockets")])
+
+        await handler.on_exhausted(_make_event(batch_index=3))
+
+        call = handler.ingest_service.fail_batch.await_args
+        assert call.args[0] == "run-1"
+        assert "exhausted" in call.kwargs["reason"]
+        assert "3" in call.kwargs["reason"]
+        assert call.kwargs["kind"] is None

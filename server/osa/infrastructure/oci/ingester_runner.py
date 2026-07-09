@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 import aiodocker
-from osa.domain.shared.error import OOMError, TransientError
+from osa.domain.shared.failure import FailureKind, RuntimeFailure
 from osa.infrastructure.logging import get_logger
 from osa.domain.shared.model.source import IngesterDefinition
 from osa.domain.shared.port.ingester_runner import IngesterInputs, IngesterOutput, IngesterRunner
@@ -108,7 +108,7 @@ class OciIngesterRunner(IngesterRunner):
                     timeout=timeout,
                     duration=duration,
                 )
-                raise TransientError(f"Ingester timed out after {timeout}s")
+                raise RuntimeFailure(FailureKind.TIMEOUT, f"Ingester timed out after {timeout}s")
         finally:
             rmtree(staging_dir, onexc=_force_remove)
 
@@ -169,7 +169,7 @@ class OciIngesterRunner(IngesterRunner):
             oom_killed = inspect_data.get("State", {}).get("OOMKilled", False)
 
             if oom_killed:
-                raise OOMError("Ingester killed by OOM")
+                raise RuntimeFailure(FailureKind.OOM, "Ingester killed by OOM")
 
             if exit_code != 0:
                 # Tenant container output (which can carry upstream credentials /
@@ -186,7 +186,13 @@ class OciIngesterRunner(IngesterRunner):
                     exit_code=exit_code,
                     image=ingester.image,
                 )
-                raise TransientError(f"Ingester exited with code {exit_code}")
+                # UPSTREAM: ingester non-zero exit is usually an upstream API
+                # failure (500, rate limit), not a code bug.
+                raise RuntimeFailure(
+                    FailureKind.UPSTREAM,
+                    f"Ingester exited with code {exit_code}",
+                    exit_code=exit_code,
+                )
 
             records = parse_records_file(output_dir)
             session = parse_session_file(output_dir)
@@ -194,7 +200,7 @@ class OciIngesterRunner(IngesterRunner):
 
         except aiodocker.DockerError as e:
             log.error("Docker error running ingester: {error}", error=str(e))
-            raise TransientError(f"Docker error: {e}") from e
+            raise RuntimeFailure(FailureKind.RUNTIME, f"Docker error: {e}") from e
         finally:
             if container is not None:
                 try:
@@ -237,5 +243,8 @@ class OciIngesterRunner(IngesterRunner):
 
         # Pull from registry as last resort
         log.info("Pulling ingester image: {image}", image=image)
-        await self._docker.images.pull(image)
+        try:
+            await self._docker.images.pull(image)
+        except aiodocker.DockerError as e:
+            raise RuntimeFailure(FailureKind.IMAGE_PULL, f"Image pull failed: {e}") from e
         return image

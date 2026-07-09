@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from osa.config import K8sConfig
-from osa.domain.shared.error import OOMError, TransientError
+from osa.domain.shared.failure import FailureKind, RuntimeFailure
 from osa.domain.shared.model.source import IngesterDefinition, IngesterLimits
 from osa.domain.shared.model.srn import ConventionSlug
 from osa.domain.shared.port.ingester_runner import IngesterInputs
@@ -398,8 +398,9 @@ class TestSourceLifecycle:
         files_dir.mkdir(parents=True)
         inputs = IngesterInputs(convention_id=_CONV_SLUG)
 
-        with pytest.raises(TransientError, match="[Tt]imed out|[Dd]eadline"):
+        with pytest.raises(RuntimeFailure, match="[Tt]imed out|[Dd]eadline") as exc_info:
             await runner._run_job(ingester, inputs, work_dir, files_dir)
+        assert exc_info.value.kind is FailureKind.TIMEOUT
 
     @pytest.mark.asyncio
     async def test_oom_raises_oom_error(self, tmp_path: Path):
@@ -453,8 +454,67 @@ class TestSourceLifecycle:
         files_dir.mkdir(parents=True)
         inputs = IngesterInputs(convention_id=_CONV_SLUG)
 
-        with pytest.raises(OOMError, match="[Oo]OM"):
+        with pytest.raises(RuntimeFailure, match="[Oo]OM") as exc_info:
             await runner._run_job(ingester, inputs, work_dir, files_dir)
+        assert exc_info.value.kind is FailureKind.OOM
+
+    @pytest.mark.asyncio
+    async def test_nonzero_exit_is_an_upstream_failure(self, tmp_path: Path):
+        """Ingester non-zero exit is usually an upstream API failure — the
+        cause kind must say UPSTREAM (retryable), not HOOK_EXIT."""
+        config = _make_config(data_mount_path=str(tmp_path))
+        runner = K8sIngesterRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
+
+        batch_api = AsyncMock()
+        core_api = AsyncMock()
+        runner._batch_api = batch_api
+        runner._core_api = core_api
+
+        job_list = MagicMock()
+        job_list.items = []
+        batch_api.list_namespaced_job.return_value = job_list
+        batch_api.create_namespaced_job.return_value = MagicMock()
+
+        pod = MagicMock()
+        pod.status.phase = "Running"
+        pod.status.container_statuses = None
+        pod_list = MagicMock()
+        pod_list.items = [pod]
+
+        failed_job = MagicMock()
+        condition = MagicMock()
+        condition.type = "Failed"
+        condition.status = "True"
+        condition.reason = "BackoffLimitExceeded"
+        failed_job.status.conditions = [condition]
+        failed_job.status.succeeded = None
+        failed_job.status.failed = 1
+        batch_api.read_namespaced_job.return_value = failed_job
+
+        exit_pod = MagicMock()
+        exit_pod.status.phase = "Failed"
+        terminated = MagicMock()
+        terminated.reason = None
+        terminated.exit_code = 3
+        container_status = MagicMock()
+        container_status.state.terminated = terminated
+        exit_pod.status.container_statuses = [container_status]
+        exit_pod_list = MagicMock()
+        exit_pod_list.items = [exit_pod]
+
+        core_api.list_namespaced_pod.side_effect = [pod_list, exit_pod_list]
+
+        ingester = _make_ingester()
+        work_dir = tmp_path / "sources" / "localhost_conv1" / "staging" / "run1"
+        work_dir.mkdir(parents=True)
+        files_dir = work_dir / "files"
+        files_dir.mkdir(parents=True)
+        inputs = IngesterInputs(convention_id=_CONV_SLUG)
+
+        with pytest.raises(RuntimeFailure, match="[Ee]xit") as exc_info:
+            await runner._run_job(ingester, inputs, work_dir, files_dir)
+        assert exc_info.value.kind is FailureKind.UPSTREAM
+        assert exc_info.value.exit_code == 3
 
 
 # ---------------------------------------------------------------------------
