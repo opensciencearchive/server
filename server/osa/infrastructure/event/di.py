@@ -22,6 +22,7 @@ from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.event_repository import EventRepository
 from osa.domain.validation.handler import ValidateDeposition
 from osa.infrastructure.event.worker import WorkerPool
+from osa.infrastructure.telemetry.sampler import TelemetrySampler
 from osa.util.di.base import Provider
 from osa.util.di.scope import Scope
 
@@ -135,9 +136,10 @@ class EventProvider(Provider):
         container: AsyncContainer,
         handler_types: HandlerTypes,
         config: Config,
+        sampler: TelemetrySampler,
     ) -> WorkerPool:
         """WorkerPool with pull-based event handlers."""
-        pool = WorkerPool(container=container, stale_claim_interval=60.0)
+        pool = WorkerPool(container=container, stale_claim_interval=60.0, sampler=sampler)
 
         for handler_type in handler_types:
             pool.register(handler_type, config=config)

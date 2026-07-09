@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, NewType
 
 if TYPE_CHECKING:
     from osa.config import Config
+    from osa.infrastructure.telemetry.sampler import TelemetrySampler
 
 import logfire
 from apscheduler import AsyncScheduler
@@ -405,12 +406,18 @@ class WorkerPool:
         self,
         container: AsyncContainer | None = None,
         stale_claim_interval: float = 60.0,
+        *,
+        sampler: "TelemetrySampler | None" = None,
+        sampler_interval: float = 15.0,
     ) -> None:
         self._container = container
         self._workers: list[Worker] = []
         self._stale_claim_interval = stale_claim_interval
         self._stale_claim_task: asyncio.Task | None = None
         self._device_auth_cleanup_task: asyncio.Task | None = None
+        self._sampler = sampler
+        self._sampler_interval = sampler_interval
+        self._telemetry_sampler_task: asyncio.Task | None = None
         self._shutdown = False
         self._scheduler: AsyncScheduler | None = None
         self._exit_stack: AsyncExitStack | None = None
@@ -527,6 +534,12 @@ class WorkerPool:
             self._run_device_auth_cleanup(), name="device-auth-cleanup"
         )
 
+        # Start telemetry gauge sampler (only when observability is wired in)
+        if self._sampler is not None:
+            self._telemetry_sampler_task = asyncio.create_task(
+                self._run_telemetry_sampler(), name="telemetry-sampler"
+            )
+
         logger.info(
             f"WorkerPool started with {len(self._workers)} workers, {len(schedules)} schedules"
         )
@@ -553,6 +566,13 @@ class WorkerPool:
             self._device_auth_cleanup_task.cancel()
             try:
                 await self._device_auth_cleanup_task
+            except asyncio.CancelledError:
+                pass
+
+        if self._telemetry_sampler_task and not self._telemetry_sampler_task.done():
+            self._telemetry_sampler_task.cancel()
+            try:
+                await self._telemetry_sampler_task
             except asyncio.CancelledError:
                 pass
 
@@ -625,6 +645,28 @@ class WorkerPool:
                 break
             except Exception as e:
                 logger.error(f"Stale claim cleanup failed: {e}")
+
+    async def _run_telemetry_sampler(self) -> None:
+        """Periodically refresh the telemetry gauge snapshot.
+
+        Mirrors :meth:`_run_stale_claim_cleanup`'s shutdown discipline. The
+        sampler itself never raises (it warns and keeps the last snapshot), but
+        the broad-except guard keeps the loop alive against any unexpected
+        failure so gauges merely go stale rather than the loop dying.
+        """
+        while not self._shutdown:
+            try:
+                await asyncio.sleep(self._sampler_interval)
+
+                if self._shutdown or self._container is None or self._sampler is None:
+                    break
+
+                await self._sampler.refresh(self._container, self._workers)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warn(f"Telemetry sampler loop error: {e}")
 
     async def _run_device_auth_cleanup(self) -> None:
         """Periodically delete expired device authorizations."""
