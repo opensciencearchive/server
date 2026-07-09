@@ -145,3 +145,53 @@ def test_otlp_without_token_sends_no_auth_header(recorder: _Recorder) -> None:
     ]
     span_exp = _span_exporter(span_procs[0])
     assert "Authorization" not in span_exp._session.headers  # noqa: SLF001
+
+
+# ── Prometheus-compatible histogram views (regression: #158 smoke test) ──────
+#
+# prometheus-exporter 0.60b1 crashes on ExponentialHistogramDataPoint at
+# collection time, and logfire's DEFAULT_VIEWS aggregate every histogram
+# exponentially. The bootstrap must swap in explicit buckets whenever the pull
+# endpoint is enabled — otherwise the first scrape after any histogram record
+# (e.g. one instrumented HTTP request) returns a 500.
+
+
+def test_views_keep_logfire_defaults_when_prometheus_disabled() -> None:
+    views = TelemetryBootstrap._metric_views(prometheus_enabled=False)
+    assert views == list(setup_mod.logfire.MetricsOptions.DEFAULT_VIEWS)
+
+
+def test_views_replace_exponential_histograms_when_prometheus_enabled() -> None:
+    from opentelemetry.sdk.metrics.view import ExponentialBucketHistogramAggregation
+
+    views = TelemetryBootstrap._metric_views(prometheus_enabled=True)
+    assert not any(
+        isinstance(getattr(v, "_aggregation", None), ExponentialBucketHistogramAggregation)
+        for v in views
+    )
+    # The non-histogram defaults (active_requests attribute filtering) survive.
+    assert len(views) == len(setup_mod.logfire.MetricsOptions.DEFAULT_VIEWS)
+
+
+def test_histogram_records_render_through_prometheus_reader() -> None:
+    """End-to-end: a recorded histogram must survive a Prometheus collection."""
+    from opentelemetry.sdk.metrics import MeterProvider
+    from prometheus_client import CollectorRegistry, generate_latest
+
+    from osa.infrastructure.telemetry.setup import _OwnedRegistryPrometheusReader
+
+    registry = CollectorRegistry()
+    reader = _OwnedRegistryPrometheusReader(registry)
+    provider = MeterProvider(
+        metric_readers=[reader],
+        views=TelemetryBootstrap._metric_views(prometheus_enabled=True),
+    )
+    try:
+        meter = provider.get_meter("osa-test")
+        histogram = meter.create_histogram("osa_test_duration_seconds", unit="s")
+        histogram.record(0.25, {"hook": "demo"})
+
+        exposition = generate_latest(registry).decode()
+        assert "osa_test_duration_seconds" in exposition
+    finally:
+        provider.shutdown()

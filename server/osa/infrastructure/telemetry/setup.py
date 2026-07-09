@@ -23,7 +23,13 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 from opentelemetry.exporter.prometheus import PrometheusMetricReader
 from opentelemetry.sdk._logs import LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.sdk.metrics import Histogram
 from opentelemetry.sdk.metrics.export import MetricReader, PeriodicExportingMetricReader
+from opentelemetry.sdk.metrics.view import (
+    ExplicitBucketHistogramAggregation,
+    ExponentialBucketHistogramAggregation,
+    View,
+)
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanProcessor
 from prometheus_client import REGISTRY as _PROMETHEUS_DEFAULT_REGISTRY
 from prometheus_client import CollectorRegistry
@@ -69,6 +75,33 @@ class TelemetryBootstrap:
     def prometheus_registry(self) -> CollectorRegistry | None:
         """The owned Prometheus registry ``/metrics`` renders, or None when disabled."""
         return self._prometheus_registry
+
+    @staticmethod
+    def _metric_views(*, prometheus_enabled: bool) -> list[View]:
+        """Logfire's default views, made Prometheus-compatible when needed.
+
+        With the pull endpoint off, logfire's defaults stand (exponential
+        histograms — better resolution, smaller payloads). With it on, the
+        exponential-aggregation view is replaced by explicit buckets, because
+        prometheus-exporter 0.60b1 raises ``AttributeError`` on
+        ``ExponentialHistogramDataPoint`` during collection. The other default
+        views (e.g. ``http.server.active_requests`` attribute filtering) are
+        kept either way.
+        """
+        defaults = list(logfire.MetricsOptions.DEFAULT_VIEWS)
+        if not prometheus_enabled:
+            return defaults
+        views = [
+            v
+            for v in defaults
+            if not isinstance(
+                getattr(v, "_aggregation", None), ExponentialBucketHistogramAggregation
+            )
+        ]
+        views.append(
+            View(instrument_type=Histogram, aggregation=ExplicitBucketHistogramAggregation())
+        )
+        return views
 
     def configure(self, config: Config) -> None:
         """Configure the process-global telemetry pipeline exactly once.
@@ -130,6 +163,13 @@ class TelemetryBootstrap:
             else None
         )
 
+        # Logfire's default views aggregate all histograms into exponential
+        # buckets, which the Prometheus exporter cannot render (its collector
+        # crashes on ExponentialHistogramDataPoint at scrape time). Views are
+        # provider-wide, so when the pull endpoint is on we fall back to
+        # explicit buckets for every histogram — OTLP consumers handle both.
+        views = self._metric_views(prometheus_enabled=obs.prometheus_enabled)
+
         logfire.configure(
             send_to_logfire="if-token-present",
             service_name=config.name,
@@ -137,7 +177,7 @@ class TelemetryBootstrap:
             console=False,  # we render spans via OSAConsoleExporter
             inspect_arguments=False,
             additional_span_processors=span_processors,
-            metrics=logfire.MetricsOptions(additional_readers=list(metric_readers)),
+            metrics=logfire.MetricsOptions(additional_readers=list(metric_readers), views=views),
             sampling=logfire.SamplingOptions(head=obs.trace_sample_rate),
             advanced=advanced,
         )
