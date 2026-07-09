@@ -27,6 +27,7 @@ dependencies = [
     "openpyxl>=3.1.5",
     "python-multipart>=0.0.22",
     "slowapi>=0.1.9",
+    "opentelemetry-exporter-prometheus==0.60b1",
 ]
 
 [project.entry-points."osa.sources"]
