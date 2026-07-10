@@ -21,8 +21,16 @@ from osa.domain.data.query.skill import (
     GetSchemaReferenceHandler,
     GetSkillDocumentHandler,
 )
+from osa.domain.data.query.view import (
+    GetColumnSampleHandler,
+    GetDatasetListHandler,
+    GetFilterPanelHandler,
+    GetRecordDetailHandler,
+    ReadTablePageHandler,
+)
 from osa.domain.data.service.data_catalog import DataCatalogService
 from osa.domain.data.service.data_query import DataQueryService
+from osa.domain.data.service.data_view import DataViewService
 from osa.domain.data.service.skill_generator import SkillGeneratorService
 from osa.domain.data.service.skill_renderer import SkillRenderer
 from osa.util.di.base import Provider
@@ -39,6 +47,17 @@ class DataProvider(Provider):
     @provide(scope=Scope.UOW)
     def get_data_catalog_service(self, read_store: DataCatalogReadStore) -> DataCatalogService:
         return DataCatalogService(read_store=read_store)
+
+    @provide(scope=Scope.UOW)
+    def get_data_view_service(
+        self,
+        catalog_service: DataCatalogService,
+        query_service: DataQueryService,
+        config: Config,
+    ) -> DataViewService:
+        return DataViewService(
+            catalog_service=catalog_service, query_service=query_service, config=config
+        )
 
     @provide(scope=Scope.APP)
     def get_skill_renderer(self) -> SkillRenderer:
@@ -67,3 +86,10 @@ class DataProvider(Provider):
     get_root_discovery_handler = provide(GetRootDiscoveryHandler, scope=Scope.UOW)
     get_skill_document_handler = provide(GetSkillDocumentHandler, scope=Scope.UOW)
     get_schema_reference_handler = provide(GetSchemaReferenceHandler, scope=Scope.UOW)
+
+    # View queries (#162) — payload-shaped reads for interactive consumers.
+    read_table_page_handler = provide(ReadTablePageHandler, scope=Scope.UOW)
+    get_dataset_list_handler = provide(GetDatasetListHandler, scope=Scope.UOW)
+    get_record_detail_handler = provide(GetRecordDetailHandler, scope=Scope.UOW)
+    get_filter_panel_handler = provide(GetFilterPanelHandler, scope=Scope.UOW)
+    get_column_sample_handler = provide(GetColumnSampleHandler, scope=Scope.UOW)

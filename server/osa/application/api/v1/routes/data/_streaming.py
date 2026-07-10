@@ -68,30 +68,17 @@ async def _paginated_response(
     columns: Sequence[ColumnSpec],
     plan: QueryPlan,
 ) -> StreamingResponse:
-    limit = plan.pagination.limit
-    page: list[Mapping[str, Any]] = []
-    has_more = False
-    async for row in rows:
-        if len(page) == limit:
-            has_more = True
-            break
-        page.append(row)
-
-    next_cursor = _next_cursor(page, plan) if has_more else None
+    # plan.take_page owns the limit+1 mechanic and the next_cursor encoding
+    # (shared with the view queries), so the encode side cannot drift from
+    # the store's decode side.
+    slice_ = await plan.take_page(rows)
 
     async def page_iter() -> AsyncIterator[Mapping[str, Any]]:
-        for row in page:
+        for row in slice_.rows:
             yield row
 
     serializer = fmt.make_serializer()
     return StreamingResponse(
-        serializer.stream(page_iter(), columns, next_cursor=next_cursor),
+        serializer.stream(page_iter(), columns, next_cursor=slice_.next_cursor),
         media_type=fmt.media_type,
     )
-
-
-def _next_cursor(page: list[Mapping[str, Any]], plan: QueryPlan) -> str | None:
-    # Tiebreak selection and sort=id aliasing live on plan.keyset — the same
-    # object the store builds its ORDER BY / after-condition from, so the
-    # encode side cannot drift from the decode side.
-    return plan.keyset.cursor_from_row(page[-1]) if page else None

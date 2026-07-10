@@ -307,6 +307,22 @@ class DataConfig(BaseModel):
     max_page_limit: int = 1000  # page-size ceiling; over-large requests are clamped, not 422d
 
 
+class McpConfig(BaseModel):
+    """MCP Apps surface configuration (nested in Config, ``OSA_MCP__*``).
+
+    - ``OSA_MCP__ENABLED`` — serve the MCP streamable-HTTP endpoint at ``/mcp``
+      (default ``true``). The surface is public and read-only, mirroring
+      ``/data/``; no LLM key is involved (the connecting host runs the model).
+    - ``OSA_MCP__WIDGET_BUNDLE_DIR`` — directory holding the compiled
+      ``ui://osa/*`` widget bundles (one self-contained HTML file per widget).
+      ``None`` (default) means the bundles packaged with the server image
+      (``osa/application/api/mcp/bundles/``).
+    """
+
+    enabled: bool = True
+    widget_bundle_dir: Path | None = None
+
+
 class ObservabilityConfig(BaseModel):
     """Telemetry export configuration (metrics, logs, traces).
 
@@ -359,6 +375,7 @@ class Config(BaseSettings):
     auth: AuthConfig = AuthConfig()  # Defaults are dev-safe; boot check enforces prod-correctness
     runner: RunnerConfig = RunnerConfig()
     data: DataConfig = DataConfig()  # /data/ read-surface filter-tree bounds
+    mcp: McpConfig = McpConfig()  # MCP Apps surface (OSA_MCP__*)
     observability: ObservabilityConfig = (
         ObservabilityConfig()
     )  # telemetry export (OSA_OBSERVABILITY__*)
