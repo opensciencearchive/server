@@ -25,12 +25,13 @@ from osa.domain.shared.port.ingester_runner import IngesterOutput
 _T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
-def _make_event(ingest_run_id: str = "run-1") -> NextBatchRequested:
+def _make_event(ingest_run_id: str = "run-1", batch_index: int = 0) -> NextBatchRequested:
     return NextBatchRequested(
         id=EventId(uuid4()),
         ingest_run_id=IngestRunId(ingest_run_id),
         convention_id="test-conv",
         batch_size=100,
+        batch_index=batch_index,
     )
 
 
@@ -168,6 +169,53 @@ class TestExhaustedRetriesFailIngestion:
 
         kwargs = handler.ingest_service.fail_ingestion.await_args.kwargs
         assert "exhausted" in kwargs["reason"]
+
+
+class TestBatchIndexComesFromTheEvent:
+    """batch_index is carried in the event, never re-derived from run counters (#160)."""
+
+    @pytest.mark.asyncio
+    async def test_batch_index_drives_storage_from_event_not_run_counter(self) -> None:
+        # Run counter is ahead of the event's index (e.g. a pipelined redo);
+        # the handler must honour the event, not the mutable counter.
+        run = _make_run()
+        run.batches_ingested = 7
+        handler = _make_handler(run=run)
+
+        await handler.handle(_make_event(batch_index=3))
+
+        assert handler.ingester_runner.run.await_args.kwargs["inputs"].batch_index == 3
+        handler.ingest_storage.batch_work_dir.assert_called_once_with("run-1", 3)
+        handler.ingest_storage.batch_files_dir.assert_called_once_with("run-1", 3)
+        handler.ingest_storage.write_records.assert_awaited_once()
+        assert handler.ingest_storage.write_records.await_args.args[1] == 3
+
+    @pytest.mark.asyncio
+    async def test_continuation_event_advances_batch_index_by_one(self) -> None:
+        handler = _make_handler()
+        # Make the batch produce a session + records so has_more is True.
+        handler.ingester_runner.run.return_value = IngesterOutput(
+            records=[{"source_id": "a", "metadata": {}}],
+            session={"cursor": "next"},
+            files_dir=Path("/tmp/files"),
+        )
+
+        await handler.handle(_make_event(batch_index=4))
+
+        continuations = [e for e in _emitted(handler) if isinstance(e, NextBatchRequested)]
+        assert len(continuations) == 1
+        assert continuations[0].batch_index == 5
+
+    @pytest.mark.asyncio
+    async def test_backpressure_requeue_keeps_the_same_batch_index(self) -> None:
+        handler = _make_handler()
+        handler.ingester_runner.has_capacity.return_value = False
+
+        await handler.handle(_make_event(batch_index=6))
+
+        requeues = [e for e in _emitted(handler) if isinstance(e, NextBatchRequested)]
+        assert len(requeues) == 1
+        assert requeues[0].batch_index == 6
 
 
 class TestTerminalRunGuard:

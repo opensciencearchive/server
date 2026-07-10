@@ -92,6 +92,7 @@ class IngestService(Service):
                 ingest_run_id=run_id,
                 convention_id=convention_id,
                 batch_size=batch_size,
+                batch_index=0,
             )
         )
 

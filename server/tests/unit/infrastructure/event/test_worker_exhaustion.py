@@ -38,6 +38,7 @@ class TestWorkerOnExhaustedErrorSafety:
             ingest_run_id=IngestRunId("run-1"),
             convention_id="urn:osa:localhost:conv:test@1.0.0",
             batch_size=100,
+            batch_index=0,
         )
         delivery = MagicMock()
         delivery.id = "delivery-1"

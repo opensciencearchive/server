@@ -74,6 +74,7 @@ class RunIngester(EventHandler[NextBatchRequested]):
                     ingest_run_id=event.ingest_run_id,
                     convention_id=event.convention_id,
                     batch_size=event.batch_size,
+                    batch_index=event.batch_index,
                 ),
                 deliver_after=datetime.now(UTC) + BACKPRESSURE_DELAY,
             )
@@ -89,7 +90,7 @@ class RunIngester(EventHandler[NextBatchRequested]):
         if convention.ingester is None:
             raise NotFoundError(f"No ingester for convention {event.convention_id}")
 
-        batch_index = ingest_run.batches_ingested
+        batch_index = event.batch_index
 
         session = await self.ingest_storage.read_session(event.ingest_run_id)
 
@@ -226,6 +227,7 @@ class RunIngester(EventHandler[NextBatchRequested]):
                     ingest_run_id=event.ingest_run_id,
                     convention_id=event.convention_id,
                     batch_size=ingest_run.batch_size,
+                    batch_index=event.batch_index + 1,
                 )
             )
 

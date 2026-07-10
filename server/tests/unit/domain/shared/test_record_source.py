@@ -54,6 +54,24 @@ class TestIngestSource:
         restored = IngestSource.model_validate(data)
         assert restored == src
 
+    def test_batch_index_defaults_to_none_for_legacy_rows(self):
+        src = IngestSource(
+            id="run-123-source-456",
+            ingest_run_id="run123",
+            upstream_source="pdb",
+        )
+        assert src.batch_index is None
+
+    def test_batch_index_round_trips(self):
+        src = IngestSource(
+            id="run-123-source-456",
+            ingest_run_id="run123",
+            upstream_source="pdb",
+            batch_index=4,
+        )
+        restored = IngestSource.model_validate(src.model_dump())
+        assert restored.batch_index == 4
+
 
 class TestRecordSourceDiscriminator:
     def test_deserializes_deposition(self):

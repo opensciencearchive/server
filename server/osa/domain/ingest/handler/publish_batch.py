@@ -104,6 +104,7 @@ class PublishBatch(EventHandler[HookBatchCompleted]):
                             id=f"{ingest_run.convention_id}:{record.source_id}",
                             ingest_run_id=ingest_run.id,
                             upstream_source=record.source_id,
+                            batch_index=event.batch_index,
                         ),
                         metadata=record.metadata,
                         convention_id=ConventionSlug.parse(ingest_run.convention_id),

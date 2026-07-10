@@ -102,6 +102,8 @@ class TestStartIngest:
         assert second_event.__class__.__name__ == "NextBatchRequested"
         assert second_event.ingest_run_id == run.id
         assert second_event.convention_id == run.convention_id
+        # First batch always pulls index 0 (#160).
+        assert second_event.batch_index == 0
 
     @pytest.mark.asyncio
     async def test_custom_batch_size(self) -> None:

@@ -142,3 +142,84 @@ class TestTerminalRunGuard:
         repo = PostgresIngestRunRepository(pg_session)
         with pytest.raises(NotFoundError):
             await repo.increment_failed("does-not-exist")
+
+
+@pytest.mark.asyncio
+class TestMarkBatchIngested:
+    """Idempotent batch-ingested marker with GREATEST semantics (#160)."""
+
+    async def test_advances_counter_to_batch_index_plus_one(self, pg_session: AsyncSession):
+        repo = PostgresIngestRunRepository(pg_session)
+        run = _make_run("ing-mb1")
+        run.batches_ingested = 0
+        await repo.save(run)
+
+        result = await repo.mark_batch_ingested("ing-mb1", 0, ingestion_finished=False)
+
+        assert isinstance(result, Applied)
+        assert result.run.batches_ingested == 1
+        assert result.run.ingestion_finished is False
+
+    async def test_idempotent_on_repeat_with_same_index(self, pg_session: AsyncSession):
+        repo = PostgresIngestRunRepository(pg_session)
+        run = _make_run("ing-mb2")
+        run.batches_ingested = 0
+        await repo.save(run)
+
+        first = await repo.mark_batch_ingested("ing-mb2", 3, ingestion_finished=False)
+        second = await repo.mark_batch_ingested("ing-mb2", 3, ingestion_finished=False)
+
+        assert isinstance(first, Applied)
+        assert isinstance(second, Applied)
+        # GREATEST(4, 4) = 4 — the duplicate delivery does not double-count.
+        assert first.run.batches_ingested == 4
+        assert second.run.batches_ingested == 4
+
+    async def test_never_rolls_back_a_counter_that_ran_ahead(self, pg_session: AsyncSession):
+        """A late delivery for an earlier batch must not lower the counter."""
+        repo = PostgresIngestRunRepository(pg_session)
+        run = _make_run("ing-mb3")
+        run.batches_ingested = 5
+        await repo.save(run)
+
+        result = await repo.mark_batch_ingested("ing-mb3", 1, ingestion_finished=False)
+
+        assert isinstance(result, Applied)
+        assert result.run.batches_ingested == 5  # GREATEST(5, 2) = 5
+
+    async def test_ingestion_finished_latches_true(self, pg_session: AsyncSession):
+        repo = PostgresIngestRunRepository(pg_session)
+        run = _make_run("ing-mb4")
+        run.batches_ingested = 0
+        await repo.save(run)
+
+        finished = await repo.mark_batch_ingested("ing-mb4", 0, ingestion_finished=True)
+        assert isinstance(finished, Applied)
+        assert finished.run.ingestion_finished is True
+
+        # A later call with the flag False must NOT reset the latch.
+        again = await repo.mark_batch_ingested("ing-mb4", 1, ingestion_finished=False)
+        assert isinstance(again, Applied)
+        assert again.run.ingestion_finished is True
+
+    async def test_noop_on_terminal_run(self, pg_session: AsyncSession):
+        repo = PostgresIngestRunRepository(pg_session)
+        await repo.save(_make_run("ing-mb5"))
+        await repo.abort(
+            "ing-mb5",
+            reason="bad image",
+            kind=FailureKind.IMAGE_PULL,
+            completed_at=datetime.now(UTC),
+        )
+
+        result = await repo.mark_batch_ingested("ing-mb5", 9, ingestion_finished=True)
+
+        assert isinstance(result, RunClosed)
+        fetched = await repo.get(IngestRunId("ing-mb5"))
+        assert fetched is not None
+        assert fetched.batches_ingested == 1  # _make_run seeds 1; abort didn't advance it
+
+    async def test_missing_run_raises(self, pg_session: AsyncSession):
+        repo = PostgresIngestRunRepository(pg_session)
+        with pytest.raises(NotFoundError):
+            await repo.mark_batch_ingested("does-not-exist", 0, ingestion_finished=False)

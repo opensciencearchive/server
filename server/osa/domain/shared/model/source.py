@@ -57,6 +57,11 @@ class IngestSource(_RecordSourceBase):
     type: Literal["ingest"] = "ingest"
     ingest_run_id: str
     upstream_source: str
+    batch_index: int | None = None
+    """Which ingest batch published this record (#160).
+
+    ``None`` only for records predating the field.
+    """
 
 
 def _record_source_discriminator(v: Any) -> str:

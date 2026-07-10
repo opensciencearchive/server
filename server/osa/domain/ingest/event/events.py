@@ -25,6 +25,12 @@ class NextBatchRequested(Event):
     ingest_run_id: IngestRunId
     convention_id: str
     batch_size: int
+    batch_index: int
+    """Which batch this request pulls (#160).
+
+    Carried in the event so retries and pipelined batches never re-derive it
+    from mutable run counters — the index is fixed at emission time.
+    """
 
 
 class IngesterBatchReady(Event):

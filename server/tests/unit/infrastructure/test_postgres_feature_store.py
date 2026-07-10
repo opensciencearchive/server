@@ -154,7 +154,22 @@ class TestInsertFeatures:
         count = await store.insert_features("pocket_detect", "urn:rec:1", rows, _RUN_ID)
 
         assert count == 2
-        conn.execute.assert_called_once()
+        # Replace semantics (#160): one DELETE (scoped to the record) + one insert chunk.
+        assert conn.execute.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_deletes_existing_rows_for_record_before_insert(self):
+        """Replace-by-record: a DELETE scoped to record_srn precedes the insert (#160)."""
+        engine, conn = _mock_engine_with_reflect("pocket_detect", ["score"])
+        store = PostgresFeatureStore(engine=engine, session=AsyncMock())
+
+        await store.insert_features("pocket_detect", "urn:rec:1", [{"score": 0.95}], _RUN_ID)
+
+        # First execute is the DELETE; second is the insert.
+        delete_stmt = conn.execute.call_args_list[0][0][0]
+        compiled = delete_stmt.compile()
+        assert "DELETE FROM" in str(compiled)
+        assert "record_srn" in str(compiled)
 
     @pytest.mark.asyncio
     async def test_empty_rows_returns_zero(self):
@@ -189,7 +204,8 @@ class TestInsertFeatures:
         count = await store.insert_features("hook", "urn:rec:1", rows, _RUN_ID)
 
         assert count == 2500
-        assert conn.execute.call_count == 3  # 1000 + 1000 + 500
+        # 1 replace-DELETE + 3 insert chunks (1000 + 1000 + 500).
+        assert conn.execute.call_count == 4
 
     @pytest.mark.asyncio
     async def test_single_chunk_for_small_batch(self):
@@ -200,7 +216,8 @@ class TestInsertFeatures:
         count = await store.insert_features("hook", "urn:rec:1", rows, _RUN_ID)
 
         assert count == 999
-        assert conn.execute.call_count == 1
+        # 1 replace-DELETE + 1 insert chunk.
+        assert conn.execute.call_count == 2
 
     @pytest.mark.asyncio
     async def test_insert_rejects_invalid_hook_name(self):

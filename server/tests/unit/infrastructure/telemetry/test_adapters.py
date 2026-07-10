@@ -189,7 +189,9 @@ def test_workflow_stage_finished_counts_by_workflow_stage_outcome(reader, meter)
     points = {
         tuple(sorted(a.items())): p.value for a, p in _points(reader, "osa_workflow_stages_total")
     }
-    assert points[(("outcome", "ran"), ("stage", "validate"), ("workflow", "process_submission"))] == 1
+    assert (
+        points[(("outcome", "ran"), ("stage", "validate"), ("workflow", "process_submission"))] == 1
+    )
     assert points[(("outcome", "skipped"), ("stage", "hooks"), ("workflow", "process_batch"))] == 1
 
 

@@ -3,7 +3,7 @@
 import logging
 from datetime import datetime
 
-from sqlalchemy import RowMapping, select, update
+from sqlalchemy import RowMapping, case, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -111,6 +111,38 @@ class PostgresIngestRunRepository(IngestRunRepository):
             "batches_ingested": t.c.batches_ingested + 1,
         }
         if set_ingestion_finished:
+            values["ingestion_finished"] = True
+
+        stmt = (
+            update(t)
+            .where(t.c.id == id)
+            .where(t.c.status.in_(_NON_TERMINAL))
+            .values(**values)
+            .returning(*t.c)
+        )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return await self._applied_or_closed(result.mappings().first(), id)
+
+    async def mark_batch_ingested(
+        self, id: str, batch_index: int, *, ingestion_finished: bool
+    ) -> RunUpdate:
+        """Idempotently advance batches_ingested to batch_index+1, non-terminal only (#160).
+
+        Uses a portable ``CASE WHEN`` (GREATEST semantics) so a duplicate
+        delivery for an already-counted batch — or one that lags a counter that
+        ran ahead — is a no-op. ``ingestion_finished`` latches True and is never
+        reset (omitted from the UPDATE when the flag is False, mirroring
+        ``increment_batches_ingested``).
+        """
+        t = ingest_runs_table
+        values = {
+            "batches_ingested": case(
+                (t.c.batches_ingested < batch_index + 1, batch_index + 1),
+                else_=t.c.batches_ingested,
+            ),
+        }
+        if ingestion_finished:
             values["ingestion_finished"] = True
 
         stmt = (

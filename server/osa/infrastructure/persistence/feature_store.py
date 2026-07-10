@@ -82,6 +82,12 @@ class PostgresFeatureStore(FeatureStore):
         rows: list[dict[str, Any]],
         run_id: str,
     ) -> int:
+        """Insert this record's feature rows with replace semantics per record.
+
+        Redoing an insert after a partial failure converges instead of
+        duplicating rows (#160): existing rows for ``record_srn`` in this
+        feature table are deleted before the insert, in the same transaction.
+        """
         if not rows:
             return 0
 
@@ -108,6 +114,10 @@ class PostgresFeatureStore(FeatureStore):
             metadata = sa.MetaData(schema=pg_schema)
             await conn.run_sync(metadata.reflect, only=[pg_table])
             table = metadata.tables[f"{pg_schema}.{pg_table}"]
+
+            # Replace-by-record: drop any prior rows for this record so a redo
+            # after a partial failure converges instead of duplicating (#160).
+            await conn.execute(table.delete().where(table.c.record_srn == record_srn))
 
             for i in range(0, len(enriched_rows), chunk_size):
                 chunk = enriched_rows[i : i + chunk_size]
