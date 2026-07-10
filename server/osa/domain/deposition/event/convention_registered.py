@@ -9,12 +9,11 @@ from osa.domain.shared.model.srn import ConventionSlug, SchemaId
 class ConventionRegistered(Event):
     """Emitted when a convention is created via deploy.
 
-    Carries hook definitions so ``CreateFeatureTables`` can create feature
-    tables without querying the convention repository.
-
-    Carries ``schema_id`` and ``schema_fields`` so ``EnsureMetadataTable`` can
-    create and evolve typed metadata tables without traversing the semantics
-    repository.
+    Audit-only (#160): the former ``CreateFeatureTables`` / ``EnsureMetadataTable``
+    subscribers are gone — feature-table creation is inlined at the deploy command
+    handler and metadata projection is a synchronous dual-write. The event lives
+    on for the ``/events`` changefeed and keeps its hook + schema payload so that
+    record remains self-describing to changefeed consumers.
     """
 
     id: EventId

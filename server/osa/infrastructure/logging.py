@@ -101,9 +101,9 @@ class OSAConsoleExporter(SimpleConsoleSpanExporter):
 def _shorten_module(name: str) -> str:
     """Shorten module path to fit ~20 chars.
 
-    ``osa.domain.ingest.handler.run_ingester`` → ``ingest.run_ingester``
-    ``osa.infrastructure.oci.runner``           → ``infra.oci.runner``
-    ``osa.domain.feature.handler.insert_batch_features`` → ``feat.ins_batch_feat``
+    ``osa.domain.ingest.service.ingest``  → ``ingest.ingest``
+    ``osa.infrastructure.oci.runner``     → ``infra.oci.runner``
+    ``osa.domain.feature.service.feature`` → ``feature.feature``
     """
     short = (
         name.replace("osa.domain.", "")

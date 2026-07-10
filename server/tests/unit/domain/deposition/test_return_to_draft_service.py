@@ -1,4 +1,10 @@
-"""TDD Red: Tests for ReturnToDraft handler delegating to DepositionService."""
+"""Tests for DepositionService.return_to_draft().
+
+The return-to-draft transition used to be reachable via a ``ReturnToDraft`` event
+handler; that handler was deleted when the pipeline collapsed into orchestrated
+workflows (#160). The service method it delegated to lives on — ProcessSubmission
+calls it directly on the validation-failed / on-exhausted paths.
+"""
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
@@ -9,10 +15,7 @@ import pytest
 from osa.domain.auth.model.value import UserId
 from osa.domain.deposition.model.aggregate import Deposition
 from osa.domain.deposition.model.value import DepositionStatus
-from osa.domain.shared.event import EventId
 from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
-from osa.domain.validation.event.validation_failed import ValidationFailed
-from osa.domain.validation.model import RunStatus
 
 
 def _make_dep_srn() -> DepositionSRN:
@@ -76,45 +79,3 @@ class TestDepositionServiceReturnToDraft:
 
         with pytest.raises(NotFoundError):
             await service.return_to_draft(_make_dep_srn())
-
-
-class TestReturnToDraftHandlerDelegatesToService:
-    """ReturnToDraft handler delegates to deposition_service.return_to_draft()."""
-
-    @pytest.mark.asyncio
-    async def test_handler_delegates_to_service(self):
-        from osa.domain.deposition.handler.return_to_draft import ReturnToDraft
-
-        service = AsyncMock()
-        handler = ReturnToDraft(deposition_service=service)
-
-        event = ValidationFailed(
-            id=EventId(uuid4()),
-            deposition_srn=_make_dep_srn(),
-            convention_id=_make_conv_slug(),
-            status=RunStatus.FAILED,
-            reasons=["Missing required field"],
-        )
-        await handler.handle(event)
-
-        service.return_to_draft.assert_called_once_with(_make_dep_srn())
-
-    @pytest.mark.asyncio
-    async def test_handler_catches_not_found(self):
-        """Handler should not blow up if deposition is missing — workers must be resilient."""
-        from osa.domain.deposition.handler.return_to_draft import ReturnToDraft
-        from osa.domain.shared.error import NotFoundError
-
-        service = AsyncMock()
-        service.return_to_draft.side_effect = NotFoundError("not found")
-
-        handler = ReturnToDraft(deposition_service=service)
-        event = ValidationFailed(
-            id=EventId(uuid4()),
-            deposition_srn=_make_dep_srn(),
-            convention_id=_make_conv_slug(),
-            status=RunStatus.FAILED,
-            reasons=["error"],
-        )
-        # Should not raise
-        await handler.handle(event)

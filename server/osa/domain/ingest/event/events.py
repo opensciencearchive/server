@@ -17,8 +17,9 @@ class IngestRunStarted(Event):
 class NextBatchRequested(Event):
     """Emitted to trigger the next ingester batch pull.
 
-    Emitted by StartIngest (first batch) and by RunIngester (continuation).
-    RunIngester is the only handler that listens to this event.
+    Appended by ``start_ingest`` (first batch, index 0) and by ``ProcessBatch``
+    (continuation, index+1; backpressure requeue, same index). ``ProcessBatch``
+    is its only consumer.
     """
 
     id: EventId
@@ -59,8 +60,8 @@ class HookBatchCompleted(Event):
 class IngestBatchPublished(Event):
     """Emitted when records from a batch are bulk-published.
 
-    Triggers InsertBatchFeatures for feature insertion.
-    Batch-level event — NOT per-record (AD-3).
+    Audit-only (#160): feature insertion now runs inline as ProcessBatch's next
+    stage rather than via a subscriber. Batch-level event — NOT per-record (AD-3).
     """
 
     id: EventId

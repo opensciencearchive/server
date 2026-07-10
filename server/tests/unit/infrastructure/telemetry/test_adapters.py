@@ -157,15 +157,18 @@ def test_ingest_run_finished_kind_none_maps_to_none_label(reader, meter):
 def test_outbox_delivery_completed_counter_and_histogram(reader, meter):
     instr = OtelOutboxInstrumentation(meter)
     instr.delivery_completed(
-        consumer_group="RunHooks", status=DeliveryStatus.DELIVERED, retry_count=0, duration_s=0.25
+        consumer_group="ProcessBatch",
+        status=DeliveryStatus.DELIVERED,
+        retry_count=0,
+        duration_s=0.25,
     )
 
     (attrs, point) = _points(reader, "osa_deliveries_total")[0]
-    assert attrs == {"consumer_group": "RunHooks", "status": "delivered"}
+    assert attrs == {"consumer_group": "ProcessBatch", "status": "delivered"}
     assert point.value == 1
 
     (h_attrs, h_point) = _points(reader, "osa_dispatch_duration_seconds")[0]
-    assert h_attrs == {"consumer_group": "RunHooks"}
+    assert h_attrs == {"consumer_group": "ProcessBatch"}
     assert h_point.sum == pytest.approx(0.25)
 
 

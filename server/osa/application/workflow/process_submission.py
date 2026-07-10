@@ -78,9 +78,9 @@ class ProcessSubmission(EventHandler[DepositionSubmittedEvent]):
         if dep is None:
             # Deterministic: this delivery can never succeed — dead-letter now
             # rather than burn a container-sized retry budget on a missing row.
-            raise PermanentError(
+            raise PermanentError(f"Deposition not found: {event.deposition_id}") from NotFoundError(
                 f"Deposition not found: {event.deposition_id}"
-            ) from NotFoundError(f"Deposition not found: {event.deposition_id}")
+            )
 
         # The publish stage commits ACCEPTED before the feature stage runs, so a
         # crash or error during feature insertion redelivers with an ACCEPTED
@@ -218,9 +218,7 @@ class ProcessSubmission(EventHandler[DepositionSubmittedEvent]):
             try:
                 record = await self.record_service.publish_record(draft)
             except NotFoundError as exc:
-                raise PermanentError(
-                    f"Cannot publish {event.deposition_id}: {exc}"
-                ) from exc
+                raise PermanentError(f"Cannot publish {event.deposition_id}: {exc}") from exc
 
             # Complete the deposition — sets record_srn + ACCEPTED, closing the
             # audited gap where the success path left it IN_VALIDATION forever.

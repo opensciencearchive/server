@@ -5,22 +5,17 @@ from typing import Any, NewType
 
 from dishka import AsyncContainer, provide
 
+# Composition-root wiring: this DI module is the one place the application layer
+# is imported from infrastructure, so the orchestrators can be registered as the
+# node's core event handlers (#160).
+from osa.application.workflow.process_batch import ProcessBatch
+from osa.application.workflow.process_submission import ProcessSubmission
 from osa.config import Config
-from osa.domain.curation.handler import AutoApproveCuration
-from osa.domain.deposition.handler import ReturnToDraft
-from osa.domain.feature.handler import (
-    CreateFeatureTables,
-    InsertBatchFeatures,
-    InsertRecordFeatures,
-)
-from osa.domain.ingest.handler import PublishBatch, RunHooks, RunIngester
-from osa.domain.record.handler import ConvertDepositionToRecord
 from osa.domain.shared.event import EventHandler
 from osa.domain.shared.event_log import EventLog
 from osa.domain.shared.model.subscription_registry import SubscriptionRegistry
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.event_repository import EventRepository
-from osa.domain.validation.handler import ValidateDeposition
 from osa.infrastructure.event.worker import WorkerPool
 from osa.infrastructure.telemetry.sampler import TelemetrySampler
 from osa.util.di.base import Provider
@@ -32,26 +27,19 @@ logger = logging.getLogger(__name__)
 # Type alias for handler list
 HandlerTypes = NewType("HandlerTypes", list[type[EventHandler[Any]]])
 
-# Core event handlers shipped with OSA
+# Core event handlers shipped with OSA.
+#
+# The pipeline is orchestrated, not choreographed (#160): each workflow is a
+# single handler that runs its stages in order and checkpoints durable state
+# between them, replacing the former ten-handler event chain. ProcessSubmission
+# drives the deposition path (DepositionSubmittedEvent) and ProcessBatch drives
+# the ingest path (NextBatchRequested). Every domain event those workflows
+# append is now audit-only (no subscribers). Feature-table creation on convention
+# deploy is inlined at the deploy command handler (decision 9), not an event
+# handler. Metadata projection is a synchronous dual-write inside the services.
 _CORE_HANDLERS: list[type[EventHandler[Any]]] = [
-    # Feature handlers (must run before source triggers)
-    CreateFeatureTables,
-    InsertRecordFeatures,
-    InsertBatchFeatures,
-    # Metadata projection is now synchronous (dual-write inside RecordService /
-    # ConventionService) — no event handlers required for it.
-    # Ingest handlers
-    RunIngester,
-    RunHooks,
-    PublishBatch,
-    # Validation handlers
-    ValidateDeposition,
-    # Deposition handlers
-    ReturnToDraft,
-    # Curation handlers
-    AutoApproveCuration,
-    # Record handlers
-    ConvertDepositionToRecord,
+    ProcessSubmission,
+    ProcessBatch,
 ]
 
 

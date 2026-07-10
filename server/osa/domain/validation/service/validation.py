@@ -141,7 +141,7 @@ class ValidationService(Service):
                 break
 
             finished_at = datetime.now(timezone.utc)
-            # run.json carries run_id to InsertRecordFeatures — no DB lookup (§6).
+            # run.json carries run_id to the feature-insert stage — no DB lookup (§6).
             await self.hook_storage.write_run_ref(work_dir, str(run_id), str(release.id))
             await self.hook_registry.record_run(
                 HookRun(

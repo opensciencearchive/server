@@ -232,8 +232,8 @@ class Worker:
             self._state.last_claim_at = result.claimed_at
 
             # Link the dispatch span back to every origin span in the batch so
-            # request → RunHooks → PublishBatch → … chains reconnect across the
-            # outbox. The span is current while ``handle`` runs, so handler-internal
+            # request → ProcessSubmission / ProcessBatch → … chains reconnect
+            # across the outbox. The span is current while ``handle`` runs, so handler-internal
             # spans nest under it and events appended during handling capture it as
             # their traceparent (the next hop links back here).
             links = self._links_from_deliveries(result.deliveries)
@@ -452,7 +452,7 @@ class WorkerPool:
         """Register an EventHandler type and create Worker(s) for it.
 
         Concurrency is determined by (in priority order):
-        1. Config override (e.g. ``config.worker.hook_concurrency`` for RunHooks)
+        1. Config override (``config.worker.hook_concurrency`` for ProcessBatch)
         2. Handler classvar ``__concurrency__``
         3. Default of 1
 
@@ -461,11 +461,14 @@ class WorkerPool:
         """
         concurrency = getattr(handler_type, "__concurrency__", 1)
 
-        # Apply config overrides
+        # Apply config overrides. The limit was introduced to bound concurrent
+        # hook containers; ProcessBatch now contains the hook stage, so the same
+        # ``hook_concurrency`` sizes its fan-out. Running >1 workers is also what
+        # preserves batch pipelining (batch N+1 ingests while batch N runs hooks).
         if config is not None:
-            from osa.domain.ingest.handler.run_hooks import RunHooks
+            from osa.application.workflow.process_batch import ProcessBatch
 
-            if handler_type is RunHooks:
+            if handler_type is ProcessBatch:
                 concurrency = config.worker.hook_concurrency
 
         first_worker = None

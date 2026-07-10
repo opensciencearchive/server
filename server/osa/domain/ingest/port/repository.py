@@ -14,7 +14,7 @@ class IngestRunRepository(Port, Protocol):
 
     Counter updates (batches_completed, published_count) use atomic SQL
     increments in the concrete implementation to avoid lost updates under
-    concurrent PublishBatch workers.
+    concurrent ProcessBatch workers.
     """
 
     @abstractmethod

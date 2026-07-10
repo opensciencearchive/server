@@ -106,7 +106,11 @@ class WorkerConfig(BaseModel):
 
     poll_interval: float = 0.5  # Seconds between outbox polls
     batch_size: int = 100  # Maximum events to fetch per poll cycle
-    hook_concurrency: int = 8  # Number of concurrent hook workers
+    # Sizes the ProcessBatch worker fan-out: the number of concurrent ingest-batch
+    # orchestrators, which bounds concurrent hook containers and enables batch
+    # pipelining (#160). Name kept for deployment compatibility; the rename to a
+    # workflow-neutral key is #160 Phase 2.
+    hook_concurrency: int = 8
 
 
 class K8sConfig(BaseModel):

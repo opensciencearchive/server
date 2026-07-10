@@ -641,6 +641,39 @@ class TestHooksAbortOnEnvironmentalFailure:
         assert not any(isinstance(e, HookBatchCompleted) for e in _emitted(handler))
         handler.record_service.bulk_publish.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_abort_dominates_retry_in_a_mixed_batch(self) -> None:
+        """Most-severe wins: a transient-retry hook alongside an abort-worthy one
+        yields an abort, not a re-drive (#152 decision precedence)."""
+        # hook_a wants a transient retry; hook_b hit an unpullable image.
+        execs = [
+            _failed_exec("hook_a", FailureKind.TIMEOUT),
+            _failed_exec("hook_b", FailureKind.IMAGE_PULL, offset=10),
+        ]
+        handler = _make_handler(hook_names=("hook_a", "hook_b"), executions=execs)
+
+        await handler.handle(_make_event())
+
+        # Abort wins: the run is hard-stopped, the batch is NOT re-driven or completed.
+        handler.ingest_service.abort_run.assert_awaited_once()
+        assert not any(isinstance(e, HookBatchCompleted) for e in _emitted(handler))
+
+
+class TestHooksTerminalFailurePolicy:
+    """GiveUp-class hook failures record an ERROR run and COMPLETE the batch —
+    the failed feature is dropped, its passing siblings and records survive."""
+
+    @pytest.mark.asyncio
+    async def test_oom_exhaustion_completes_batch_with_retry_count(self) -> None:
+        handler = _make_handler(executions=[_failed_exec("pockets", FailureKind.OOM)])
+
+        await handler.handle(_make_event())
+
+        run = _recorded_runs(handler)[0]
+        assert run.status == HookRunStatus.ERROR and run.oom_retries == 3
+        assert any(isinstance(e, HookBatchCompleted) for e in _emitted(handler))
+        handler.ingest_service.fail_batch.assert_not_called()
+
 
 class TestHooksMetricsEmission:
     @pytest.mark.asyncio

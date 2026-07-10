@@ -129,10 +129,10 @@ async def test_refresh_populates_all_gauges(reader, meter):
     oldest = datetime.now(UTC) - timedelta(seconds=12)
     stats = DeliveryStats(
         counts={
-            ("RunHooks", DeliveryStatus.PENDING): 3,
-            ("PublishBatch", DeliveryStatus.PENDING): 1,
-            ("RunHooks", DeliveryStatus.FAILED): 2,
-            ("RunHooks", DeliveryStatus.DELIVERED): 99,
+            ("ProcessBatch", DeliveryStatus.PENDING): 3,
+            ("ProcessSubmission", DeliveryStatus.PENDING): 1,
+            ("ProcessBatch", DeliveryStatus.FAILED): 2,
+            ("ProcessBatch", DeliveryStatus.DELIVERED): 99,
         },
         oldest_pending_created_at=oldest,
     )
@@ -150,10 +150,10 @@ async def test_refresh_populates_all_gauges(reader, meter):
     assert lag_val == pytest.approx(12.0, abs=2.0)
 
     pending = {a["consumer_group"]: v for a, v in _points(reader, "osa_outbox_pending")}
-    assert pending == {"RunHooks": 3, "PublishBatch": 1}
+    assert pending == {"ProcessBatch": 3, "ProcessSubmission": 1}
 
     failed = {a["consumer_group"]: v for a, v in _points(reader, "osa_outbox_failed")}
-    assert failed == {"RunHooks": 2}
+    assert failed == {"ProcessBatch": 2}
 
     assert _points(reader, "osa_workers_busy") == [({}, 2)]
     assert _points(reader, "osa_workers_total") == [({}, 3)]
@@ -206,7 +206,7 @@ async def test_refresh_error_keeps_previous_snapshot(meter, monkeypatch):
 
     good = SamplerSnapshot(
         outbox_lag_seconds=5.0,
-        pending_by_group={"RunHooks": 7},
+        pending_by_group={"ProcessBatch": 7},
         failed_by_group={},
         pool=PoolStats(checked_out=1, size=5, overflow=0),
         workers_busy=1,
