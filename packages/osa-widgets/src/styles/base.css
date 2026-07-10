@@ -1,30 +1,24 @@
 /* Shared base styles for all OSA widgets. Sandbox-safe: system fonts only,
-   no external resources, light/dark via prefers-color-scheme. */
+   no external resources.
+
+   Palette mirrors the OSA landing site (sage accent, off-white background,
+   not-quite-black text). The widgets render as a consistent branded light
+   card in any host — the off-white identity is deliberate, so there is no
+   dark-mode auto-switch. */
 
 :root {
-  --bg: #ffffff;
-  --fg: #1a1d21;
-  --fg-muted: #5c6570;
-  --border: #d9dee3;
-  --surface: #f5f7f9;
-  --accent: #2563eb;
-  --warning-bg: #fef3c7;
-  --warning-fg: #92400e;
-  --error-fg: #b91c1c;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #14161a;
-    --fg: #e6e9ec;
-    --fg-muted: #9aa4af;
-    --border: #33393f;
-    --surface: #1d2126;
-    --accent: #60a5fa;
-    --warning-bg: #3a2e12;
-    --warning-fg: #fcd34d;
-    --error-fg: #f87171;
-  }
+  --bg: #fdfdfd; /* off-white */
+  --fg: hsl(0, 0%, 5%); /* not-quite-black */
+  --fg-muted: hsl(0, 0%, 38%);
+  --fg-subtle: hsl(0, 0%, 55%);
+  --border: hsl(0, 0%, 88%);
+  --surface: hsl(160, 20%, 97%); /* sage-tinted off-white */
+  --accent: hsl(160, 30%, 42%); /* sage (deepened for contrast on off-white) */
+  --accent-hover: hsl(160, 35%, 32%);
+  --accent-light: hsl(160, 25%, 95%);
+  --warning-bg: hsl(40, 60%, 94%);
+  --warning-fg: hsl(35, 55%, 32%);
+  --error-fg: hsl(2, 55%, 46%);
 }
 
 * {
@@ -176,6 +170,7 @@ button.osa-button.primary {
   padding: 10px 12px;
   margin-bottom: 8px;
   background: var(--bg);
+  box-shadow: 0 1px 2px hsl(0, 0%, 0%, 0.04);
 }
 
 .card.clickable {
@@ -299,4 +294,9 @@ details.filter-json pre {
 
 a {
   color: var(--accent);
+  text-decoration-color: var(--accent-light);
+}
+
+a:hover {
+  color: var(--accent-hover);
 }
