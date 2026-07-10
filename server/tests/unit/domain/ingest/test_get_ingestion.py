@@ -1,7 +1,7 @@
 """Tests for GetIngestion — a failed run carries a queryable explanation (#152)."""
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -92,6 +92,7 @@ class TestGetIngestionService:
             convention_service=AsyncMock(),
             outbox=AsyncMock(),
             node_domain=Domain("localhost"),
+            instrumentation=MagicMock(),
         )
 
         with pytest.raises(NotFoundError):

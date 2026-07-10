@@ -12,6 +12,7 @@ from osa.domain.ingest.model.ingest_run import (
     IngestStatus,
     RunClosed,
 )
+from osa.domain.ingest.port.instrumentation import IngestInstrumentation
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.shared.error import ConflictError, NotFoundError
 from osa.domain.shared.event import EventId
@@ -31,6 +32,7 @@ class IngestService(Service):
     convention_service: ConventionService
     outbox: Outbox
     node_domain: Domain
+    instrumentation: IngestInstrumentation
 
     async def start_ingest(
         self,
@@ -129,6 +131,7 @@ class IngestService(Service):
                     published_count=published_count,
                 )
             case Applied(run):
+                self.instrumentation.batch_completed(published_count=published_count)
                 await self._check_completion(run)
 
     async def fail_batch(
@@ -150,6 +153,7 @@ class IngestService(Service):
                     reason=reason,
                 )
             case Applied(run):
+                self.instrumentation.batch_failed(kind=kind)
                 await self._check_completion(run)
                 await self.ingest_repo.record_failure(ingest_run_id, reason=reason, kind=kind)
 
@@ -186,6 +190,7 @@ class IngestService(Service):
                     reason=reason,
                 )
             case Applied(run):
+                self.instrumentation.batch_failed(kind=kind)
                 await self._check_completion(run)
                 await self.ingest_repo.record_failure(ingest_run_id, reason=reason, kind=kind)
 
@@ -212,6 +217,9 @@ class IngestService(Service):
                     ingest_run_id=ingest_run_id,
                 )
             case Applied():
+                # Terminal metric for the abort path — the run reaches FAILED
+                # exactly once here (subsequent aborts return RunClosed).
+                self.instrumentation.run_finished(status=IngestStatus.FAILED, kind=kind)
                 log.error(
                     "[{short_id}] run ABORTED ({kind}): {reason}",
                     short_id=str(ingest_run_id)[:8],
@@ -225,6 +233,11 @@ class IngestService(Service):
         if not ingest_run.check_completion(datetime.now(UTC)):
             return
         await self.ingest_repo.save(ingest_run)
+        # Terminal metric for the natural-completion path. ``check_completion``
+        # only transitions RUNNING → COMPLETED, and it fires at most once per run
+        # (subsequent calls see a non-RUNNING status), so this can't double-count
+        # nor collide with the abort_run path (which terminalizes to FAILED).
+        self.instrumentation.run_finished(status=ingest_run.status, kind=ingest_run.failure_kind)
         await self.outbox.append(
             IngestCompleted(
                 id=EventId(uuid4()),

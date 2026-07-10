@@ -21,6 +21,7 @@ from osa.application.api.v1.routes import (
     hooks,
     ingestions,
     health,
+    metrics,
     ontologies,
     schemas,
     stats,
@@ -36,6 +37,8 @@ from osa.domain.shared.error import OSAError
 from osa.domain.shared.event import EventHandler
 from osa.infrastructure.event.worker import WorkerPool
 from osa.infrastructure.persistence.seed import ensure_system_user
+from osa.infrastructure.telemetry.api import ApiInstrumentation
+from osa.infrastructure.telemetry.setup import bootstrap
 from osa.util.di.fastapi import setup_dishka
 
 logger = logging.getLogger(__name__)
@@ -99,6 +102,12 @@ async def lifespan(app: FastAPI):
     async with worker_pool:
         yield
 
+    # Flush buffered telemetry (span/metric/log exporters) before teardown.
+    # NOT logfire.shutdown(): that tears down the process-global providers,
+    # which would break later create_app() instances in the same test process
+    # (the bootstrap is configure-once and never re-runs).
+    logfire.force_flush()
+
     await container.close()
 
 
@@ -132,39 +141,9 @@ def create_app(
     # Refuse to boot if the dev JWT secret is misconfigured for the deploy.
     _check_dev_secret_safety(config)
 
-    # Configure logfire as the single logging system
-    import logging as _logging
-
-    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-
-    from osa.infrastructure.logging import OSAConsoleExporter
-
-    logfire.configure(
-        send_to_logfire="if-token-present",
-        service_name=config.name,
-        console=False,  # Disable default console — we use OSAConsoleExporter
-        inspect_arguments=False,
-        additional_span_processors=[
-            SimpleSpanProcessor(
-                OSAConsoleExporter(
-                    output=sys.stderr,
-                    include_timestamp=True,
-                    min_log_level=config.logging.level,
-                )
-            ),
-        ],
-    )
-
-    # Route Python logging through logfire so old-style logger.info() calls
-    # appear in the same output stream
-    root = _logging.getLogger()
-    root.setLevel(config.logging.level.upper())
-    for h in root.handlers[:]:
-        root.removeHandler(h)
-    root.addHandler(logfire.LogfireLoggingHandler())
-
-    # Suppress duplicate access logs — logfire FastAPI instrumentation handles HTTP logging
-    _logging.getLogger("uvicorn.access").setLevel(_logging.WARNING)
+    # Configure the process-global telemetry pipeline (logfire + OTel exporters).
+    # Idempotent across repeated create_app() calls in one process.
+    bootstrap.configure(config)
 
     logfire.info("Starting OSA server: {name} v{version}", name=config.name, version=config.version)
 
@@ -181,7 +160,9 @@ def create_app(
     logfire.instrument_httpx()
     logfire.instrument_fastapi(
         app_instance,
-        excluded_urls="/api/v1/health",
+        # Probes and the scrape endpoint are high-frequency and uninteresting as
+        # traces; the OTel FastAPI instrumentor takes a comma-separated regex list.
+        excluded_urls="/api/v1/health,/api/v1/ready,/metrics",
     )
 
     # Setup dependency injection
@@ -206,9 +187,11 @@ def create_app(
     app_instance.include_router(validation.router, prefix="/api/v1")
     app_instance.include_router(data_routes.router, prefix="/api/v1")
 
-    # Unversioned root surface — GET / and GET /SKILL.md (#151). Included
-    # after the /api/v1 routers so nothing shadows the API prefix.
+    # Unversioned root surface — GET / and GET /SKILL.md (#151), plus GET
+    # /metrics (#158, Prometheus convention). Included after the /api/v1
+    # routers so nothing shadows the API prefix.
     app_instance.include_router(skill_routes.router)
+    app_instance.include_router(metrics.router)
 
     # POST /data/* rate limiting (slowapi). The shared limiter is attached to
     # app state and its 429 handler registered; GET routes are not limited.
@@ -238,6 +221,14 @@ def create_app(
             request.method,
             request.url.path,
         )
+        # Count the unhandled error for observability. A telemetry failure must
+        # never mask the 500 response, so resolution + emission is guarded and
+        # only logged.
+        try:
+            instrumentation = await request.app.state.dishka_container.get(ApiInstrumentation)
+            instrumentation.unhandled_error()
+        except Exception:
+            logger.warning("Failed to record unhandled-error metric", exc_info=True)
         return JSONResponse(
             status_code=500,
             content={"detail": "Internal server error"},

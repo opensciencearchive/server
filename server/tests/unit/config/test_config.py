@@ -179,3 +179,48 @@ class TestDataConfig:
     def test_max_page_limit_yaml_override(self):
         cfg = config_from_yaml({"data": {"max_page_limit": 250}})
         assert cfg.data.max_page_limit == 250
+
+
+class TestObservabilityConfig:
+    """Telemetry export configuration group (metrics/logs/traces), OSA_OBSERVABILITY__*."""
+
+    def test_defaults(self):
+        """Fresh Config has push export disabled, Prometheus on, full sampling, no token."""
+        cfg = config_from_yaml({})
+        assert cfg.observability.otlp_endpoint is None
+        assert cfg.observability.otlp_token is None
+        assert cfg.observability.prometheus_enabled is True
+        assert cfg.observability.trace_sample_rate == 1.0
+
+    def test_env_override(self):
+        """OSA_OBSERVABILITY__* env vars populate the nested group."""
+        cfg = config_from_yaml(
+            {},
+            env_overrides={
+                "OSA_OBSERVABILITY__OTLP_ENDPOINT": "https://otlp.example.com",
+                "OSA_OBSERVABILITY__PROMETHEUS_ENABLED": "false",
+                "OSA_OBSERVABILITY__TRACE_SAMPLE_RATE": "0.25",
+                "OSA_OBSERVABILITY__OTLP_TOKEN": "sekrit",
+            },
+        )
+        assert cfg.observability.otlp_endpoint == "https://otlp.example.com"
+        assert cfg.observability.prometheus_enabled is False
+        assert cfg.observability.trace_sample_rate == 0.25
+        assert cfg.observability.otlp_token is not None
+        assert cfg.observability.otlp_token.get_secret_value() == "sekrit"
+
+    def test_trace_sample_rate_above_one_raises(self):
+        """trace_sample_rate > 1.0 fails validation."""
+        with pytest.raises(Exception):  # Pydantic ValidationError
+            config_from_yaml(
+                {},
+                env_overrides={"OSA_OBSERVABILITY__TRACE_SAMPLE_RATE": "1.5"},
+            )
+
+    def test_trace_sample_rate_below_zero_raises(self):
+        """trace_sample_rate < 0.0 fails validation."""
+        with pytest.raises(Exception):  # Pydantic ValidationError
+            config_from_yaml(
+                {},
+                env_overrides={"OSA_OBSERVABILITY__TRACE_SAMPLE_RATE": "-0.1"},
+            )

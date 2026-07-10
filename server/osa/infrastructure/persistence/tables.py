@@ -106,6 +106,7 @@ events_table = Table(
     Column("event_type", String(128), nullable=False),
     Column("payload", JSON, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("trace_context", String, nullable=True),
 )
 
 Index(

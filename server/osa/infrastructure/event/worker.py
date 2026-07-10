@@ -1,6 +1,7 @@
 """Worker and WorkerPool for pull-based event processing."""
 
 import asyncio
+import time
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -8,13 +9,20 @@ from typing import TYPE_CHECKING, Any, NewType
 
 if TYPE_CHECKING:
     from osa.config import Config
+    from osa.infrastructure.telemetry.sampler import TelemetrySampler
 
+import logfire
 from apscheduler import AsyncScheduler
 from apscheduler.triggers.cron import CronTrigger
 from dishka import AsyncContainer
+from opentelemetry import trace as otel_trace
+from opentelemetry.trace import SpanContext
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from osa.domain.auth.model.identity import Identity, System
 from osa.domain.shared.error import PermanentError, SkippedEvents, TransientError
 from osa.domain.shared.event import (
+    Delivery,
+    DeliveryStatus,
     EventHandler,
     Schedule,
     WorkerConfig,
@@ -22,10 +30,15 @@ from osa.domain.shared.event import (
     WorkerStatus,
 )
 from osa.domain.shared.outbox import Outbox
+from osa.domain.shared.port.instrumentation import OutboxInstrumentation
 from osa.infrastructure.logging import get_logger
 from osa.util.di.scope import Scope
 
 logger = get_logger(__name__)
+
+# W3C traceparent extraction only (no baggage). Module-level so the propagator
+# is built once; tests monkeypatch ``logfire.span`` in this module's namespace.
+_PROPAGATOR = TraceContextTextMapPropagator()
 
 
 @dataclass
@@ -104,6 +117,16 @@ class Worker:
         """Current worker state."""
         return self._state
 
+    @property
+    def is_alive(self) -> bool:
+        """True when the worker's background task is running (started, not done).
+
+        Distinguishes a started-and-healthy worker from an un-started one (task
+        is None) or a crashed one (task finished). Consumed by the ``/ready``
+        readiness check.
+        """
+        return self._task is not None and not self._task.done()
+
     def set_container(self, container: AsyncContainer) -> None:
         """Set the DI container for scoped dependency resolution."""
         self._container = container
@@ -112,8 +135,6 @@ class Worker:
         """Start the worker in a background task."""
         if self._container is None:
             raise RuntimeError("Container not set. Call set_container() first.")
-
-        import logfire
 
         self._shutdown = False
         self._task = asyncio.create_task(self._run(), name=f"worker-{self.name}")
@@ -143,6 +164,42 @@ class Worker:
         finally:
             logger.info(f"Worker '{self.name}' stopped")
 
+    def _links_from_deliveries(
+        self, deliveries: list[Delivery]
+    ) -> list[tuple[SpanContext, dict[str, str]]]:
+        """Span links back to the operations that appended each claimed event.
+
+        A batch can mix events appended by several unrelated requests, so the
+        dispatch span *links* to each origin span (many-to-one) rather than
+        adopting a single parent. A missing or malformed traceparent must never
+        affect dispatch — it only costs one link.
+        """
+        links: list[tuple[SpanContext, dict[str, str]]] = []
+        for d in deliveries:
+            if d.trace_context is None:
+                # Non-instrumented origin (CLI/cron) — nothing to link, silently.
+                continue
+            try:
+                ctx = _PROPAGATOR.extract({"traceparent": d.trace_context})
+                sc = otel_trace.get_current_span(ctx).get_span_context()
+                if not sc.is_valid:
+                    logger.warn(
+                        "Worker '{name}' ignoring malformed traceparent on delivery {id}",
+                        name=self.name,
+                        id=d.id,
+                    )
+                    continue
+                links.append((sc, {"delivery.id": d.id}))
+            except Exception as exc:
+                # A bad traceparent must NEVER break dispatch — warn and skip.
+                logger.warn(
+                    "Worker '{name}' failed to extract trace link for delivery {id}: {error}",
+                    name=self.name,
+                    id=d.id,
+                    error=str(exc),
+                )
+        return links
+
     async def _poll_once(self) -> bool:
         """Execute one poll cycle: claim deliveries, process, mark status.
 
@@ -156,6 +213,8 @@ class Worker:
 
         async with self._container(scope=Scope.UOW, context={Identity: System()}) as scope:
             outbox = await scope.get(Outbox)
+            # APP-scoped instrument, resolvable from this child UOW scope.
+            instrumentation = await scope.get(OutboxInstrumentation)
 
             # Claim deliveries for this consumer group
             result = await outbox.claim(
@@ -172,43 +231,124 @@ class Worker:
             self._state.current_batch = result.events
             self._state.last_claim_at = result.claimed_at
 
-            handler = await scope.get(self._handler_type)
+            # Link the dispatch span back to every origin span in the batch so
+            # request → RunHooks → PublishBatch → … chains reconnect across the
+            # outbox. The span is current while ``handle`` runs, so handler-internal
+            # spans nest under it and events appended during handling capture it as
+            # their traceparent (the next hop links back here).
+            links = self._links_from_deliveries(result.deliveries)
+            dispatch_start = time.monotonic()
 
-            try:
-                events = result.events
+            with logfire.span(
+                "worker.dispatch {consumer_group}",
+                consumer_group=self._consumer_group,
+                batch_size=len(result.deliveries),
+                _links=links,
+            ):
+                handler = await scope.get(self._handler_type)
 
-                if self._batch_size > 1:
-                    await handler.handle_batch(events)
-                else:
-                    await handler.handle(events[0])
+                try:
+                    events = result.events
 
-                # Mark all deliveries as delivered
-                for delivery in result.deliveries:
-                    await outbox.mark_delivered(delivery.id)
-
-                self._state.processed_count += len(result.deliveries)
-
-            except SkippedEvents as e:
-                logger.warn(f"Worker '{self.name}' skipping {len(e.event_ids)} events: {e.reason}")
-                skipped_set = set(e.event_ids)
-                for delivery in result.deliveries:
-                    if delivery.event.id in skipped_set:
-                        await outbox.mark_skipped(delivery.id, e.reason)
+                    if self._batch_size > 1:
+                        await handler.handle_batch(events)
                     else:
+                        await handler.handle(events[0])
+
+                    # Mark all deliveries as delivered
+                    for delivery in result.deliveries:
                         await outbox.mark_delivered(delivery.id)
-                self._state.processed_count += len(result.deliveries) - len(e.event_ids)
 
-            except TransientError as e:
-                self._state.failed_count += len(result.deliveries)
-                self._state.error = e
-                for delivery in result.deliveries:
-                    exhausted = delivery.retry_count + 1 >= self._max_retries
-                    if exhausted:
-                        logger.warn(
-                            "Worker '{name}' transient retries exhausted: {error}",
-                            name=self.name,
-                            error=str(e),
+                    self._state.processed_count += len(result.deliveries)
+
+                    elapsed = time.monotonic() - dispatch_start
+                    for delivery in result.deliveries:
+                        instrumentation.delivery_completed(
+                            consumer_group=self._consumer_group,
+                            status=DeliveryStatus.DELIVERED,
+                            retry_count=delivery.retry_count,
+                            duration_s=elapsed,
                         )
+
+                except SkippedEvents as e:
+                    logger.warn(
+                        f"Worker '{self.name}' skipping {len(e.event_ids)} events: {e.reason}"
+                    )
+                    skipped_set = set(e.event_ids)
+                    elapsed = time.monotonic() - dispatch_start
+                    for delivery in result.deliveries:
+                        if delivery.event.id in skipped_set:
+                            await outbox.mark_skipped(delivery.id, e.reason)
+                            status = DeliveryStatus.SKIPPED
+                        else:
+                            await outbox.mark_delivered(delivery.id)
+                            status = DeliveryStatus.DELIVERED
+                        instrumentation.delivery_completed(
+                            consumer_group=self._consumer_group,
+                            status=status,
+                            retry_count=delivery.retry_count,
+                            duration_s=elapsed,
+                        )
+                    self._state.processed_count += len(result.deliveries) - len(e.event_ids)
+
+                except TransientError as e:
+                    self._state.failed_count += len(result.deliveries)
+                    self._state.error = e
+                    elapsed = time.monotonic() - dispatch_start
+                    for delivery in result.deliveries:
+                        exhausted = delivery.retry_count + 1 >= self._max_retries
+                        if exhausted:
+                            logger.warn(
+                                "Worker '{name}' transient retries exhausted: {error}",
+                                name=self.name,
+                                error=str(e),
+                            )
+                            try:
+                                await handler.on_exhausted(delivery.event)
+                            except Exception as exhausted_err:
+                                logger.error(
+                                    "Worker '{name}' on_exhausted failed: {error}",
+                                    name=self.name,
+                                    error=str(exhausted_err),
+                                )
+                            await outbox.mark_failed(delivery.id, str(e))
+                        else:
+                            backoff_seconds = min(300, 60 * (2**delivery.retry_count))
+                            deliver_after = datetime.now(UTC) + timedelta(seconds=backoff_seconds)
+                            logger.warn(
+                                "Worker '{name}' transient failure: {error} "
+                                "(attempt={attempt}, next_retry=+{backoff}s)",
+                                name=self.name,
+                                error=str(e),
+                                attempt=delivery.retry_count,
+                                backoff=backoff_seconds,
+                            )
+                            await outbox.mark_failed_with_retry(
+                                delivery.id,
+                                str(e),
+                                max_retries=self._max_retries,
+                                deliver_after=deliver_after,
+                            )
+                        # The counter measures dispatch ATTEMPT outcomes: a
+                        # retry-scheduled delivery is a failed attempt even though
+                        # its row returns to pending for a later re-drive.
+                        instrumentation.delivery_completed(
+                            consumer_group=self._consumer_group,
+                            status=DeliveryStatus.FAILED,
+                            retry_count=delivery.retry_count,
+                            duration_s=elapsed,
+                        )
+
+                except PermanentError as e:
+                    self._state.failed_count += len(result.deliveries)
+                    self._state.error = e
+                    logger.error(
+                        "Worker '{name}' permanent failure: {error}",
+                        name=self.name,
+                        error=str(e),
+                    )
+                    elapsed = time.monotonic() - dispatch_start
+                    for delivery in result.deliveries:
                         try:
                             await handler.on_exhausted(delivery.event)
                         except Exception as exhausted_err:
@@ -218,76 +358,53 @@ class Worker:
                                 error=str(exhausted_err),
                             )
                         await outbox.mark_failed(delivery.id, str(e))
-                    else:
-                        backoff_seconds = min(300, 60 * (2**delivery.retry_count))
-                        deliver_after = datetime.now(UTC) + timedelta(seconds=backoff_seconds)
-                        logger.warn(
-                            "Worker '{name}' transient failure: {error} "
-                            "(attempt={attempt}, next_retry=+{backoff}s)",
-                            name=self.name,
-                            error=str(e),
-                            attempt=delivery.retry_count,
-                            backoff=backoff_seconds,
-                        )
-                        await outbox.mark_failed_with_retry(
-                            delivery.id,
-                            str(e),
-                            max_retries=self._max_retries,
-                            deliver_after=deliver_after,
+                        instrumentation.delivery_completed(
+                            consumer_group=self._consumer_group,
+                            status=DeliveryStatus.FAILED,
+                            retry_count=delivery.retry_count,
+                            duration_s=elapsed,
                         )
 
-            except PermanentError as e:
-                self._state.failed_count += len(result.deliveries)
-                self._state.error = e
-                logger.error(
-                    "Worker '{name}' permanent failure: {error}",
-                    name=self.name,
-                    error=str(e),
-                )
-                for delivery in result.deliveries:
-                    try:
-                        await handler.on_exhausted(delivery.event)
-                    except Exception as exhausted_err:
-                        logger.error(
-                            "Worker '{name}' on_exhausted failed: {error}",
-                            name=self.name,
-                            error=str(exhausted_err),
-                        )
-                    await outbox.mark_failed(delivery.id, str(e))
-
-            except Exception as e:
-                self._state.failed_count += len(result.deliveries)
-                self._state.error = e
-                logger.error(
-                    "Worker '{name}' batch failed: {error}",
-                    name=self.name,
-                    error=str(e),
-                )
-                for delivery in result.deliveries:
-                    exhausted = delivery.retry_count + 1 >= self._max_retries
-                    if exhausted:
-                        try:
-                            await handler.on_exhausted(delivery.event)
-                        except Exception as exhausted_err:
-                            logger.error(
-                                "Worker '{name}' on_exhausted failed: {error}",
-                                name=self.name,
-                                error=str(exhausted_err),
+                except Exception as e:
+                    self._state.failed_count += len(result.deliveries)
+                    self._state.error = e
+                    logger.error(
+                        "Worker '{name}' batch failed: {error}",
+                        name=self.name,
+                        error=str(e),
+                    )
+                    elapsed = time.monotonic() - dispatch_start
+                    for delivery in result.deliveries:
+                        exhausted = delivery.retry_count + 1 >= self._max_retries
+                        if exhausted:
+                            try:
+                                await handler.on_exhausted(delivery.event)
+                            except Exception as exhausted_err:
+                                logger.error(
+                                    "Worker '{name}' on_exhausted failed: {error}",
+                                    name=self.name,
+                                    error=str(exhausted_err),
+                                )
+                            await outbox.mark_failed(delivery.id, str(e))
+                        else:
+                            backoff_seconds = min(30, 5 ** (delivery.retry_count + 1))
+                            deliver_after = datetime.now(UTC) + timedelta(seconds=backoff_seconds)
+                            await outbox.mark_failed_with_retry(
+                                delivery.id,
+                                str(e),
+                                max_retries=self._max_retries,
+                                deliver_after=deliver_after,
                             )
-                        await outbox.mark_failed(delivery.id, str(e))
-                    else:
-                        backoff_seconds = min(30, 5 ** (delivery.retry_count + 1))
-                        deliver_after = datetime.now(UTC) + timedelta(seconds=backoff_seconds)
-                        await outbox.mark_failed_with_retry(
-                            delivery.id,
-                            str(e),
-                            max_retries=self._max_retries,
-                            deliver_after=deliver_after,
+                        instrumentation.delivery_completed(
+                            consumer_group=self._consumer_group,
+                            status=DeliveryStatus.FAILED,
+                            retry_count=delivery.retry_count,
+                            duration_s=elapsed,
                         )
 
-            finally:
-                self._state.current_batch = []
-                self._state.status = WorkerStatus.IDLE
+                finally:
+                    self._state.current_batch = []
+                    self._state.status = WorkerStatus.IDLE
 
         return True
 
@@ -299,12 +416,18 @@ class WorkerPool:
         self,
         container: AsyncContainer | None = None,
         stale_claim_interval: float = 60.0,
+        *,
+        sampler: "TelemetrySampler | None" = None,
+        sampler_interval: float = 15.0,
     ) -> None:
         self._container = container
         self._workers: list[Worker] = []
         self._stale_claim_interval = stale_claim_interval
         self._stale_claim_task: asyncio.Task | None = None
         self._device_auth_cleanup_task: asyncio.Task | None = None
+        self._sampler = sampler
+        self._sampler_interval = sampler_interval
+        self._telemetry_sampler_task: asyncio.Task | None = None
         self._shutdown = False
         self._scheduler: AsyncScheduler | None = None
         self._exit_stack: AsyncExitStack | None = None
@@ -421,6 +544,12 @@ class WorkerPool:
             self._run_device_auth_cleanup(), name="device-auth-cleanup"
         )
 
+        # Start telemetry gauge sampler (only when observability is wired in)
+        if self._sampler is not None:
+            self._telemetry_sampler_task = asyncio.create_task(
+                self._run_telemetry_sampler(), name="telemetry-sampler"
+            )
+
         logger.info(
             f"WorkerPool started with {len(self._workers)} workers, {len(schedules)} schedules"
         )
@@ -447,6 +576,13 @@ class WorkerPool:
             self._device_auth_cleanup_task.cancel()
             try:
                 await self._device_auth_cleanup_task
+            except asyncio.CancelledError:
+                pass
+
+        if self._telemetry_sampler_task and not self._telemetry_sampler_task.done():
+            self._telemetry_sampler_task.cancel()
+            try:
+                await self._telemetry_sampler_task
             except asyncio.CancelledError:
                 pass
 
@@ -519,6 +655,28 @@ class WorkerPool:
                 break
             except Exception as e:
                 logger.error(f"Stale claim cleanup failed: {e}")
+
+    async def _run_telemetry_sampler(self) -> None:
+        """Periodically refresh the telemetry gauge snapshot.
+
+        Mirrors :meth:`_run_stale_claim_cleanup`'s shutdown discipline. The
+        sampler itself never raises (it warns and keeps the last snapshot), but
+        the broad-except guard keeps the loop alive against any unexpected
+        failure so gauges merely go stale rather than the loop dying.
+        """
+        while not self._shutdown:
+            try:
+                await asyncio.sleep(self._sampler_interval)
+
+                if self._shutdown or self._container is None or self._sampler is None:
+                    break
+
+                await self._sampler.refresh(self._container, self._workers)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warn(f"Telemetry sampler loop error: {e}")
 
     async def _run_device_auth_cleanup(self) -> None:
         """Periodically delete expired device authorizations."""

@@ -1,9 +1,10 @@
 """Domain events, event handlers, scheduled tasks, and worker infrastructure."""
 
 from abc import ABC, ABCMeta, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import (
     Any,
     ClassVar,
@@ -49,6 +50,22 @@ class Event(Entity):
 
 
 # --- Worker Infrastructure ---
+
+
+class DeliveryStatus(StrEnum):
+    """Vocabulary for the ``deliveries.status`` column.
+
+    Enumerates the lifecycle states a delivery row can hold. Members are
+    plain strings so they compare and persist identically to the bare
+    literals previously used, while giving the type checker a bounded,
+    named set (bounded-cardinality metric labels rely on this too).
+    """
+
+    PENDING = "pending"
+    CLAIMED = "claimed"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+    SKIPPED = "skipped"
 
 
 class WorkerConfig(BaseModel):
@@ -126,11 +143,39 @@ class Delivery:
 
     Workers iterate over Delivery objects so they can mark each
     delivery by its own row ID rather than the event's ID.
+
+    Attributes:
+        trace_context: Opaque W3C ``traceparent`` of the operation that
+            originally appended the event, or None for non-instrumented
+            contexts (CLI/cron). Domain code never parses this — it is
+            carried through so infrastructure can link dispatch spans.
     """
 
     id: str
     event: "Event"
     retry_count: int = 0
+    trace_context: str | None = None
+
+
+@dataclass(frozen=True)
+class DeliveryStats:
+    """Snapshot of outbox delivery health, used for telemetry gauges.
+
+    Attributes:
+        counts: Row count per ``(consumer_group, status)`` pair across the
+            whole deliveries table — the raw material for per-group,
+            per-status gauges.
+        oldest_pending_created_at: The ``events.created_at`` of the oldest
+            *eligible* pending delivery, or None when no work is currently
+            claimable. "Eligible pending" means
+            ``status = 'pending' AND (deliver_after IS NULL OR deliver_after <= now)``
+            — i.e. work a worker could claim right now. Deliveries scheduled
+            for later (a future ``deliver_after``) are excluded so they never
+            inflate outbox-lag measurements. Timezone-aware (UTC).
+    """
+
+    counts: Mapping[tuple[str, DeliveryStatus], int]
+    oldest_pending_created_at: datetime | None
 
 
 @dataclass(frozen=True)

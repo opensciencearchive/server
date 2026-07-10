@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from osa.config import Config
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.ingest.command.start_ingest import StartIngestHandler
+from osa.domain.ingest.port.instrumentation import IngestInstrumentation
 from osa.domain.ingest.query.get_ingestion import GetIngestionHandler
 from osa.infrastructure.s3.client import S3Client
 from osa.domain.ingest.port.repository import IngestRunRepository
@@ -40,12 +41,14 @@ class IngestProvider(Provider):
         convention_service: ConventionService,
         outbox: Outbox,
         node_domain: Domain,
+        instrumentation: IngestInstrumentation,
     ) -> IngestService:
         return IngestService(
             ingest_repo=ingest_repo,
             convention_service=convention_service,
             outbox=outbox,
             node_domain=node_domain,
+            instrumentation=instrumentation,
         )
 
     # Ingest storage — default (filesystem, for local/Docker)

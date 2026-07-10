@@ -247,8 +247,17 @@ class TestCreateApp:
         assert CustomHandler in handler_types
 
     def test_default_create_app_serves_health(self):
-        """Default create_app produces a working app."""
+        """Default create_app produces a working app.
+
+        Liveness returns the real running version (from Config), not the old
+        hardcoded "0.1.0".
+        """
+        from osa.config import Config
+
         app = create_app()
         client = TestClient(app, raise_server_exceptions=False)
         response = client.get("/api/v1/health")
         assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "ok"
+        assert body["version"] == Config().version

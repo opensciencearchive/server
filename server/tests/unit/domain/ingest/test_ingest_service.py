@@ -1,5 +1,6 @@
 """T022: Unit tests for IngestService.start_ingest."""
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -9,6 +10,24 @@ from osa.domain.ingest.service.ingest import IngestService
 from osa.domain.shared.error import ConflictError, NotFoundError
 from osa.domain.shared.model.source import IngesterDefinition
 from osa.domain.shared.model.srn import Domain
+
+
+class RecordingIngestInstrumentation:
+    """Records IngestInstrumentation calls for assertion (no MagicMock indirection)."""
+
+    def __init__(self) -> None:
+        self.batches_completed: list[int] = []
+        self.batches_failed: list = []
+        self.runs_finished: list[tuple] = []
+
+    def batch_completed(self, *, published_count) -> None:  # noqa: ANN001
+        self.batches_completed.append(published_count)
+
+    def batch_failed(self, *, kind) -> None:  # noqa: ANN001
+        self.batches_failed.append(kind)
+
+    def run_finished(self, *, status, kind) -> None:  # noqa: ANN001
+        self.runs_finished.append((status, kind))
 
 
 def _make_convention(*, has_ingester: bool = True):
@@ -48,6 +67,7 @@ def _make_service(
         convention_service=convention_service,
         outbox=outbox,
         node_domain=Domain("localhost"),
+        instrumentation=RecordingIngestInstrumentation(),
     )
 
 
@@ -290,3 +310,120 @@ class TestTerminalRunAccountingIsFrozen:
 
         service.ingest_repo.increment_failed.assert_not_awaited()
         service.ingest_repo.record_failure.assert_not_awaited()
+
+
+class TestIngestMetricsEmission:
+    """IngestService emits batch/run telemetry at the Applied arms and terminal
+    transitions — exactly once per terminal run."""
+
+    @pytest.mark.asyncio
+    async def test_complete_batch_emits_batch_completed(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+
+        service = _make_service()
+        run = MagicMock(id="run-1", published_count=5)
+        run.check_completion.return_value = False
+        service.ingest_repo.increment_completed.return_value = Applied(run=run)
+
+        await service.complete_batch(IngestRunId("run-1"), published_count=5)
+
+        assert service.instrumentation.batches_completed == [5]
+        assert service.instrumentation.runs_finished == []
+
+    @pytest.mark.asyncio
+    async def test_complete_batch_noop_emits_nothing(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+
+        service = _make_service()
+        service.ingest_repo.increment_completed.return_value = RunClosed()
+
+        await service.complete_batch(IngestRunId("run-1"), published_count=5)
+
+        assert service.instrumentation.batches_completed == []
+
+    @pytest.mark.asyncio
+    async def test_completion_emits_run_finished_once(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId
+
+        service = _make_service()
+        run = IngestRun(
+            id=IngestRunId("run-1"),
+            convention_id="test-conv",
+            status=IngestStatus.RUNNING,
+            ingestion_finished=True,
+            batches_ingested=1,
+            batches_completed=0,
+            published_count=3,
+            started_at=datetime.now(UTC),
+        )
+        # increment_completed returns the run that now satisfies completion.
+        run.batches_completed = 1
+        service.ingest_repo.increment_completed.return_value = Applied(run=run)
+
+        await service.complete_batch(IngestRunId("run-1"), published_count=3)
+
+        assert service.instrumentation.runs_finished == [(IngestStatus.COMPLETED, None)]
+
+    @pytest.mark.asyncio
+    async def test_fail_batch_emits_batch_failed(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+        from osa.domain.shared.failure import FailureKind
+
+        service = _make_service()
+        run = MagicMock(id="run-1", published_count=0)
+        run.check_completion.return_value = False
+        service.ingest_repo.increment_failed.return_value = Applied(run=run)
+
+        await service.fail_batch(IngestRunId("run-1"), reason="boom", kind=FailureKind.HOOK_EXIT)
+
+        assert service.instrumentation.batches_failed == [FailureKind.HOOK_EXIT]
+
+    @pytest.mark.asyncio
+    async def test_fail_ingestion_emits_batch_failed(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+        from osa.domain.shared.failure import FailureKind
+
+        service = _make_service()
+        run = MagicMock(id="run-1", published_count=0)
+        run.check_completion.return_value = False
+        service.ingest_repo.increment_batches_ingested.return_value = Applied(run=run)
+        service.ingest_repo.increment_failed.return_value = Applied(run=run)
+
+        await service.fail_ingestion(
+            IngestRunId("run-1"), reason="upstream 500", kind=FailureKind.UPSTREAM
+        )
+
+        assert service.instrumentation.batches_failed == [FailureKind.UPSTREAM]
+
+    @pytest.mark.asyncio
+    async def test_abort_emits_run_finished_failed(self) -> None:
+        from datetime import datetime as _dt
+
+        from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId
+        from osa.domain.shared.failure import FailureKind
+
+        service = _make_service()
+        service.ingest_repo.abort.return_value = Applied(
+            run=IngestRun(
+                id=IngestRunId("run-1"),
+                convention_id="test-conv",
+                status=IngestStatus.FAILED,
+                started_at=_dt.now(UTC),
+            )
+        )
+
+        await service.abort_run(IngestRunId("run-1"), reason="rbac denied", kind=FailureKind.RBAC)
+
+        assert service.instrumentation.runs_finished == [(IngestStatus.FAILED, FailureKind.RBAC)]
+
+    @pytest.mark.asyncio
+    async def test_abort_noop_emits_no_run_finished(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+        from osa.domain.shared.failure import FailureKind
+
+        service = _make_service()
+        service.ingest_repo.abort.return_value = RunClosed()
+
+        await service.abort_run(IngestRunId("run-1"), reason="x", kind=FailureKind.RBAC)
+
+        assert service.instrumentation.runs_finished == []

@@ -23,7 +23,7 @@ These exceptions drive worker retry policy, not HTTP responses, so
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import assert_never
+from typing import ClassVar, assert_never
 
 from osa.domain.shared.error import OSAError
 
@@ -70,6 +70,20 @@ class RuntimeFailure(OSAError):
         self.oom_retries = oom_retries
 
 
+class DecisionKind(StrEnum):
+    """Bounded label vocabulary for the decision a :class:`FailurePolicy` picks.
+
+    A metric-friendly projection of the :data:`Decision` union: one member per
+    Decision variant. Keeps failure/decision metric labels algebraic (bounded
+    cardinality) instead of stringly-typed at emission sites.
+    """
+
+    RETRY = "retry"
+    RETRY_WITH_MORE_MEMORY = "retry_with_more_memory"
+    GIVE_UP = "give_up"
+    ABORT_RUN = "abort_run"
+
+
 @dataclass(frozen=True)
 class PriorAttempts:
     """Remediation state the policy consults — a view over existing data.
@@ -85,10 +99,14 @@ class PriorAttempts:
 class Retry:
     """Re-drive the failed unit of work; the worker's delivery budget bounds it."""
 
+    kind_label: ClassVar[DecisionKind] = DecisionKind.RETRY
+
 
 @dataclass(frozen=True)
 class RetryWithMoreMemory:
     """Re-run with a doubled memory limit — the only adjust-and-rerun today."""
+
+    kind_label: ClassVar[DecisionKind] = DecisionKind.RETRY_WITH_MORE_MEMORY
 
 
 @dataclass(frozen=True)
@@ -98,6 +116,8 @@ class GiveUp:
     reason: str
     kind: FailureKind
 
+    kind_label: ClassVar[DecisionKind] = DecisionKind.GIVE_UP
+
 
 @dataclass(frozen=True)
 class AbortRun:
@@ -105,6 +125,8 @@ class AbortRun:
 
     reason: str
     kind: FailureKind
+
+    kind_label: ClassVar[DecisionKind] = DecisionKind.ABORT_RUN
 
 
 Decision = Retry | RetryWithMoreMemory | GiveUp | AbortRun
