@@ -532,5 +532,8 @@ def configure_logging(config: LoggingConfig) -> None:
     logging.getLogger("aiosqlite").setLevel(logging.WARNING)
     logging.getLogger("apscheduler").setLevel(logging.WARNING)  # Suppress job completion spam
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)  # Logfire handles HTTP logging
+    logging.getLogger("mcp").setLevel(
+        logging.WARNING
+    )  # Silence per-request MCP transport play-by-play
 
     logging.debug("Logging configured: level=%s, file=%s", config.level, config.file)

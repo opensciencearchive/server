@@ -31,6 +31,7 @@ always comes from ``list_datasets`` / ``describe_dataset``.
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -52,12 +53,16 @@ from osa.application.api.mcp.meta import (
     ResultMeta,
     ToolMeta,
 )
+from osa.application.api.mcp.observability import summarize_args, summarize_result
 from osa.application.api.mcp.resources import WIDGETS, WidgetDef, WidgetRegistry
 from osa.application.api.mcp.tools import TOOLS, TOOLS_BY_NAME, Tool
 from osa.application.api.mcp.uow import anonymous_uow
 from osa.config import Config
 from osa.domain.data.query.skill import GetSkillDocument, GetSkillDocumentHandler
 from osa.domain.shared.error import DomainError, NotFoundError
+from osa.infrastructure.logging import get_logger
+
+log = get_logger("api.mcp")
 
 
 class McpSurface:
@@ -90,6 +95,15 @@ class McpSurface:
         async with anonymous_uow(self._container) as scope:
             handler = await scope.get(GetSkillDocumentHandler)
             self.server.instructions = await handler.run(GetSkillDocument())
+        # One startup line: confirms the surface came up and surfaces the
+        # instruction size (a tiny value hints the SKILL.md snapshot predates
+        # the node's data — the known startup-snapshot caveat).
+        log.info(
+            "MCP surface ready: {tools} tools, {widgets} widgets, instructions {chars} chars",
+            tools=len(TOOLS),
+            widgets=len(WIDGETS),
+            chars=len(self.server.instructions or ""),
+        )
         async with self._session_manager.run():
             yield
 
@@ -108,11 +122,18 @@ def _build_server(container: AsyncContainer, config: Config) -> Server:
     async def call_tool(name: str, arguments: dict) -> types.CallToolResult:
         tool_cls = TOOLS_BY_NAME.get(name)
         if tool_cls is None:
+            log.warn("tool call for unknown tool {tool}", tool=name)
             return _error_result(f"Unknown tool: {name!r}")
         try:
             args = tool_cls.spec.input_model.model_validate(arguments)
         except pydantic.ValidationError as exc:
+            log.warn(
+                "{tool} rejected bad arguments: {reason}",
+                tool=name,
+                reason=str(exc).splitlines()[0],
+            )
             return _error_result(f"Invalid arguments for {name}: {exc}")
+        started = time.perf_counter()
         try:
             async with anonymous_uow(container) as scope:
                 handler = await scope.get(tool_cls.handler_type)
@@ -120,7 +141,20 @@ def _build_server(container: AsyncContainer, config: Config) -> Server:
         except DomainError as exc:
             # Business rejections (unknown schema/column, bad filter…) are the
             # model's/widget's to react to — a tool error, not a protocol one.
+            log.warn(
+                "{tool} [{args}] rejected: {reason}",
+                tool=name,
+                args=summarize_args(args),
+                reason=str(exc),
+            )
             return _error_result(str(exc))
+        log.info(
+            "{tool} [{args}] -> {result} in {ms:.0f}ms",
+            tool=name,
+            args=summarize_args(args),
+            result=summarize_result(payload),
+            ms=(time.perf_counter() - started) * 1000,
+        )
         return _widget_result(payload, resource_uri=tool_cls.spec.resource_uri)
 
     @server.list_resources()
@@ -130,10 +164,14 @@ def _build_server(container: AsyncContainer, config: Config) -> Server:
     @server.read_resource()
     async def read_resource(uri: AnyUrl) -> list[ReadResourceContents]:
         try:
-            return [registry.read(str(uri))]
+            contents = registry.read(str(uri))
         except NotFoundError as exc:
+            # Missing bundle → the operator likely skipped `just widgets-build`.
+            log.warn("widget resource {uri} unavailable: {reason}", uri=str(uri), reason=str(exc))
             # The SDK maps raised errors to a JSON-RPC error response.
             raise ValueError(str(exc)) from exc
+        log.info("served widget {uri} ({bytes} bytes)", uri=str(uri), bytes=len(contents.content))
+        return [contents]
 
     return server
 

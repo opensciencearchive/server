@@ -196,6 +196,13 @@ class TelemetryBootstrap:
         # logfire's FastAPI instrumentation already emits HTTP access telemetry.
         logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
+        # The MCP SDK narrates its per-request transport lifecycle at INFO
+        # ("Processing request of type CallToolRequest", "Terminating session:
+        # None" — the latter is just stateless mode tearing down its throwaway
+        # per-request session). Our own osa.api.mcp logger carries the useful
+        # tool-call lines, so quiet the SDK's play-by-play.
+        logging.getLogger("mcp").setLevel(logging.WARNING)
+
         logger.info(
             "Telemetry configured",
             prometheus_enabled=obs.prometheus_enabled,
