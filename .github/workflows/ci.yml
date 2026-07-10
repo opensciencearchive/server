@@ -18,6 +18,7 @@ jobs:
     outputs:
       server: ${{ steps.filter.outputs.server }}
       web: ${{ steps.filter.outputs.web }}
+      widgets: ${{ steps.filter.outputs.widgets }}
     steps:
       - uses: actions/checkout@v6
 
@@ -29,6 +30,8 @@ jobs:
               - 'server/**'
             web:
               - 'web/**'
+            widgets:
+              - 'packages/osa-widgets/**'
 
   # Server (Python backend) checks
   server-lint:
@@ -216,6 +219,42 @@ jobs:
     permissions:
       contents: read
       packages: write
+
+  # Widgets (MCP Apps UI bundles, packages/osa-widgets)
+  widgets-test:
+    name: Widgets - Typecheck, Test & Build
+    needs: changes
+    if: needs.changes.outputs.widgets == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/osa-widgets
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+          cache-dependency-path: packages/osa-widgets/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build bundles
+        run: pnpm build
 
   # Web (Next.js frontend) checks
   web-lint:
