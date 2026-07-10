@@ -1,51 +1,88 @@
 /** Shared widget bootstrap: connect to the host, then render the widget. */
 
-import { useEffect, useState, type ReactElement } from "react";
+import { Component, useEffect, useState, type ErrorInfo, type ReactElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 
+import { viewError, viewLog } from "../protocol/log";
 import { WidgetHost, type WidgetHostApi } from "../protocol/host";
 
 type RenderWidget<T> = (data: T, host: WidgetHostApi) => ReactElement;
 
 type BootState<T> =
-  | { status: "loading" }
+  | { status: "connecting" }
   | { status: "error"; message: string }
   | { status: "ready"; data: T };
 
+/**
+ * Catches render-time crashes (bad data shape, chart-lib errors) so the widget
+ * shows the failure instead of a blank frame — the single most common reason a
+ * loaded bundle renders "nothing".
+ */
+class WidgetErrorBoundary extends Component<
+  { scope: string; children: ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    viewError(this.props.scope, "widget render crashed", error, info.componentStack);
+  }
+
+  render(): ReactNode {
+    if (this.state.error) {
+      return (
+        <div className="widget-status widget-error">
+          Widget crashed while rendering: {this.state.error.message}
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export function Bootstrap<T>({
+  scope,
   host,
   render,
 }: {
+  scope: string;
   host: WidgetHost;
   render: RenderWidget<T>;
 }): ReactElement {
-  const [state, setState] = useState<BootState<T>>({ status: "loading" });
+  const [state, setState] = useState<BootState<T>>({ status: "connecting" });
 
   useEffect(() => {
     let cancelled = false;
+    viewLog(scope, "connecting to host…");
     host.connect().then(
       (data) => {
-        if (!cancelled) setState({ status: "ready", data: data as T });
+        if (cancelled) return;
+        viewLog(scope, "render data received", data);
+        setState({ status: "ready", data: data as T });
       },
       (err: unknown) => {
-        if (!cancelled) {
-          setState({
-            status: "error",
-            message: err instanceof Error ? err.message : String(err),
-          });
-        }
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        viewError(scope, "failed to obtain render data", message);
+        setState({ status: "error", message });
       },
     );
     return () => {
       cancelled = true;
     };
-  }, [host, render]);
+  }, [scope, host, render]);
 
-  if (state.status === "loading") return <div className="widget-status">Loading…</div>;
+  if (state.status === "connecting") {
+    return <div className="widget-status">Connecting to host…</div>;
+  }
   if (state.status === "error") {
     return <div className="widget-status widget-error">Failed to load: {state.message}</div>;
   }
-  return render(state.data, host);
+  return <WidgetErrorBoundary scope={scope}>{render(state.data, host)}</WidgetErrorBoundary>;
 }
 
 export function StandaloneNotice(): ReactElement {
@@ -59,7 +96,8 @@ export function StandaloneNotice(): ReactElement {
   );
 }
 
-export function mountWidget<T>(render: RenderWidget<T>): void {
+export function mountWidget<T>(scope: string, render: RenderWidget<T>): void {
+  viewLog(scope, "mounting");
   const container = document.getElementById("root");
   if (!container) throw new Error("Widget HTML is missing the #root container");
   const root = createRoot(container);
@@ -67,9 +105,10 @@ export function mountWidget<T>(render: RenderWidget<T>): void {
   // ui/initialize would echo straight back and be answered -32601 by our own
   // endpoint. Explain the situation instead of surfacing that self-reply.
   if (window.parent === window) {
+    viewLog(scope, "no embedding host (opened standalone)");
     root.render(<StandaloneNotice />);
     return;
   }
   const host = WidgetHost.fromWindow(window);
-  root.render(<Bootstrap host={host} render={render} />);
+  root.render(<Bootstrap scope={scope} host={host} render={render} />);
 }

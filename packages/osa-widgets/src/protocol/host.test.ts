@@ -75,6 +75,20 @@ describe("connect", () => {
     app.connect.mockRejectedValueOnce(new Error("no host"));
     await expect(host.connect()).rejects.toThrow("no host");
   });
+
+  it("rejects with a diagnostic message when the host never sends a result", async () => {
+    vi.useFakeTimers();
+    try {
+      const { host } = makeHost();
+      // connect resolves the handshake, but no ontoolresult is ever fired.
+      const connected = host.connect(5000);
+      const assertion = expect(connected).rejects.toThrow(/never delivered ui\/notifications\/tool-result/);
+      await vi.advanceTimersByTimeAsync(5000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("callTool", () => {

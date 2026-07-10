@@ -21,7 +21,7 @@ it("renders the standalone notice and never connects when there is no parent fra
 
   const render = vi.fn();
   await act(async () => {
-    mountWidget(render);
+    mountWidget("table", render);
   });
 
   expect(container.textContent).toContain("MCP Apps host");
