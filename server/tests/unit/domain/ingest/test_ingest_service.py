@@ -140,6 +140,109 @@ class TestStartIngest:
             )
 
 
+class TestEnsureRunning:
+    """ensure_running — transition a PENDING run to RUNNING; no-op otherwise."""
+
+    @pytest.mark.asyncio
+    async def test_pending_run_marked_running_and_saved(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId
+
+        service = _make_service()
+        run = IngestRun(
+            id=IngestRunId("run-1"),
+            convention_id="test-conv",
+            status=IngestStatus.PENDING,
+            started_at=datetime.now(UTC),
+        )
+        service.ingest_repo.get.return_value = run
+
+        result = await service.ensure_running(IngestRunId("run-1"))
+
+        assert result is run
+        assert run.status == IngestStatus.RUNNING
+        service.ingest_repo.save.assert_awaited_once_with(run)
+
+    @pytest.mark.asyncio
+    async def test_running_run_is_noop(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId
+
+        service = _make_service()
+        run = IngestRun(
+            id=IngestRunId("run-1"),
+            convention_id="test-conv",
+            status=IngestStatus.RUNNING,
+            started_at=datetime.now(UTC),
+        )
+        service.ingest_repo.get.return_value = run
+
+        result = await service.ensure_running(IngestRunId("run-1"))
+
+        assert result is run
+        assert run.status == IngestStatus.RUNNING
+        service.ingest_repo.save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_raises_not_found_for_missing_run(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+
+        service = _make_service()
+        service.ingest_repo.get.return_value = None
+
+        with pytest.raises(NotFoundError):
+            await service.ensure_running(IngestRunId("run-1"))
+
+
+class TestMarkBatchIngested:
+    """mark_batch_ingested — thin delegation to the idempotent repo counter."""
+
+    @pytest.mark.asyncio
+    async def test_delegates_to_repo(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+
+        service = _make_service()
+        expected = Applied(run=MagicMock())
+        service.ingest_repo.mark_batch_ingested.return_value = expected
+
+        result = await service.mark_batch_ingested(IngestRunId("run-1"), 3, ingestion_finished=True)
+
+        assert result is expected
+        service.ingest_repo.mark_batch_ingested.assert_awaited_once_with(
+            "run-1", 3, ingestion_finished=True
+        )
+
+    @pytest.mark.asyncio
+    async def test_returns_run_closed(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+
+        service = _make_service()
+        service.ingest_repo.mark_batch_ingested.return_value = RunClosed()
+
+        result = await service.mark_batch_ingested(
+            IngestRunId("run-1"), 0, ingestion_finished=False
+        )
+
+        assert isinstance(result, RunClosed)
+
+
+class TestCloseSourcing:
+    """close_sourcing — latch ingestion_finished when a redelivery sources nothing."""
+
+    @pytest.mark.asyncio
+    async def test_delegates_with_finished_flag(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+
+        service = _make_service()
+        expected = Applied(run=MagicMock())
+        service.ingest_repo.increment_batches_ingested.return_value = expected
+
+        result = await service.close_sourcing(IngestRunId("run-1"))
+
+        assert result is expected
+        service.ingest_repo.increment_batches_ingested.assert_awaited_once_with(
+            "run-1", set_ingestion_finished=True
+        )
+
+
 class TestAbortRun:
     """abort_run — the AbortRun verb's executor (#152): hard-stop the whole run."""
 

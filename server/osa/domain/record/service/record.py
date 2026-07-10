@@ -59,6 +59,12 @@ class RecordService(Service):
         """Total published records on this node."""
         return await self.record_repo.count()
 
+    async def srns_for_ingest_batch(
+        self, ingest_run_id: str, batch_index: int
+    ) -> dict[str, RecordSRN]:
+        """DB-authoritative upstream_source → SRN map for one ingest batch (workflow redo)."""
+        return await self.record_repo.srns_for_ingest_batch(ingest_run_id, batch_index)
+
     async def _resolve_schema_id(self, convention_id: ConventionSlug) -> SchemaId:
         """Resolve a convention to its schema id at publication time."""
         convention = await self.convention_repo.get(convention_id)

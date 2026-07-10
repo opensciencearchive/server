@@ -79,3 +79,76 @@ class TestDepositionServiceReturnToDraft:
 
         with pytest.raises(NotFoundError):
             await service.return_to_draft(_make_dep_srn())
+
+
+def _service_with(dep: Deposition | None):
+    from osa.domain.deposition.service.deposition import DepositionService
+
+    repo = AsyncMock()
+    repo.get.return_value = dep
+    service = DepositionService(
+        deposition_repo=repo,
+        convention_repo=AsyncMock(),
+        file_storage=AsyncMock(),
+        outbox=AsyncMock(),
+        node_domain=_make_dep_srn().domain,
+    )
+    return service, repo
+
+
+class TestDepositionServiceMarkValidated:
+    """DepositionService.mark_validated() fetches, mutates, saves, and returns the aggregate."""
+
+    @pytest.mark.asyncio
+    async def test_marks_validated_and_returns_updated_aggregate(self):
+        from osa.domain.deposition.model.value import SubmissionStage
+
+        dep = _make_deposition()
+        service, repo = _service_with(dep)
+
+        result = await service.mark_validated(dep.srn)
+
+        assert result is dep
+        assert dep.stage == SubmissionStage.VALIDATED
+        repo.save.assert_called_once_with(dep)
+
+    @pytest.mark.asyncio
+    async def test_raises_not_found_for_missing_deposition(self):
+        from osa.domain.shared.error import NotFoundError
+
+        service, _repo = _service_with(None)
+
+        with pytest.raises(NotFoundError):
+            await service.mark_validated(_make_dep_srn())
+
+
+class TestDepositionServiceAccept:
+    """DepositionService.accept() sets record_srn + ACCEPTED and returns the aggregate."""
+
+    @pytest.mark.asyncio
+    async def test_accepts_and_returns_updated_aggregate(self):
+        from osa.domain.deposition.model.value import SubmissionStage
+        from osa.domain.shared.model.srn import RecordSRN
+
+        record_srn = RecordSRN.parse("urn:osa:localhost:rec:test-rec@1")
+        dep = _make_deposition()
+        service, repo = _service_with(dep)
+
+        result = await service.accept(dep.srn, record_srn=record_srn)
+
+        assert result is dep
+        assert dep.record_srn == record_srn
+        assert dep.status == DepositionStatus.ACCEPTED
+        assert dep.stage == SubmissionStage.PUBLISHED
+        repo.save.assert_called_once_with(dep)
+
+    @pytest.mark.asyncio
+    async def test_raises_not_found_for_missing_deposition(self):
+        from osa.domain.shared.error import NotFoundError
+        from osa.domain.shared.model.srn import RecordSRN
+
+        record_srn = RecordSRN.parse("urn:osa:localhost:rec:test-rec@1")
+        service, _repo = _service_with(None)
+
+        with pytest.raises(NotFoundError):
+            await service.accept(_make_dep_srn(), record_srn=record_srn)

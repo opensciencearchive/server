@@ -65,6 +65,24 @@ class Deposition(Aggregate):
         self.status = DepositionStatus.DRAFT
         self.updated_at = datetime.now(UTC)
 
+    def mark_validated(self) -> None:
+        """Advance the submission checkpoint past validation (#160)."""
+        if self.status != DepositionStatus.IN_VALIDATION:
+            raise InvalidStateError(
+                f"Can only mark validated from IN_VALIDATION, currently {self.status}"
+            )
+        self.stage = SubmissionStage.VALIDATED
+        self.updated_at = datetime.now(UTC)
+
+    def accept(self, record_srn: RecordSRN) -> None:
+        """Close the submission workflow's publish stage (#160)."""
+        if self.status != DepositionStatus.IN_VALIDATION:
+            raise InvalidStateError(f"Can only accept from IN_VALIDATION, currently {self.status}")
+        self.record_srn = record_srn
+        self.status = DepositionStatus.ACCEPTED
+        self.stage = SubmissionStage.PUBLISHED
+        self.updated_at = datetime.now(UTC)
+
     def remove_all_files(self) -> None:
         self.files = []
         self.updated_at = datetime.now(UTC)

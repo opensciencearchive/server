@@ -111,13 +111,40 @@ def _build(
     """Wire a handler with fakes sharing a single ``order`` log."""
     order: list[str] = []
 
-    deposition_repo = AsyncMock()
-    deposition_repo.get.return_value = dep
+    deposition_service = AsyncMock()
 
-    async def _save(_d: Deposition) -> None:
+    async def _get(_srn: object) -> Deposition:
+        if dep is None:
+            from osa.domain.shared.error import NotFoundError
+
+            raise NotFoundError("Deposition not found")
+        return dep
+
+    deposition_service.get.side_effect = _get
+
+    async def _return_to_draft(_srn: object) -> Deposition:
+        assert dep is not None
+        dep.return_to_draft()
         order.append("save")
+        return dep
 
-    deposition_repo.save.side_effect = _save
+    deposition_service.return_to_draft.side_effect = _return_to_draft
+
+    async def _mark_validated(_srn: object) -> Deposition:
+        assert dep is not None
+        dep.mark_validated()
+        order.append("save")
+        return dep
+
+    deposition_service.mark_validated.side_effect = _mark_validated
+
+    async def _accept(_srn: object, *, record_srn: RecordSRN) -> Deposition:
+        assert dep is not None
+        dep.accept(record_srn)
+        order.append("save")
+        return dep
+
+    deposition_service.accept.side_effect = _accept
 
     run_mock = MagicMock()
     run_mock.srn = ValidationRunSRN.parse("urn:osa:localhost:val:run1")
@@ -171,7 +198,7 @@ def _build(
     instr = _RecordingInstrumentation()
 
     handler = ProcessSubmission(
-        deposition_repo=deposition_repo,
+        deposition_service=deposition_service,
         validation_service=validation_service,
         record_service=record_service,
         feature_service=feature_service,
@@ -184,7 +211,7 @@ def _build(
         order=order,
         appended=appended,
         rec=rec,
-        deposition_repo=deposition_repo,
+        deposition_service=deposition_service,
         validation_service=validation_service,
         record_service=record_service,
         feature_service=feature_service,
@@ -289,7 +316,7 @@ async def test_validation_failed_returns_to_draft(run_status: RunStatus) -> None
     assert failed.reasons == ["data quality too low"]
 
     assert dep.status == DepositionStatus.DRAFT
-    bag.deposition_repo.save.assert_awaited()
+    bag.deposition_service.return_to_draft.assert_awaited()
     bag.record_service.publish_record.assert_not_called()
     bag.feature_service.insert_features_for_record.assert_not_called()
     # only the claim commit — the failure branch adds none
@@ -424,7 +451,7 @@ async def test_on_exhausted_pre_publish_returns_to_draft() -> None:
     await handler.on_exhausted(_event())
 
     assert dep.status == DepositionStatus.DRAFT
-    bag.deposition_repo.save.assert_awaited()
+    bag.deposition_service.return_to_draft.assert_awaited()
     types = [type(e).__name__ for e in bag.appended]
     assert types == ["ValidationFailed"]
     failed = bag.appended[0]
@@ -443,7 +470,7 @@ async def test_on_exhausted_post_publish_no_return_to_draft() -> None:
     await handler.on_exhausted(_event())
 
     assert dep.status == DepositionStatus.ACCEPTED
-    bag.deposition_repo.save.assert_not_called()
+    bag.deposition_service.return_to_draft.assert_not_called()
     bag.outbox.append.assert_not_called()
 
 
@@ -453,4 +480,4 @@ async def test_on_exhausted_missing_deposition_does_not_raise() -> None:
     await handler.on_exhausted(_event())
 
     bag.outbox.append.assert_not_called()
-    bag.deposition_repo.save.assert_not_called()
+    bag.deposition_service.return_to_draft.assert_not_called()

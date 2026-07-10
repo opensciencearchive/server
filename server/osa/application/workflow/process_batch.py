@@ -25,11 +25,9 @@ from osa.domain.ingest.event.events import (
 )
 from osa.domain.ingest.model.ingest_run import Applied, IngestRun, IngestStatus, RunClosed
 from osa.domain.ingest.model.ingester_record import IngesterRecord
-from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.ingest.port.storage import IngestStoragePort
 from osa.domain.ingest.service.ingest import IngestService
 from osa.domain.record.model.draft import RecordDraft
-from osa.domain.record.port.repository import RecordRepository
 from osa.domain.record.service import RecordService
 from osa.domain.shared.error import NotFoundError, PermanentError, TransientError
 from osa.domain.shared.event import EventHandler, EventId
@@ -87,7 +85,6 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
     __claim_timeout__: ClassVar[float] = 7200.0  # worst-case SUM of ingester + hooks stages
     __max_retries__: ClassVar[int] = 100  # sized for the flakiest stage (hooks)
 
-    ingest_repo: IngestRunRepository
     ingest_service: IngestService
     convention_service: ConventionService
     ingester_runner: IngesterRunner
@@ -95,7 +92,6 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
     hook_service: HookService
     hook_registry: HookRegistryService
     record_service: RecordService
-    record_repo: RecordRepository
     feature_service: FeatureService
     feature_storage: FeatureStoragePort
     outbox: Outbox
@@ -114,11 +110,11 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
         return HookRunId(uuid5(_HOOK_RUN_NS, f"{ingest_run_id}:{batch_index}:{hook_name.root}"))
 
     async def handle(self, event: NextBatchRequested) -> None:
-        run = await self.ingest_repo.get(event.ingest_run_id)
-        if run is None:
+        try:
+            run = await self.ingest_service.get_ingestion(event.ingest_run_id)
+        except NotFoundError as missing:
             # Deterministic missing resource — dead-letter now instead of burning
             # a container-sized retry budget (#160 decision 10).
-            missing = NotFoundError(f"Ingest run not found: {event.ingest_run_id}")
             raise PermanentError(str(missing)) from missing
 
         # A finished/aborted run pulls no more batches — drop redelivered events
@@ -208,9 +204,8 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
         nothing durable is written before the commit that releases the tx, and
         the container simply re-runs on redelivery.
         """
-        if run.status == IngestStatus.PENDING:
-            run.mark_running()
-            await self.ingest_repo.save(run)
+        # Rebind ``run`` to the refreshed aggregate the service returns.
+        run = await self.ingest_service.ensure_running(event.ingest_run_id)
 
         if convention.ingester is None:
             missing = NotFoundError(f"No ingester for convention {run.convention_id}")
@@ -231,9 +226,7 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
                     limit=run.limit,
                     ingest_run_id=event.ingest_run_id,
                 )
-                await self.ingest_repo.increment_batches_ingested(
-                    event.ingest_run_id, set_ingestion_finished=True
-                )
+                await self.ingest_service.close_sourcing(event.ingest_run_id)
                 return True
             effective_batch_limit = min(run.batch_size, remaining)
 
@@ -322,7 +315,7 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
                 has_more = False
 
         # Idempotent counter advance keyed on THIS batch index (redelivery-safe).
-        match await self.ingest_repo.mark_batch_ingested(
+        match await self.ingest_service.mark_batch_ingested(
             event.ingest_run_id, batch_index, ingestion_finished=not has_more
         ):
             case RunClosed():
@@ -584,7 +577,7 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
 
         # DB-authoritative upstream→SRN map for THIS batch (earlier-batch dupes
         # carry their own batch_index and are excluded).
-        mapping = await self.record_repo.srns_for_ingest_batch(
+        mapping = await self.record_service.srns_for_ingest_batch(
             str(event.ingest_run_id), event.batch_index
         )
 
@@ -709,8 +702,9 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
         complete from its other batches); otherwise the ingester never delivered,
         so fail the ingestion (which latches ingestion_finished so the run closes).
         """
-        run = await self.ingest_repo.get(event.ingest_run_id)
-        if run is None:
+        try:
+            run = await self.ingest_service.get_ingestion(event.ingest_run_id)
+        except NotFoundError:
             log.error(
                 "workflow exhausted for missing run",
                 ingest_run_id=event.ingest_run_id,

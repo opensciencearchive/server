@@ -15,7 +15,7 @@ from osa.domain.deposition.port.repository import DepositionRepository
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.error import NotFoundError, ValidationError
 from osa.domain.shared.event import EventId
-from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN, Domain, LocalId
+from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN, Domain, LocalId, RecordSRN
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.service import Service
 
@@ -176,6 +176,20 @@ class DepositionService(Service):
         """Transition a deposition back to DRAFT (e.g. after validation failure)."""
         dep = await self.get(srn)
         dep.return_to_draft()
+        await self.deposition_repo.save(dep)
+        return dep
+
+    async def mark_validated(self, srn: DepositionSRN) -> Deposition:
+        """Advance the submission checkpoint past validation, returning the updated aggregate."""
+        dep = await self.get(srn)
+        dep.mark_validated()
+        await self.deposition_repo.save(dep)
+        return dep
+
+    async def accept(self, srn: DepositionSRN, *, record_srn: RecordSRN) -> Deposition:
+        """Complete the submission workflow's publish stage, returning the updated aggregate."""
+        dep = await self.get(srn)
+        dep.accept(record_srn)
         await self.deposition_repo.save(dep)
         return dep
 

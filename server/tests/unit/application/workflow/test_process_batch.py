@@ -28,7 +28,7 @@ from osa.domain.ingest.model.ingest_run import (
     IngestStatus,
     RunClosed,
 )
-from osa.domain.shared.error import PermanentError, TransientError
+from osa.domain.shared.error import NotFoundError, PermanentError, TransientError
 from osa.domain.shared.event import EventId
 from osa.domain.shared.failure import DecisionKind, FailureKind, FailurePolicy, RuntimeFailure
 from osa.domain.shared.model.hook import HookName, OciConfig, OciLimits, TableFeatureSpec
@@ -239,11 +239,6 @@ def _make_handler(
 
     timeline: list[str] = []
 
-    ingest_repo = AsyncMock()
-    ingest_repo.get.return_value = run
-    ingest_repo.mark_batch_ingested.return_value = Applied(run)
-    ingest_repo.increment_batches_ingested.return_value = Applied(run)
-
     convention_service = AsyncMock()
     conv = AsyncMock()
     conv.hooks = [HookName(n) for n in hook_names]
@@ -289,15 +284,16 @@ def _make_handler(
     record_service.bulk_publish.side_effect = _logged(
         timeline, "publish", [object()] * published_count
     )
-
-    record_repo = AsyncMock()
-    record_repo.srns_for_ingest_batch.return_value = mapping
+    record_service.srns_for_ingest_batch.return_value = mapping
 
     ingest_service = AsyncMock()
+    ingest_service.get_ingestion.return_value = run
+    ingest_service.ensure_running.return_value = run
+    ingest_service.mark_batch_ingested.return_value = Applied(run)
+    ingest_service.close_sourcing.return_value = Applied(run)
     ingest_service.complete_batch.side_effect = _logged(timeline, "complete", None)
 
     handler = ProcessBatch(
-        ingest_repo=ingest_repo,
         ingest_service=ingest_service,
         convention_service=convention_service,
         ingester_runner=ingester_runner,
@@ -307,7 +303,6 @@ def _make_handler(
             hook_names, get_run_result=_make_hook_run() if hooks_done else None
         ),
         record_service=record_service,
-        record_repo=record_repo,
         feature_service=feature_service,
         feature_storage=feature_storage,
         outbox=AsyncMock(),
@@ -512,13 +507,7 @@ class TestIngestLimitEarlyExit:
 
         await handler.handle(_make_event(batch_index=1))
 
-        handler.ingest_repo.increment_batches_ingested.assert_awaited_once()
-        assert (
-            handler.ingest_repo.increment_batches_ingested.await_args.kwargs[
-                "set_ingestion_finished"
-            ]
-            is True
-        )
+        handler.ingest_service.close_sourcing.assert_awaited_once_with("run-1")
         handler.ingester_runner.run.assert_not_called()
         handler.hook_service.run_hooks_for_batch.assert_not_called()
 
@@ -527,7 +516,7 @@ class TestMarkBatchIngestedRunClosed:
     @pytest.mark.asyncio
     async def test_run_closed_stops_without_emitting(self) -> None:
         handler = _make_handler()
-        handler.ingest_repo.mark_batch_ingested.return_value = RunClosed()
+        handler.ingest_service.mark_batch_ingested.return_value = RunClosed()
 
         await handler.handle(_make_event())
 
@@ -794,7 +783,7 @@ class TestRunGuards:
     @pytest.mark.asyncio
     async def test_missing_run_raises_permanent_error(self) -> None:
         handler = _make_handler()
-        handler.ingest_repo.get.return_value = None
+        handler.ingest_service.get_ingestion.side_effect = NotFoundError("Ingest run not found")
 
         with pytest.raises(PermanentError):
             await handler.handle(_make_event())
@@ -830,7 +819,7 @@ class TestOnExhausted:
     @pytest.mark.asyncio
     async def test_missing_run_logs_and_returns(self) -> None:
         handler = _make_handler()
-        handler.ingest_repo.get.return_value = None
+        handler.ingest_service.get_ingestion.side_effect = NotFoundError("Ingest run not found")
 
         await handler.on_exhausted(_make_event())
 

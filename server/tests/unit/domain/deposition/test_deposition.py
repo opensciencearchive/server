@@ -136,6 +136,39 @@ class TestDepositionSubmit:
             dep.return_to_draft()
 
 
+class TestDepositionMarkValidated:
+    def test_mark_validated_sets_stage(self):
+        dep = _make_deposition(status=DepositionStatus.IN_VALIDATION)
+        dep.mark_validated()
+        assert dep.stage == SubmissionStage.VALIDATED
+        assert dep.status == DepositionStatus.IN_VALIDATION
+
+    def test_mark_validated_rejects_non_in_validation(self):
+        dep = _make_deposition(status=DepositionStatus.DRAFT)
+        with pytest.raises(InvalidStateError):
+            dep.mark_validated()
+
+
+class TestDepositionAccept:
+    def test_accept_publishes_and_accepts(self):
+        from osa.domain.shared.model.srn import RecordSRN
+
+        record_srn = RecordSRN.parse("urn:osa:localhost:rec:test-rec@1")
+        dep = _make_deposition(status=DepositionStatus.IN_VALIDATION)
+        dep.accept(record_srn)
+        assert dep.record_srn == record_srn
+        assert dep.status == DepositionStatus.ACCEPTED
+        assert dep.stage == SubmissionStage.PUBLISHED
+
+    def test_accept_rejects_non_in_validation(self):
+        from osa.domain.shared.model.srn import RecordSRN
+
+        record_srn = RecordSRN.parse("urn:osa:localhost:rec:test-rec@1")
+        dep = _make_deposition(status=DepositionStatus.DRAFT)
+        with pytest.raises(InvalidStateError):
+            dep.accept(record_srn)
+
+
 class TestDepositionStage:
     def test_default_stage_is_submitted(self):
         dep = _make_deposition()

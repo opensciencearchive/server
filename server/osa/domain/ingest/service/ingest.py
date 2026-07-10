@@ -11,6 +11,7 @@ from osa.domain.ingest.model.ingest_run import (
     IngestRunId,
     IngestStatus,
     RunClosed,
+    RunUpdate,
 )
 from osa.domain.ingest.port.instrumentation import IngestInstrumentation
 from osa.domain.ingest.port.repository import IngestRunRepository
@@ -112,6 +113,34 @@ class IngestService(Service):
         if ingest_run is None:
             raise NotFoundError(f"Ingest run not found: {ingest_run_id}")
         return ingest_run
+
+    async def ensure_running(self, ingest_run_id: IngestRunId) -> IngestRun:
+        """Transition a PENDING run to RUNNING (idempotent), returning the run."""
+        run = await self.get_ingestion(ingest_run_id)
+        if run.status == IngestStatus.PENDING:
+            run.mark_running()
+            await self.ingest_repo.save(run)
+        return run
+
+    async def mark_batch_ingested(
+        self, ingest_run_id: IngestRunId, batch_index: int, *, ingestion_finished: bool
+    ) -> RunUpdate:
+        """Idempotently record that ``batch_index`` was sourced (#160)."""
+        return await self.ingest_repo.mark_batch_ingested(
+            ingest_run_id, batch_index, ingestion_finished=ingestion_finished
+        )
+
+    async def close_sourcing(self, ingest_run_id: IngestRunId) -> RunUpdate:
+        """Record that sourcing stopped without producing a batch (#160).
+
+        The record limit was already met on a redelivered request, so no batch
+        was pulled; latch ``ingestion_finished`` so completion accounting can
+        close the run. Behaviour preserved verbatim from the legacy handler,
+        including the counter increment.
+        """
+        return await self.ingest_repo.increment_batches_ingested(
+            ingest_run_id, set_ingestion_finished=True
+        )
 
     async def complete_batch(self, ingest_run_id: IngestRunId, published_count: int) -> None:
         """Account for a successfully processed batch.

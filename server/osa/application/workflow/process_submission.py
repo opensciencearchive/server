@@ -26,7 +26,7 @@ from osa.domain.curation.event.deposition_approved import DepositionApproved
 from osa.domain.deposition.event.submitted import DepositionSubmittedEvent
 from osa.domain.deposition.model.aggregate import Deposition
 from osa.domain.deposition.model.value import DepositionStatus, SubmissionStage
-from osa.domain.deposition.port.repository import DepositionRepository
+from osa.domain.deposition.service.deposition import DepositionService
 from osa.domain.feature.port.storage import FeatureStoragePort
 from osa.domain.feature.service.feature import FeatureService
 from osa.domain.record.model.draft import RecordDraft
@@ -63,7 +63,7 @@ class ProcessSubmission(EventHandler[DepositionSubmittedEvent]):
     __claim_timeout__: ClassVar[float] = 3600.0  # validation runs containers
     __max_retries__: ClassVar[int] = 10  # transient budget; permanent errors bypass it
 
-    deposition_repo: DepositionRepository
+    deposition_service: DepositionService
     validation_service: ValidationService
     record_service: RecordService
     feature_service: FeatureService
@@ -74,13 +74,12 @@ class ProcessSubmission(EventHandler[DepositionSubmittedEvent]):
 
     async def handle(self, event: DepositionSubmittedEvent) -> None:
         """Drive VALIDATE → CURATE → PUBLISH → INSERT_FEATURES to completion."""
-        dep = await self.deposition_repo.get(event.deposition_id)
-        if dep is None:
+        try:
+            dep = await self.deposition_service.get(event.deposition_id)
+        except NotFoundError as exc:
             # Deterministic: this delivery can never succeed — dead-letter now
             # rather than burn a container-sized retry budget on a missing row.
-            raise PermanentError(f"Deposition not found: {event.deposition_id}") from NotFoundError(
-                f"Deposition not found: {event.deposition_id}"
-            )
+            raise PermanentError(f"Deposition not found: {event.deposition_id}") from exc
 
         # The publish stage commits ACCEPTED before the feature stage runs, so a
         # crash or error during feature insertion redelivers with an ACCEPTED
@@ -104,15 +103,22 @@ class ProcessSubmission(EventHandler[DepositionSubmittedEvent]):
         runner = StageRunner(WorkflowName.PROCESS_SUBMISSION, self.instrumentation)
 
         if dep.stage < SubmissionStage.VALIDATED:
-            proceed = await self._validate(event, dep, runner)
-            if not proceed:
+            # Rebind ``dep`` to the service-returned aggregate — the validation
+            # checkpoint persists fresh state we must carry into the guards below.
+            # ``None`` means validation reached a terminal verdict (returned to
+            # draft): stop.
+            updated = await self._validate(event, dep, runner)
+            if updated is None:
                 return
+            dep = updated
         else:
             runner.skipped(WorkflowStage.VALIDATE)
             runner.skipped(WorkflowStage.CURATE)
 
         if dep.stage < SubmissionStage.PUBLISHED:
-            await self._publish(event, dep, runner)
+            # Rebind again: publish completes the deposition (record_srn + ACCEPTED),
+            # and the feature stage below reads ``dep.record_srn``.
+            dep = await self._publish(event, dep, runner)
         else:
             runner.skipped(WorkflowStage.PUBLISH)
             if dep.record_srn is None:
@@ -126,13 +132,14 @@ class ProcessSubmission(EventHandler[DepositionSubmittedEvent]):
 
     async def _validate(
         self, event: DepositionSubmittedEvent, dep: Deposition, runner: StageRunner
-    ) -> bool:
+    ) -> Deposition | None:
         """Run validation + the auto-approve curation gate.
 
-        Returns ``True`` to proceed to publication, ``False`` when validation
-        reached a FAILED/REJECTED verdict and the deposition was returned to
-        draft. A raised exception (setup ``ValueError`` → ``PermanentError``)
-        propagates and marks the stage FAILED — the terminal verdicts do not.
+        Returns the VALIDATED aggregate to proceed to publication, or ``None``
+        when validation reached a FAILED/REJECTED verdict and the deposition was
+        returned to draft. A raised exception (setup ``ValueError`` →
+        ``PermanentError``) propagates and marks the stage FAILED — the terminal
+        verdicts do not.
         """
         async with runner.run(WorkflowStage.VALIDATE):
             try:
@@ -164,11 +171,10 @@ class ProcessSubmission(EventHandler[DepositionSubmittedEvent]):
                         reasons=reasons,
                     )
                 )
-                dep.return_to_draft()
-                await self.deposition_repo.save(dep)
+                await self.deposition_service.return_to_draft(event.deposition_id)
                 # Validation ran to a verdict — the stage records RAN; the
                 # scope-exit commit makes this atomic with the delivery mark.
-                return False
+                return None
 
             expected_features = [FeatureName(h.root) for h in event.hooks]
             await self.outbox.append(
@@ -197,17 +203,18 @@ class ProcessSubmission(EventHandler[DepositionSubmittedEvent]):
                 )
             )
 
-        dep.stage = SubmissionStage.VALIDATED
-        await self.deposition_repo.save(dep)
+        # Advance the checkpoint via the service and return the fresh aggregate
+        # (the mutation lives on the aggregate, persisted behind the service).
+        dep = await self.deposition_service.mark_validated(event.deposition_id)
         # Checkpoint: after this commit a retry fast-forwards past VALIDATE, so
         # validation containers never re-run.
         await self.uow.commit()
-        return True
+        return dep
 
     async def _publish(
         self, event: DepositionSubmittedEvent, dep: Deposition, runner: StageRunner
-    ) -> None:
-        """Publish the record and complete the deposition."""
+    ) -> Deposition:
+        """Publish the record and complete the deposition, returning the fresh aggregate."""
         async with runner.run(WorkflowStage.PUBLISH):
             draft = RecordDraft(
                 source=DepositionSource(id=str(event.deposition_id)),
@@ -222,14 +229,12 @@ class ProcessSubmission(EventHandler[DepositionSubmittedEvent]):
 
             # Complete the deposition — sets record_srn + ACCEPTED, closing the
             # audited gap where the success path left it IN_VALIDATION forever.
-            dep.record_srn = record.srn
-            dep.status = DepositionStatus.ACCEPTED
-            dep.stage = SubmissionStage.PUBLISHED
-            await self.deposition_repo.save(dep)
+            dep = await self.deposition_service.accept(event.deposition_id, record_srn=record.srn)
 
         # Records must be committed before feature inserts: the feature store
         # writes on a separate engine with an FK to records.
         await self.uow.commit()
+        return dep
 
     async def _insert_features(
         self, event: DepositionSubmittedEvent, dep: Deposition, runner: StageRunner
@@ -250,8 +255,9 @@ class ProcessSubmission(EventHandler[DepositionSubmittedEvent]):
 
     async def on_exhausted(self, event: DepositionSubmittedEvent) -> None:
         """Best-effort recovery once the transient retry budget is spent."""
-        dep = await self.deposition_repo.get(event.deposition_id)
-        if dep is None:
+        try:
+            dep = await self.deposition_service.get(event.deposition_id)
+        except NotFoundError:
             log.error(
                 "submission retries exhausted for a missing deposition",
                 deposition_id=str(event.deposition_id),
@@ -260,7 +266,7 @@ class ProcessSubmission(EventHandler[DepositionSubmittedEvent]):
 
         if dep.status == DepositionStatus.IN_VALIDATION and dep.stage < SubmissionStage.PUBLISHED:
             try:
-                dep.return_to_draft()
+                await self.deposition_service.return_to_draft(event.deposition_id)
             except InvalidStateError as exc:
                 log.warn(
                     "could not return exhausted deposition to draft: {reason}",
@@ -268,7 +274,6 @@ class ProcessSubmission(EventHandler[DepositionSubmittedEvent]):
                     deposition_id=str(event.deposition_id),
                 )
                 return
-            await self.deposition_repo.save(dep)
             await self.outbox.append(
                 ValidationFailed(
                     id=EventId(uuid4()),
