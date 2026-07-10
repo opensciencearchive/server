@@ -11,7 +11,7 @@ domain specifics.
 """
 
 import os
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -205,11 +205,15 @@ HEADERS = {
 # as separate tasks — so the lifespan is opened inside each test's own task
 # via this context manager rather than a fixture.
 @asynccontextmanager
-async def mcp_client(tmp_path: Path) -> AsyncIterator[AsyncClient]:
+async def mcp_client(
+    tmp_path: Path, configure: Callable[[Config], None] | None = None
+) -> AsyncIterator[AsyncClient]:
     for widget in ("dataset-overview", "table", "chart", "record", "filter-panel"):
         (tmp_path / f"{widget}.html").write_text(f"<!doctype html><html>{widget}</html>")
     config = Config()
     config.mcp.widget_bundle_dir = tmp_path
+    if configure is not None:
+        configure(config)
     container = create_container(FakeDataStoresProvider())
     surface = McpSurface(container, config)
     try:
@@ -442,6 +446,31 @@ class TestUiResources:
             assert contents["mimeType"] == "text/html;profile=mcp-app"
             assert "<!doctype html>" in contents["text"]
             assert contents["_meta"]["ui"]["csp"]["connectDomains"] == []
+
+
+class TestTransportSecurity:
+    async def test_protection_enabled_rejects_disallowed_host(self, tmp_path: Path):
+        def enable(config: Config) -> None:
+            config.mcp.dns_rebinding_protection = True
+            config.mcp.allowed_hosts = ["allowed.example:*"]
+
+        async with mcp_client(tmp_path, configure=enable) as client:
+            response = await client.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+                headers=HEADERS,
+            )
+        # httpx sends Host: test — not on the allow-list → 421 Misdirected.
+        assert response.status_code == 421
+
+    async def test_protection_enabled_accepts_allowed_host(self, tmp_path: Path):
+        def enable(config: Config) -> None:
+            config.mcp.dns_rebinding_protection = True
+            config.mcp.allowed_hosts = ["test:*", "test"]
+
+        async with mcp_client(tmp_path, configure=enable) as client:
+            result = await _rpc(client, "tools/list")
+        assert result["tools"]
 
 
 class TestAppRouting:

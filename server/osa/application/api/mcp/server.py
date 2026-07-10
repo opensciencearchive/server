@@ -12,11 +12,12 @@ choices (validated against the SDK's own stateless example and issue history):
   state; the surface scales horizontally exactly like the REST API.
 - **json_response** — plain JSON bodies instead of SSE streams; the tools are
   single-shot reads, nothing streams incrementally.
-- **DNS-rebinding protection explicitly off** — the low-level SDK path
-  defaults to no Host/Origin validation *silently*; we make that choice
-  explicit. This is a public, read-only, unauthenticated surface (the same
-  posture as ``/data/``), and node deployments terminate TLS/virtual-hosting
-  at the ingress, so Host allow-listing belongs there.
+- **DNS-rebinding protection operator-configured** — the low-level SDK path
+  defaults to no Host/Origin validation *silently*; we surface the choice in
+  ``Config.mcp``. Default off: this is a public, read-only, unauthenticated
+  surface (the same posture as ``/data/``) and deployments virtual-host at
+  the ingress — but a localhost-bound node can enable it with an allow-list
+  (``OSA_MCP__DNS_REBINDING_PROTECTION`` + ``OSA_MCP__ALLOWED_HOSTS``).
 
 The session manager accepts requests only while :meth:`McpSurface.lifespan`
 is entered (it owns the transport task group), and a manager is single-use —
@@ -69,7 +70,14 @@ class McpSurface:
             app=self.server,
             json_response=True,
             stateless=True,
-            security_settings=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+            # Explicit, operator-controlled: the low-level SDK path would
+            # silently default protection OFF. Default matches the public
+            # /data/ posture; localhost-bound nodes can opt in via config.
+            security_settings=TransportSecuritySettings(
+                enable_dns_rebinding_protection=config.mcp.dns_rebinding_protection,
+                allowed_hosts=config.mcp.allowed_hosts,
+                allowed_origins=config.mcp.allowed_origins,
+            ),
         )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:

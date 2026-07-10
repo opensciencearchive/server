@@ -97,6 +97,9 @@ bundles still serves all tools; only `resources/read` returns an actionable
 |---|---|---|
 | Enable the surface | `OSA_MCP__ENABLED` | `true` |
 | Widget bundle directory | `OSA_MCP__WIDGET_BUNDLE_DIR` | packaged bundles |
+| Host/Origin validation | `OSA_MCP__DNS_REBINDING_PROTECTION` | `false` |
+| Allowed hosts (with protection on) | `OSA_MCP__ALLOWED_HOSTS` | `[]` |
+| Allowed origins (with protection on) | `OSA_MCP__ALLOWED_ORIGINS` | `[]` |
 
 ## Security posture
 
@@ -105,9 +108,13 @@ bundles still serves all tools; only `resources/read` returns an actionable
 - Widgets render in the host's mandatory sandboxed, different-origin iframe
   under a **default-deny CSP** (`_meta.ui.csp` grants no origins); all data
   arrives via host-proxied tool calls, auditable as JSON-RPC.
-- DNS-rebinding protection is explicitly disabled at the transport (public
-  virtual-hosted deployments validate `Host` at the ingress); the SDK default
-  would be silently off anyway — we made the choice visible.
+- Transport-level Host/Origin validation (DNS-rebinding protection) is
+  operator-configurable and off by default — public virtual-hosted deployments
+  validate `Host` at the ingress, and the SDK's low-level default is silently
+  off anyway; we made the choice visible and overridable. A node bound to
+  localhost that wants browser-origin hardening sets
+  `OSA_MCP__DNS_REBINDING_PROTECTION=true` plus an allow-list, e.g.
+  `OSA_MCP__ALLOWED_HOSTS='["127.0.0.1:*","localhost:*"]'`.
 
 ## Known limits (deliberate, MVP)
 

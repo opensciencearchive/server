@@ -317,10 +317,19 @@ class McpConfig(BaseModel):
       ``ui://osa/*`` widget bundles (one self-contained HTML file per widget).
       ``None`` (default) means the bundles packaged with the server image
       (``osa/application/api/mcp/bundles/``).
+    - ``OSA_MCP__DNS_REBINDING_PROTECTION`` + ``OSA_MCP__ALLOWED_HOSTS`` /
+      ``OSA_MCP__ALLOWED_ORIGINS`` — transport-level Host/Origin validation
+      (421/403 on mismatch; ``host:*`` port wildcards supported). Default off:
+      the surface is public/read-only like ``/data/`` and deployments
+      virtual-host at the ingress — but a node bound to localhost that wants
+      browser-origin hardening can turn it on with an allow-list.
     """
 
     enabled: bool = True
     widget_bundle_dir: Path | None = None
+    dns_rebinding_protection: bool = False
+    allowed_hosts: list[str] = []
+    allowed_origins: list[str] = []
 
 
 class ObservabilityConfig(BaseModel):
