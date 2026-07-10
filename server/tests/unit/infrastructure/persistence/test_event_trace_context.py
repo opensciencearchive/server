@@ -10,6 +10,7 @@ Exercises SQLAlchemyEventRepository against an in-memory SQLite engine:
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -19,6 +20,7 @@ from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from osa.domain.ingest.event.events import NextBatchRequested  # noqa: F401 — registers the type
 from osa.domain.shared.event import Delivery, DeliveryStatus, Event, EventId
 from osa.infrastructure.persistence.repository.event import SQLAlchemyEventRepository
 from osa.infrastructure.persistence.tables import deliveries_table, events_table, metadata
@@ -122,3 +124,24 @@ class TestDeliveryStatusEnum:
     def test_default_delivery_trace_context_is_none(self) -> None:
         event = TraceEvent(id=EventId(uuid4()), data="x")
         assert Delivery(id="d-1", event=event).trace_context is None
+
+
+class TestLegacyPayloadDeserialization:
+    """Mixed-version event rows must degrade gracefully, not 500 the changefeed.
+
+    Pre-#160 ``NextBatchRequested`` rows have no ``batch_index``; deserializing
+    one must warn-and-skip (return None) rather than raise — a deployment note in
+    PR #161. Exercises the private ``_deserialize`` directly (no DB needed).
+    """
+
+    def test_legacy_next_batch_requested_payload_skipped_not_raised(self) -> None:
+        repo = SQLAlchemyEventRepository(MagicMock())
+        legacy_payload = {
+            "id": str(uuid4()),
+            "ingest_run_id": "run-1",
+            "convention_id": "test-conv",
+            "batch_size": 100,
+            "created_at": "2026-01-01T00:00:00+00:00",
+        }
+
+        assert repo._deserialize("NextBatchRequested", legacy_payload) is None

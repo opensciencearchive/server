@@ -481,3 +481,121 @@ async def test_on_exhausted_missing_deposition_does_not_raise() -> None:
 
     bag.outbox.append.assert_not_called()
     bag.deposition_service.return_to_draft.assert_not_called()
+
+
+# ── Hardening tests (#160) ────────────────────────────────────────────────────
+
+
+async def test_zero_hook_submission_publishes_without_features_work() -> None:
+    # A convention with no hooks: validation still completes (instant pass) and
+    # the full pipeline runs, but every ``expected_features`` list is empty. The
+    # orchestrator still *calls* insert_features_for_record — the service no-ops
+    # internally on an empty expected set.
+    dep = _make_deposition()
+    handler, bag = _build(dep)
+
+    await handler.handle(_event(hooks=[]))
+
+    types = [type(e).__name__ for e in bag.appended]
+    assert types == ["ValidationCompleted", "DepositionApproved"]
+    completed = bag.appended[0]
+    assert isinstance(completed, ValidationCompleted)
+    assert completed.expected_features == []
+    approved = bag.appended[1]
+    assert isinstance(approved, DepositionApproved)
+    assert approved.expected_features == []
+
+    # publish draft carries an empty expected-features set
+    draft = bag.record_service.publish_record.call_args[0][0]
+    assert isinstance(draft, RecordDraft)
+    assert draft.expected_features == []
+
+    assert dep.stage == SubmissionStage.PUBLISHED
+    assert dep.status == DepositionStatus.ACCEPTED
+
+    # the orchestrator still calls the feature stage, with an empty expected set
+    bag.feature_service.insert_features_for_record.assert_called_once_with(
+        hook_output_dir="/fake/out",
+        record_srn=str(bag.rec.srn),
+        expected_features=[],
+    )
+
+
+async def test_publish_failure_emits_failed_outcome_and_propagates() -> None:
+    # A generic error in the publish stage propagates out of handle(), marks the
+    # PUBLISH stage FAILED, and never reaches INSERT_FEATURES. Crucially the
+    # VALIDATED checkpoint commit has already landed, so a retry fast-forwards
+    # past validation.
+    dep = _make_deposition()
+    handler, bag = _build(dep)
+
+    async def _boom(_draft: RecordDraft) -> None:
+        bag.order.append("publish")
+        raise RuntimeError("db down")
+
+    bag.record_service.publish_record.side_effect = _boom
+
+    with pytest.raises(RuntimeError):
+        await handler.handle(_event())
+
+    assert (_PS, WorkflowStage.VALIDATE, StageOutcome.RAN) in bag.instr.calls
+    assert (_PS, WorkflowStage.CURATE, StageOutcome.RAN) in bag.instr.calls
+    assert (_PS, WorkflowStage.PUBLISH, StageOutcome.FAILED) in bag.instr.calls
+    # INSERT_FEATURES never opened its span
+    assert not any(stage == WorkflowStage.INSERT_FEATURES for _, stage, _ in bag.instr.calls)
+    bag.feature_service.insert_features_for_record.assert_not_called()
+
+    # the VALIDATED checkpoint commit landed before publish was attempted
+    approved_idx = bag.order.index("append:DepositionApproved")
+    publish_idx = bag.order.index("publish")
+    assert any(bag.order[i] == "commit" for i in range(approved_idx, publish_idx))
+
+
+@pytest.mark.parametrize("run_status", [RunStatus.FAILED, RunStatus.REJECTED])
+async def test_terminal_verdict_with_no_reasons_still_drafts(run_status: RunStatus) -> None:
+    # A terminal verdict whose hook results carry neither an error_message nor a
+    # rejection_reason (here: an empty results list) yields an empty reasons list
+    # but still returns the deposition to draft and never publishes.
+    dep = _make_deposition()
+    handler, bag = _build(dep, run_status=run_status, hook_results=[])
+
+    await handler.handle(_event())
+
+    types = [type(e).__name__ for e in bag.appended]
+    assert types == ["ValidationFailed"]
+    failed = bag.appended[0]
+    assert isinstance(failed, ValidationFailed)
+    assert failed.reasons == []
+
+    assert dep.status == DepositionStatus.DRAFT
+    bag.deposition_service.return_to_draft.assert_awaited()
+    bag.record_service.publish_record.assert_not_called()
+
+
+async def test_redelivery_after_resubmission_revalidates() -> None:
+    # Pins that a stale delivery racing a resubmission converges on current
+    # deposition state: the deposition is back IN_VALIDATION/SUBMITTED (the user
+    # fixed and resubmitted), so re-handling the original event simply
+    # re-validates. The cost is a duplicate validation run — accepted by design.
+    dep = _make_deposition(status=DepositionStatus.IN_VALIDATION, stage=SubmissionStage.SUBMITTED)
+    handler, bag = _build(dep)
+
+    await handler.handle(_event())
+
+    bag.validation_service.validate_deposition.assert_called_once()
+    bag.record_service.publish_record.assert_called_once()
+    assert dep.stage == SubmissionStage.PUBLISHED
+    assert dep.status == DepositionStatus.ACCEPTED
+
+
+async def test_on_exhausted_noop_when_already_drafted() -> None:
+    # Already back in DRAFT (a prior terminal verdict, or a concurrent
+    # return-to-draft): on_exhausted must not double-notify — no second
+    # return_to_draft and no ValidationFailed.
+    dep = _make_deposition(status=DepositionStatus.DRAFT, stage=SubmissionStage.SUBMITTED)
+    handler, bag = _build(dep)
+
+    await handler.on_exhausted(_event())
+
+    bag.deposition_service.return_to_draft.assert_not_called()
+    bag.outbox.append.assert_not_called()

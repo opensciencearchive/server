@@ -825,3 +825,197 @@ class TestOnExhausted:
 
         handler.ingest_service.fail_batch.assert_not_called()
         handler.ingest_service.fail_ingestion.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_boundary_equal_index_fails_ingestion(self) -> None:
+        # batches_ingested == batch_index → the batch was never sourced (the
+        # counter only exceeds the index once ingest completes), so the ingestion
+        # (not just the batch) is failed. Pins the boundary of the `>` guard.
+        handler = _make_handler(run=_make_run(batches_ingested=3))
+
+        await handler.on_exhausted(_make_event(batch_index=3))
+
+        handler.ingest_service.fail_ingestion.assert_awaited_once()
+        handler.ingest_service.fail_batch.assert_not_called()
+
+
+# ── Hardening tests (#160) ────────────────────────────────────────────────────
+
+
+class TestFinalAndLimitedBatches:
+    @pytest.mark.asyncio
+    async def test_final_empty_batch_closes_run(self) -> None:
+        # The ingester's last pull yields no records and no session: has_more is
+        # False, the run's ingestion is finished, no continuation is emitted, and
+        # complete_batch reports zero published. The downstream stages still run
+        # over the (empty) passed set.
+        handler = _make_handler(
+            records=[], outcomes={}, executions=[], mapping={}, published_count=0
+        )
+        empty_output = IngesterOutput(records=[], session=None, files_dir=Path("/tmp/files"))
+
+        async def _empty_run(*_args: object, **_kwargs: object) -> IngesterOutput:
+            return empty_output
+
+        handler.ingester_runner.run.side_effect = _empty_run
+
+        await handler.handle(_make_event())
+
+        # ingestion latched finished, no continuation
+        assert handler.ingest_service.mark_batch_ingested.await_args.kwargs["ingestion_finished"]
+        assert not any(isinstance(e, NextBatchRequested) for e in _emitted(handler))
+
+        # downstream stages still run; nothing passed → publish over [] and count 0
+        stages = [(s, o) for _, s, o in handler.instrumentation.stages]
+        assert (WorkflowStage.HOOKS, StageOutcome.RAN) in stages
+        assert (WorkflowStage.PUBLISH, StageOutcome.RAN) in stages
+        assert (WorkflowStage.INSERT_FEATURES, StageOutcome.RAN) in stages
+        handler.record_service.bulk_publish.assert_awaited_once_with([])
+        assert handler.ingest_service.complete_batch.await_args.kwargs["published_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_limit_reached_exactly_stops_chaining(self) -> None:
+        # The ingester returns records + a session (would normally chain), but
+        # completing THIS batch reaches the run's limit exactly, so has_more is
+        # forced False: ingestion is latched finished and no next batch requested.
+        handler = _make_handler(run=_make_run(batches_ingested=0, limit=100))
+
+        await handler.handle(_make_event(batch_index=0))
+
+        assert handler.ingest_service.mark_batch_ingested.await_args.kwargs["ingestion_finished"]
+        assert not any(isinstance(e, NextBatchRequested) for e in _emitted(handler))
+        # the batch itself was still sourced + processed
+        handler.ingester_runner.run.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_limit_met_redelivery_early_exits(self) -> None:
+        # A redelivered request for a batch whose limit is already met: sourcing
+        # is closed and the handler exits before touching the ingester or any
+        # downstream stage.
+        run = _make_run(batches_ingested=1, limit=100)
+        handler = _make_handler(run=run)
+
+        await handler.handle(_make_event(batch_index=1))
+
+        handler.ingest_service.close_sourcing.assert_awaited_once_with("run-1")
+        handler.ingester_runner.run.assert_not_called()
+        handler.hook_service.run_hooks_for_batch.assert_not_called()
+        handler.record_service.bulk_publish.assert_not_called()
+        handler.ingest_service.complete_batch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ingester_without_session_ends_run(self) -> None:
+        # The ingester returns records but no session (upstream exhausted): the
+        # records still flow to storage, but has_more is False so ingestion is
+        # latched finished and no continuation is requested.
+        handler = _make_handler(has_more=False)
+
+        await handler.handle(_make_event())
+
+        assert handler.ingest_service.mark_batch_ingested.await_args.kwargs["ingestion_finished"]
+        assert not any(isinstance(e, NextBatchRequested) for e in _emitted(handler))
+        # the batch's records were still persisted
+        handler.ingest_storage.write_records.assert_awaited_once()
+        assert handler.ingest_storage.write_records.await_args.args[2] == [
+            {"source_id": "rec-1", "metadata": {}}
+        ]
+
+
+class TestPublishRedoRecovery:
+    @pytest.mark.asyncio
+    async def test_publish_redo_recovers_mapping_from_db(self) -> None:
+        # A redo after a crash between publish and feature insertion: ingest +
+        # hooks are skipped (counter ahead, provenance present), every draft now
+        # conflicts (bulk_publish returns []), yet the upstream→SRN mapping is
+        # recovered from the DB. No duplicate IngestBatchPublished fires, but the
+        # feature stage runs against the recovered mapping and completes the batch.
+        handler = _make_handler(
+            run=_make_run(batches_ingested=5),
+            hooks_done=True,
+            published_count=0,
+            mapping={"rec-1": _srn("r-1")},
+        )
+
+        await handler.handle(_make_event(batch_index=0))
+
+        assert not any(isinstance(e, IngestBatchPublished) for e in _emitted(handler))
+        handler.feature_service.insert_features.assert_awaited_once()
+        assert handler.feature_service.insert_features.await_args.kwargs["record_srn"] == str(
+            _srn("r-1")
+        )
+        assert handler.ingest_service.complete_batch.await_args.kwargs["published_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_cross_batch_duplicate_skipped_in_feature_insert(self) -> None:
+        # Two records passed hooks, but only one is in this batch's SRN mapping
+        # (the other was published by an earlier batch). Feature insertion runs
+        # only for the mapped record; the cross-batch duplicate is skipped.
+        outcomes = {
+            HookRecordId("rec-1"): BatchRecordOutcome(
+                record_id=HookRecordId("rec-1"),
+                status=OutcomeStatus.PASSED,
+                features=[{"v": 1}],
+            ),
+            HookRecordId("rec-2"): BatchRecordOutcome(
+                record_id=HookRecordId("rec-2"),
+                status=OutcomeStatus.PASSED,
+                features=[{"v": 2}],
+            ),
+        }
+        handler = _make_handler(outcomes=outcomes, mapping={"rec-1": _srn("r-1")})
+
+        await handler.handle(_make_event())
+
+        handler.feature_service.insert_features.assert_awaited_once()
+        assert handler.feature_service.insert_features.await_args.kwargs["record_srn"] == str(
+            _srn("r-1")
+        )
+
+
+class TestPartialProvenance:
+    @pytest.mark.asyncio
+    async def test_partial_provenance_reruns_all_hooks(self) -> None:
+        # One hook's provenance row exists, the other's does not: the guard is
+        # all-or-nothing, so the whole HOOKS stage re-runs — run_hooks_for_batch
+        # is called with BOTH hooks paired to their releases.
+        handler = _make_handler(
+            hook_names=("hook_a", "hook_b"),
+            executions=[_passed_exec("hook_a"), _passed_exec("hook_b", offset=5)],
+        )
+        event = _make_event()
+        run_id_a = ProcessBatch._hook_run_id(
+            event.ingest_run_id, event.batch_index, HookName("hook_a")
+        )
+
+        async def _get_run(rid: HookRunId) -> HookRun | None:
+            return _make_hook_run() if rid == run_id_a else None
+
+        handler.hook_registry.get_run.side_effect = _get_run
+
+        await handler.handle(event)
+
+        handler.hook_service.run_hooks_for_batch.assert_awaited_once()
+        pairs = handler.hook_service.run_hooks_for_batch.await_args.kwargs["hook_releases"]
+        paired_names = {identity.name.root for identity, _release in pairs}
+        assert paired_names == {"hook_a", "hook_b"}
+
+
+class TestHookRetryStageOutcome:
+    @pytest.mark.asyncio
+    async def test_hook_retry_emits_failed_stage_outcome(self) -> None:
+        # A transient (Retry) hook verdict records the HOOKS stage FAILED and
+        # short-circuits: neither PUBLISH nor INSERT_FEATURES stage outcomes are
+        # recorded.
+        handler = _make_handler(executions=[_failed_exec("pockets", FailureKind.TIMEOUT)])
+
+        with pytest.raises(TransientError):
+            await handler.handle(_make_event())
+
+        stages = handler.instrumentation.stages
+        assert (
+            WorkflowName.PROCESS_BATCH,
+            WorkflowStage.HOOKS,
+            StageOutcome.FAILED,
+        ) in stages
+        assert not any(stage == WorkflowStage.PUBLISH for _, stage, _ in stages)
+        assert not any(stage == WorkflowStage.INSERT_FEATURES for _, stage, _ in stages)
