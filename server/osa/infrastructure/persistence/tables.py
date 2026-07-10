@@ -31,6 +31,7 @@ depositions_table = Table(
     Column("srn", String, primary_key=True),
     Column("convention_id", String, nullable=False),  # Convention submitted against
     Column("status", String(32), nullable=False),  # DepositionStatus as string
+    Column("stage", String(32), nullable=False),  # SubmissionStage as string
     Column("metadata", JSON, nullable=False),
     Column("files", JSON, nullable=False),
     Column("record_id", String, nullable=True),

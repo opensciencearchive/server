@@ -7,7 +7,11 @@ import pytest
 
 from osa.domain.auth.model.value import UserId
 from osa.domain.deposition.model.aggregate import Deposition
-from osa.domain.deposition.model.value import DepositionFile, DepositionStatus
+from osa.domain.deposition.model.value import (
+    DepositionFile,
+    DepositionStatus,
+    SubmissionStage,
+)
 from osa.domain.shared.error import InvalidStateError
 from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
 
@@ -130,3 +134,20 @@ class TestDepositionSubmit:
         dep = _make_deposition()
         with pytest.raises(InvalidStateError):
             dep.return_to_draft()
+
+
+class TestDepositionStage:
+    def test_default_stage_is_submitted(self):
+        dep = _make_deposition()
+        assert dep.stage == SubmissionStage.SUBMITTED
+
+    def test_submit_resets_stage_to_submitted(self):
+        # A resubmission (DRAFT with a leftover advanced checkpoint) must restart
+        # the workflow from the top.
+        dep = _make_deposition(
+            status=DepositionStatus.DRAFT,
+            stage=SubmissionStage.PUBLISHED,
+        )
+        dep.submit()
+        assert dep.status == DepositionStatus.IN_VALIDATION
+        assert dep.stage == SubmissionStage.SUBMITTED
