@@ -1,5 +1,7 @@
 """Tests for handler __auth__ gate: metaclass wraps run() with auth check."""
 
+import gc
+
 import pytest
 
 from osa.domain.auth.model.principal import Principal
@@ -65,9 +67,16 @@ class UnprotectedResult(Result):
     value: str
 
 
-class UnprotectedHandler(CommandHandler[UnprotectedCommand, UnprotectedResult]):
-    async def run(self, cmd: UnprotectedCommand) -> UnprotectedResult:
-        return UnprotectedResult(value=cmd.value)
+def _make_unprotected_handler() -> "CommandHandler[UnprotectedCommand, UnprotectedResult]":
+    # Defined inside a factory, NOT at module level: handler subclasses missing
+    # __auth__ must not linger in CommandHandler.__subclasses__ once this module
+    # is imported, or validate_all_handlers() (create_app startup) fails for
+    # every test that runs later in the same process.
+    class UnprotectedHandler(CommandHandler[UnprotectedCommand, UnprotectedResult]):
+        async def run(self, cmd: UnprotectedCommand) -> UnprotectedResult:
+            return UnprotectedResult(value=cmd.value)
+
+    return UnprotectedHandler()
 
 
 class UnprotectedQuery(Query):
@@ -78,12 +87,28 @@ class UnprotectedQueryResult(QueryResult):
     value: str
 
 
-class UnprotectedQueryHandler(QueryHandler[UnprotectedQuery, UnprotectedQueryResult]):
-    async def run(self, cmd: UnprotectedQuery) -> UnprotectedQueryResult:
-        return UnprotectedQueryResult(value=cmd.value)
+def _make_unprotected_query_handler() -> "QueryHandler[UnprotectedQuery, UnprotectedQueryResult]":
+    class UnprotectedQueryHandler(QueryHandler[UnprotectedQuery, UnprotectedQueryResult]):
+        async def run(self, cmd: UnprotectedQuery) -> UnprotectedQueryResult:
+            return UnprotectedQueryResult(value=cmd.value)
+
+    return UnprotectedQueryHandler()
 
 
 # --- Tests ---
+
+
+@pytest.fixture(autouse=True)
+def _collect_transient_handler_classes():
+    """Drop factory-created handler classes from __subclasses__ after each test.
+
+    Classes live in reference cycles, so without an explicit collect the
+    transient no-__auth__ handlers would linger in
+    CommandHandler/QueryHandler.__subclasses__ and fail
+    validate_all_handlers() for any later create_app() in the same process.
+    """
+    yield
+    gc.collect()
 
 
 class TestAuthGateOnCommandHandler:
@@ -136,14 +161,14 @@ class TestAuthGateOnCommandHandler:
 
     @pytest.mark.asyncio
     async def test_unprotected_command_handler_raises_configuration_error(self) -> None:
-        handler = UnprotectedHandler()
+        handler = _make_unprotected_handler()
 
         with pytest.raises(ConfigurationError, match="UnprotectedHandler"):
             await handler.run(UnprotectedCommand(value="test"))
 
     @pytest.mark.asyncio
     async def test_unprotected_query_handler_raises_configuration_error(self) -> None:
-        handler = UnprotectedQueryHandler()
+        handler = _make_unprotected_query_handler()
 
         with pytest.raises(ConfigurationError, match="UnprotectedQueryHandler"):
             await handler.run(UnprotectedQuery(value="test"))
