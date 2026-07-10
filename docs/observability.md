@@ -131,8 +131,50 @@ drawn from a bounded enum (below), so time-series cardinality stays finite. The
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
-| `osa_deliveries_total` | counter | `consumer_group`, `status` | Terminal outbox dispatch-attempt outcomes, by consumer group and delivery status. |
-| `osa_dispatch_duration_seconds` | histogram | `consumer_group` | Wall-clock duration of a single delivery dispatch. |
+| `osa_deliveries_total` | counter | `consumer_group`, `status` | Outbox dispatch-attempt outcomes, by consumer group and delivery status. |
+| `osa_dispatch_duration_seconds` | histogram | `consumer_group` | Wall-clock duration of one delivery dispatch — since #160 a *whole workflow*, not a single hop. |
+
+> **Two consumer groups only.** Since #160 the outbox drives exactly two
+> consumer groups — `ProcessSubmission` and `ProcessBatch` — each an
+> orchestrator that runs a whole pipeline in one delivery
+> (`ProcessSubmission`: validate → curate → publish → insert_features;
+> `ProcessBatch`: ingest → hooks → publish → insert_features). Two consequences
+> for reading these metrics:
+>
+> - **`osa_dispatch_duration_seconds` now times a whole workflow**, not a single
+>   hop. One `ProcessBatch` observation can span minutes to hours — it parks on
+>   the ingester and hook containers. For per-stage latency, read the nested
+>   `workflow.stage {stage}` spans instead (see [Traces](#traces)), not this
+>   histogram.
+> - **`osa_deliveries_total{status="failed"}` counts failed *attempts*, not
+>   terminal failures.** One retry budget now spans the whole workflow, and
+>   stage-skipping makes a redelivery cheap — it fast-forwards past the stages a
+>   durable checkpoint has already cleared — so failed-attempt counts inflate
+>   relative to the number of submissions/runs that actually failed. Read
+>   terminal outcomes from the domain counters instead —
+>   `osa_ingest_runs_total{status="failed"}`,
+>   `osa_ingest_batches_total{outcome="failed"}` — not from delivery status.
+
+### Workflow stages
+
+Emitted from the two orchestrators' stage guards (#160): one increment per
+stage per delivery attempt, tagged with how that stage concluded.
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `osa_workflow_stages_total` | counter | `workflow`, `stage`, `outcome` | Workflow-stage executions, by workflow, stage, and how the stage concluded on that delivery attempt. |
+
+`outcome="ran"` means the stage did its work (ran containers, published, or
+inserted features); `outcome="skipped"` means a redelivery fast-forwarded past a
+stage a durable checkpoint had already cleared; `outcome="failed"` means the
+stage raised and the delivery will be retried (or dead-lettered).
+
+**Operational reading:** an `outcome="ran"` on a redelivery where `skipped` was
+expected means a stage checkpoint was lost and container work was repeated —
+directly alertable. In steady state a retried delivery should skip every stage
+up to the one that failed; a `ran` where you expected `skipped` is the signal
+that a checkpoint (the deposition `stage` column, the ingest counters, or the
+hook-run provenance rows) didn't survive.
 
 ### Outbox / worker gauges (periodic sampler)
 
@@ -150,6 +192,16 @@ on SQLite (no connection pool to sample).
 | `osa_db_pool_overflow` | gauge | — | Overflow connections open beyond the base pool size. |
 | `osa_workers_busy` | gauge | — | Worker loops currently processing a batch. |
 | `osa_workers_total` | gauge | — | Total worker loops in the pool. |
+
+> **Worker-pool size (since #160).** The dispatch pool is one `ProcessSubmission`
+> worker plus `worker.hook_concurrency` (default `8`) `ProcessBatch` workers,
+> plus the maintenance loops. `worker.hook_concurrency` — the knob that bounds
+> concurrent hook containers — now also sizes the `ProcessBatch` fan-out;
+> running more than one is what preserves batch pipelining (batch N+1 sources
+> while batch N runs hooks). `osa_workers_total` shrank accordingly when the
+> ~17-worker, 10-consumer-group choreography collapsed into these two
+> orchestrators, and `osa_outbox_pending` / `osa_outbox_failed` now carry just
+> the two `consumer_group` values (`ProcessSubmission`, `ProcessBatch`).
 
 ### API edge
 
@@ -179,9 +231,16 @@ Label values come straight from these enums:
 - **`outcome`** on `osa_ingest_batches_total`: `completed`, `failed`.
 - **`status`** on `osa_deliveries_total` (`DeliveryStatus`): `pending`,
   `claimed`, `delivered`, `failed`, `skipped`.
-- **`consumer_group`** on delivery metrics: the event-handler class name that
-  processed the delivery — a fixed set of registered handlers (e.g. `RunHooks`,
-  `PublishBatch`, `RunIngester`, `ConvertDepositionToRecord`).
+- **`consumer_group`** on delivery/outbox metrics: the orchestrator class name
+  that processed the delivery — since #160 exactly two registered handlers,
+  `ProcessSubmission` and `ProcessBatch`.
+- **`workflow`** on `osa_workflow_stages_total` (`WorkflowName`):
+  `process_submission`, `process_batch`.
+- **`stage`** on `osa_workflow_stages_total` (`WorkflowStage`): `validate`,
+  `curate`, `ingest`, `hooks`, `publish`, `insert_features`. The enum is shared
+  by both workflows; not every workflow visits every stage.
+- **`outcome`** on `osa_workflow_stages_total` (`StageOutcome`): `ran`,
+  `skipped`, `failed`.
 - **`hook`**: the hook's registered name.
 
 ## Health endpoints
@@ -232,20 +291,35 @@ introduces. An inbound HTTP request opens a request span; when its handler
 appends an event to the outbox, the request's trace context (a W3C
 `traceparent`) is captured and stored on the delivery row. Later — possibly in a
 different worker, out of band — the worker claims that delivery and opens a
-`worker.dispatch` span, and any hook or child spans produced while handling the
-event nest under it. Because events appended *during* handling capture the
-dispatch span as *their* trace context in turn, multi-hop chains
-(request → RunHooks → PublishBatch → …) fall out automatically: each hop links
-to the previous one.
+`worker.dispatch {consumer_group}` span. Since #160 the orchestrator runs its
+stages *inside* that one span: each stage opens a nested `workflow.stage {stage}`
+child span (`validate`, `curate`, `ingest`, `hooks`, `publish`,
+`insert_features`), and any hook or container spans nest under those. So a whole
+submission or batch pipeline is a single `worker.dispatch` span with a child
+span per stage — no longer a chain of one dispatch span per hop.
+
+Because the pipeline now runs in a single delivery, **most cross-hop span links
+are gone**. Span links remain load-bearing at exactly two boundaries:
+
+- **Originating request → workflow dispatch.** The API request that appended the
+  triggering event (`DepositionSubmittedEvent`, `NextBatchRequested`) is linked
+  from the `worker.dispatch` span, joining the request to the workflow it kicked
+  off across the outbox boundary.
+- **`NextBatchRequested` self-chaining.** `ProcessBatch` emits the next
+  `NextBatchRequested` from inside its own dispatch span (during the `ingest`
+  stage), so batch N+1's dispatch span carries a link back to batch N's — the
+  ingest pipeline stays one linked chain even though each batch is its own
+  delivery.
 
 The join is modeled with **span links, not parent/child**. A single worker poll
-claims a *batch* of deliveries that can originate from many different requests,
-so there is no single parent to attach to — instead the dispatch span carries a
-link to each originating span. NULL trace context (events created outside any
-request, e.g. from the CLI or a cron loop) simply produces no link, and a
-malformed `traceparent` is skipped with a warning without blocking delivery.
-Sampling is head-based via `OSA_OBSERVABILITY__TRACE_SAMPLE_RATE` — the decision
-is made once at the root and honored consistently down the chain.
+claims a *batch* of deliveries that can originate from different requests (or
+different prior batches), so there is no single parent to attach to — instead
+the dispatch span carries a link to each originating span. NULL trace context
+(events created outside any request, e.g. from the CLI or a cron loop) simply
+produces no link, and a malformed `traceparent` is skipped with a warning
+without blocking delivery. Sampling is head-based via
+`OSA_OBSERVABILITY__TRACE_SAMPLE_RATE` — the decision is made once at the root
+and honored consistently down the chain.
 
 ## Security notes
 

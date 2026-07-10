@@ -34,30 +34,30 @@ class TestSrnsForIngestBatch:
         # This run+batch: two records.
         await seed_record(
             pg_engine,
-            srn="urn:osa:localhost:rec:r1@1",
+            srn="urn:osa:localhost:rec:rec-1@1",
             source=_ingest_source(run_id="run-a", upstream="pdb:1", batch_index=2),
         )
         await seed_record(
             pg_engine,
-            srn="urn:osa:localhost:rec:r2@1",
+            srn="urn:osa:localhost:rec:rec-2@1",
             source=_ingest_source(run_id="run-a", upstream="pdb:2", batch_index=2),
         )
         # Same run, different batch — excluded.
         await seed_record(
             pg_engine,
-            srn="urn:osa:localhost:rec:r3@1",
+            srn="urn:osa:localhost:rec:rec-3@1",
             source=_ingest_source(run_id="run-a", upstream="pdb:3", batch_index=1),
         )
         # Different run, same batch index — excluded.
         await seed_record(
             pg_engine,
-            srn="urn:osa:localhost:rec:r4@1",
+            srn="urn:osa:localhost:rec:rec-4@1",
             source=_ingest_source(run_id="run-b", upstream="pdb:4", batch_index=2),
         )
         # Deposition-source record — excluded.
         await seed_record(
             pg_engine,
-            srn="urn:osa:localhost:rec:r5@1",
+            srn="urn:osa:localhost:rec:rec-5@1",
             source={"type": "deposition", "id": "dep-1"},
         )
 
@@ -65,8 +65,8 @@ class TestSrnsForIngestBatch:
         mapping = await repo.srns_for_ingest_batch("run-a", 2)
 
         assert mapping == {
-            "pdb:1": RecordSRN.parse("urn:osa:localhost:rec:r1@1"),
-            "pdb:2": RecordSRN.parse("urn:osa:localhost:rec:r2@1"),
+            "pdb:1": RecordSRN.parse("urn:osa:localhost:rec:rec-1@1"),
+            "pdb:2": RecordSRN.parse("urn:osa:localhost:rec:rec-2@1"),
         }
 
     async def test_empty_dict_when_no_matches(
@@ -74,7 +74,7 @@ class TestSrnsForIngestBatch:
     ):
         await seed_record(
             pg_engine,
-            srn="urn:osa:localhost:rec:r1@1",
+            srn="urn:osa:localhost:rec:rec-1@1",
             source=_ingest_source(run_id="run-a", upstream="pdb:1", batch_index=0),
         )
         repo = PostgresRecordRepository(pg_session)
@@ -88,7 +88,7 @@ class TestSrnsForIngestBatch:
         """A record predating the field (batch_index absent) never matches."""
         await seed_record(
             pg_engine,
-            srn="urn:osa:localhost:rec:r1@1",
+            srn="urn:osa:localhost:rec:rec-1@1",
             source=_ingest_source(run_id="run-a", upstream="pdb:1", batch_index=None),
         )
         repo = PostgresRecordRepository(pg_session)
