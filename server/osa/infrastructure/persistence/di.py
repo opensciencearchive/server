@@ -26,6 +26,7 @@ from osa.domain.semantics.port.schema_repository import SchemaRepository
 from osa.domain.shared.model.srn import Domain
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.event_repository import EventRepository
+from osa.domain.shared.port.unit_of_work import UnitOfWork
 from osa.domain.feature.port.feature_store import FeatureStore
 from osa.domain.validation.port.repository import ValidationRunRepository
 from osa.domain.validation.port.hook_registry import HookRegistry
@@ -71,6 +72,7 @@ from osa.domain.metadata.port.metadata_store import MetadataStore
 from osa.infrastructure.persistence.repository.validation import (
     PostgresValidationRunRepository,
 )
+from osa.infrastructure.persistence.unit_of_work import SessionUnitOfWork
 from osa.util.di.base import Provider
 from osa.util.di.markers import K8S
 from osa.util.di.scope import Scope
@@ -104,6 +106,10 @@ class PersistenceProvider(Provider):
         provides=ValidationRunRepository,
     )
     event_repo = provide(SQLAlchemyEventRepository, scope=Scope.UOW, provides=EventRepository)
+
+    # Unit of work — commits stage checkpoints on the UOW-scoped session so
+    # orchestrators can release the transaction before parking on containers.
+    unit_of_work = provide(SessionUnitOfWork, scope=Scope.UOW, provides=UnitOfWork)
 
     # Feature store
     @provide(scope=Scope.UOW)

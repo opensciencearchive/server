@@ -20,11 +20,13 @@ from osa.domain.ingest.model.ingest_run import IngestStatus
 from osa.domain.shared.event import DeliveryStatus
 from osa.domain.shared.failure import DecisionKind, FailureKind
 from osa.domain.shared.model.hook import HookName
+from osa.domain.shared.model.workflow import StageOutcome, WorkflowName, WorkflowStage
 from osa.domain.validation.model.hook_run import HookRunStatus
 from osa.infrastructure.telemetry.api import ApiInstrumentation
 from osa.infrastructure.telemetry.hook import OtelHookInstrumentation
 from osa.infrastructure.telemetry.ingest import OtelIngestInstrumentation
 from osa.infrastructure.telemetry.outbox import OtelOutboxInstrumentation
+from osa.infrastructure.telemetry.workflow import OtelWorkflowInstrumentation
 
 
 @pytest.fixture
@@ -165,6 +167,48 @@ def test_outbox_delivery_completed_counter_and_histogram(reader, meter):
     (h_attrs, h_point) = _points(reader, "osa_dispatch_duration_seconds")[0]
     assert h_attrs == {"consumer_group": "RunHooks"}
     assert h_point.sum == pytest.approx(0.25)
+
+
+# ── Workflow adapter ──────────────────────────────────────────────────────────
+
+
+def test_workflow_stage_finished_counts_by_workflow_stage_outcome(reader, meter):
+    instr = OtelWorkflowInstrumentation(meter)
+
+    instr.stage_finished(
+        workflow=WorkflowName.PROCESS_SUBMISSION,
+        stage=WorkflowStage.VALIDATE,
+        outcome=StageOutcome.RAN,
+    )
+    instr.stage_finished(
+        workflow=WorkflowName.PROCESS_BATCH,
+        stage=WorkflowStage.HOOKS,
+        outcome=StageOutcome.SKIPPED,
+    )
+
+    points = {
+        tuple(sorted(a.items())): p.value for a, p in _points(reader, "osa_workflow_stages_total")
+    }
+    assert points[(("outcome", "ran"), ("stage", "validate"), ("workflow", "process_submission"))] == 1
+    assert points[(("outcome", "skipped"), ("stage", "hooks"), ("workflow", "process_batch"))] == 1
+
+
+def test_workflow_stage_finished_exact_label_dict(reader, meter):
+    instr = OtelWorkflowInstrumentation(meter)
+
+    instr.stage_finished(
+        workflow=WorkflowName.PROCESS_BATCH,
+        stage=WorkflowStage.INSERT_FEATURES,
+        outcome=StageOutcome.FAILED,
+    )
+
+    (attrs, point) = _points(reader, "osa_workflow_stages_total")[0]
+    assert attrs == {
+        "workflow": "process_batch",
+        "stage": "insert_features",
+        "outcome": "failed",
+    }
+    assert point.value == 1
 
 
 # ── API adapter ───────────────────────────────────────────────────────────────
