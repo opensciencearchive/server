@@ -1,6 +1,6 @@
 """PostgreSQL implementation of RecordRepository."""
 
-from sqlalchemy import func, select, text
+from sqlalchemy import Integer, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,6 +54,28 @@ class PostgresRecordRepository(RecordRepository):
         result = await self.session.execute(stmt)
         row = result.mappings().first()
         return row_to_record(dict(row)) if row else None
+
+    async def srns_for_ingest_batch(
+        self, ingest_run_id: str, batch_index: int
+    ) -> dict[str, RecordSRN]:
+        """Map upstream_source → SRN for records published by one ingest batch.
+
+        Recovers a batch's publish mapping on workflow retry: bulk_publish's
+        ON CONFLICT returns only newly inserted rows, so a redo needs the
+        DB-authoritative answer. Records published by an EARLIER batch carry
+        that batch's index and are correctly excluded.
+        """
+        source = records_table.c.source
+        stmt = select(
+            records_table.c.srn,
+            source["upstream_source"].astext,
+        ).where(
+            source["type"].astext == "ingest",
+            source["ingest_run_id"].astext == ingest_run_id,
+            source["batch_index"].astext.cast(Integer) == batch_index,
+        )
+        result = await self.session.execute(stmt)
+        return {upstream_source: RecordSRN.parse(srn) for srn, upstream_source in result.fetchall()}
 
     async def count(self) -> int:
         """Count total records in the database."""

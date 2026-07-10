@@ -9,7 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from osa.domain.auth.model.identity import System
 from osa.domain.auth.model.value import SYSTEM_USER_ID, UserId
 from osa.domain.deposition.model.aggregate import Deposition
-from osa.domain.deposition.model.value import DepositionFile, DepositionStatus
+from osa.domain.deposition.model.value import (
+    DepositionFile,
+    DepositionStatus,
+    SubmissionStage,
+)
 from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
 from osa.infrastructure.persistence.repository.deposition import (
     PostgresDepositionRepository,
@@ -21,6 +25,7 @@ def _make_deposition(
     srn: str | None = None,
     owner_id: UserId = SYSTEM_USER_ID,
     status: DepositionStatus = DepositionStatus.DRAFT,
+    stage: SubmissionStage = SubmissionStage.SUBMITTED,
     metadata: dict | None = None,
 ) -> Deposition:
     dep_id = srn or f"urn:osa:localhost:dep:{uuid4()}"
@@ -29,6 +34,7 @@ def _make_deposition(
         srn=DepositionSRN.parse(dep_id),
         convention_id=ConventionSlug.parse("test-conv"),
         status=status,
+        stage=stage,
         metadata=metadata or {"title": "Test Deposition"},
         files=[],
         owner_id=owner_id,
@@ -54,6 +60,22 @@ class TestDepositionRepoRoundTrip:
         assert got.status == DepositionStatus.DRAFT
         assert got.metadata == {"title": "Test Deposition"}
         assert got.owner_id == SYSTEM_USER_ID
+
+    async def test_stage_round_trip(self, pg_session: AsyncSession):
+        """The persisted submission-stage checkpoint survives save → get (#160)."""
+        identity = System()
+        repo = PostgresDepositionRepository(pg_session, identity)
+
+        dep = _make_deposition(
+            status=DepositionStatus.IN_VALIDATION,
+            stage=SubmissionStage.VALIDATED,
+        )
+        await repo.save(dep)
+        await pg_session.commit()
+
+        got = await repo.get(dep.srn)
+        assert got is not None
+        assert got.stage == SubmissionStage.VALIDATED
 
     async def test_get_nonexistent_returns_none(self, pg_session: AsyncSession):
         identity = System()

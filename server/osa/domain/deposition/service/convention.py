@@ -58,8 +58,9 @@ class ConventionService(Service):
         a differing declaration updates the convention in place — no caller version,
         no conflict path. The schema (versioned, immutable) and each hook release
         (idempotent on digest) are reused when already present. Feature-table
-        creation is handled asynchronously by ``CreateFeatureTables`` reacting to
-        ``ConventionRegistered``.
+        creation is now inlined at the deploy command handler (#160, decision 9);
+        the ``ConventionRegistered`` event this method still appends is audit-only
+        (no subscribers) — it lives on for the ``/events`` changefeed.
         """
         hooks = hooks or []
 
@@ -106,7 +107,8 @@ class ConventionService(Service):
         )
         await self.convention_repo.save(convention)
 
-        # 4) Async feature-table creation reacts to this (hook names + specs).
+        # 4) Audit-only event (no subscribers): recorded for the /events
+        #    changefeed. Feature tables are created by the deploy command handler.
         await self.outbox.append(
             ConventionRegistered(
                 id=EventId(uuid4()),

@@ -160,6 +160,31 @@ class TestRecordService:
         assert record.srn.version.root == 1
 
 
+class TestRecordServiceSrnsForIngestBatch:
+    @pytest.mark.asyncio
+    async def test_delegates_to_repo(
+        self,
+        mock_record_repo: RecordRepository,
+        mock_convention_repo: ConventionRepository,
+        mock_outbox: Outbox,
+        node_domain: Domain,
+    ):
+        from osa.domain.shared.model.srn import RecordSRN, RecordVersion
+
+        expected = {
+            "pdb-1": RecordSRN(
+                domain=node_domain, id=LocalId(str(uuid4())), version=RecordVersion(1)
+            )
+        }
+        mock_record_repo.srns_for_ingest_batch = AsyncMock(return_value=expected)
+        service = _make_service(mock_record_repo, mock_convention_repo, mock_outbox, node_domain)
+
+        result = await service.srns_for_ingest_batch("run-123", 2)
+
+        assert result is expected
+        mock_record_repo.srns_for_ingest_batch.assert_awaited_once_with("run-123", 2)
+
+
 class TestRecordServiceIngestSource:
     @pytest.mark.asyncio
     async def test_publish_with_ingest_source(

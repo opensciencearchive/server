@@ -1,4 +1,10 @@
-"""TDD Red: Tests for ReturnToDraft handler delegating to DepositionService."""
+"""Tests for DepositionService.return_to_draft().
+
+The return-to-draft transition used to be reachable via a ``ReturnToDraft`` event
+handler; that handler was deleted when the pipeline collapsed into orchestrated
+workflows (#160). The service method it delegated to lives on — ProcessSubmission
+calls it directly on the validation-failed / on-exhausted paths.
+"""
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
@@ -9,10 +15,7 @@ import pytest
 from osa.domain.auth.model.value import UserId
 from osa.domain.deposition.model.aggregate import Deposition
 from osa.domain.deposition.model.value import DepositionStatus
-from osa.domain.shared.event import EventId
 from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
-from osa.domain.validation.event.validation_failed import ValidationFailed
-from osa.domain.validation.model import RunStatus
 
 
 def _make_dep_srn() -> DepositionSRN:
@@ -78,43 +81,74 @@ class TestDepositionServiceReturnToDraft:
             await service.return_to_draft(_make_dep_srn())
 
 
-class TestReturnToDraftHandlerDelegatesToService:
-    """ReturnToDraft handler delegates to deposition_service.return_to_draft()."""
+def _service_with(dep: Deposition | None):
+    from osa.domain.deposition.service.deposition import DepositionService
+
+    repo = AsyncMock()
+    repo.get.return_value = dep
+    service = DepositionService(
+        deposition_repo=repo,
+        convention_repo=AsyncMock(),
+        file_storage=AsyncMock(),
+        outbox=AsyncMock(),
+        node_domain=_make_dep_srn().domain,
+    )
+    return service, repo
+
+
+class TestDepositionServiceMarkValidated:
+    """DepositionService.mark_validated() fetches, mutates, saves, and returns the aggregate."""
 
     @pytest.mark.asyncio
-    async def test_handler_delegates_to_service(self):
-        from osa.domain.deposition.handler.return_to_draft import ReturnToDraft
+    async def test_marks_validated_and_returns_updated_aggregate(self):
+        from osa.domain.deposition.model.value import SubmissionStage
 
-        service = AsyncMock()
-        handler = ReturnToDraft(deposition_service=service)
+        dep = _make_deposition()
+        service, repo = _service_with(dep)
 
-        event = ValidationFailed(
-            id=EventId(uuid4()),
-            deposition_srn=_make_dep_srn(),
-            convention_id=_make_conv_slug(),
-            status=RunStatus.FAILED,
-            reasons=["Missing required field"],
-        )
-        await handler.handle(event)
+        result = await service.mark_validated(dep.srn)
 
-        service.return_to_draft.assert_called_once_with(_make_dep_srn())
+        assert result is dep
+        assert dep.stage == SubmissionStage.VALIDATED
+        repo.save.assert_called_once_with(dep)
 
     @pytest.mark.asyncio
-    async def test_handler_catches_not_found(self):
-        """Handler should not blow up if deposition is missing — workers must be resilient."""
-        from osa.domain.deposition.handler.return_to_draft import ReturnToDraft
+    async def test_raises_not_found_for_missing_deposition(self):
         from osa.domain.shared.error import NotFoundError
 
-        service = AsyncMock()
-        service.return_to_draft.side_effect = NotFoundError("not found")
+        service, _repo = _service_with(None)
 
-        handler = ReturnToDraft(deposition_service=service)
-        event = ValidationFailed(
-            id=EventId(uuid4()),
-            deposition_srn=_make_dep_srn(),
-            convention_id=_make_conv_slug(),
-            status=RunStatus.FAILED,
-            reasons=["error"],
-        )
-        # Should not raise
-        await handler.handle(event)
+        with pytest.raises(NotFoundError):
+            await service.mark_validated(_make_dep_srn())
+
+
+class TestDepositionServiceAccept:
+    """DepositionService.accept() sets record_srn + ACCEPTED and returns the aggregate."""
+
+    @pytest.mark.asyncio
+    async def test_accepts_and_returns_updated_aggregate(self):
+        from osa.domain.deposition.model.value import SubmissionStage
+        from osa.domain.shared.model.srn import RecordSRN
+
+        record_srn = RecordSRN.parse("urn:osa:localhost:rec:test-rec@1")
+        dep = _make_deposition()
+        service, repo = _service_with(dep)
+
+        result = await service.accept(dep.srn, record_srn=record_srn)
+
+        assert result is dep
+        assert dep.record_srn == record_srn
+        assert dep.status == DepositionStatus.ACCEPTED
+        assert dep.stage == SubmissionStage.PUBLISHED
+        repo.save.assert_called_once_with(dep)
+
+    @pytest.mark.asyncio
+    async def test_raises_not_found_for_missing_deposition(self):
+        from osa.domain.shared.error import NotFoundError
+        from osa.domain.shared.model.srn import RecordSRN
+
+        record_srn = RecordSRN.parse("urn:osa:localhost:rec:test-rec@1")
+        service, _repo = _service_with(None)
+
+        with pytest.raises(NotFoundError):
+            await service.accept(_make_dep_srn(), record_srn=record_srn)

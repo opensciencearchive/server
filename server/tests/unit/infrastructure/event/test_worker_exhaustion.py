@@ -12,8 +12,8 @@ from uuid import uuid4
 
 import pytest
 
+from osa.application.workflow.process_batch import ProcessBatch
 from osa.domain.ingest.event.events import NextBatchRequested
-from osa.domain.ingest.handler.run_ingester import RunIngester
 from osa.domain.ingest.model.ingest_run import IngestRunId
 from osa.domain.shared.event import EventId
 from osa.infrastructure.event.worker import Worker
@@ -23,10 +23,10 @@ class TestWorkerOnExhaustedErrorSafety:
     @pytest.mark.asyncio
     async def test_mark_failed_runs_even_if_on_exhausted_raises(self) -> None:
         """If on_exhausted throws, mark_failed must still run."""
-        worker = Worker(RunIngester)
+        worker = Worker(ProcessBatch)
 
         # Mock handler whose on_exhausted raises
-        handler = AsyncMock(spec=RunIngester)
+        handler = AsyncMock(spec=ProcessBatch)
         handler.handle = AsyncMock(side_effect=Exception("something broke"))
         handler.on_exhausted = AsyncMock(side_effect=RuntimeError("DB down during on_exhausted"))
 
@@ -38,6 +38,7 @@ class TestWorkerOnExhaustedErrorSafety:
             ingest_run_id=IngestRunId("run-1"),
             convention_id="urn:osa:localhost:conv:test@1.0.0",
             batch_size=100,
+            batch_index=0,
         )
         delivery = MagicMock()
         delivery.id = "delivery-1"
@@ -59,7 +60,7 @@ class TestWorkerOnExhaustedErrorSafety:
                 pass
 
         async def mock_get(t: type) -> Any:
-            if t is RunIngester:
+            if t is ProcessBatch:
                 return handler
             if t is OutboxInstrumentation:
                 return _NullOutboxInstrumentation()

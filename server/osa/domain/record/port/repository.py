@@ -21,4 +21,17 @@ class RecordRepository(Port, Protocol):
     async def get(self, srn: RecordSRN) -> Record | None: ...
 
     @abstractmethod
+    async def srns_for_ingest_batch(
+        self, ingest_run_id: str, batch_index: int
+    ) -> dict[str, RecordSRN]:
+        """Map upstream_source → SRN for records published by one ingest batch.
+
+        Recovers a batch's publish mapping on workflow retry: bulk_publish's
+        ON CONFLICT returns only newly inserted rows, so a redo needs the
+        DB-authoritative answer. Records published by an EARLIER batch carry
+        that batch's index and are correctly excluded.
+        """
+        ...
+
+    @abstractmethod
     async def count(self) -> int: ...

@@ -234,6 +234,7 @@ def upgrade() -> None:
         sa.Column("srn", sa.String(), nullable=False),
         sa.Column("convention_id", sa.String(), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False),
+        sa.Column("stage", sa.String(length=32), nullable=False),
         sa.Column("metadata", sa.JSON(), nullable=False),
         sa.Column("files", sa.JSON(), nullable=False),
         sa.Column("record_id", sa.String(), nullable=True),

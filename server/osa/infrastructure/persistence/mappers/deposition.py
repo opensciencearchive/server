@@ -3,7 +3,11 @@ from uuid import UUID
 
 from osa.domain.auth.model.value import UserId
 from osa.domain.deposition.model.aggregate import Deposition
-from osa.domain.deposition.model.value import DepositionFile, DepositionStatus
+from osa.domain.deposition.model.value import (
+    DepositionFile,
+    DepositionStatus,
+    SubmissionStage,
+)
 from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN, RecordSRN
 
 
@@ -18,6 +22,7 @@ def row_to_deposition(row: dict[str, Any]) -> Deposition:
         srn=DepositionSRN.parse(row["srn"]),
         convention_id=ConventionSlug.parse(row["convention_id"]),
         status=DepositionStatus(row["status"]),
+        stage=SubmissionStage(row["stage"]),
         metadata=row.get("metadata", {}),
         files=files,
         record_srn=RecordSRN.parse(record_id) if record_id else None,
@@ -33,6 +38,7 @@ def deposition_to_dict(dep: Deposition) -> dict[str, Any]:
         "srn": str(dep.srn),
         "convention_id": str(dep.convention_id),
         "status": dep.status,
+        "stage": dep.stage,
         "metadata": dep.metadata,
         "files": [f.model_dump(mode="json") for f in dep.files],
         "record_id": str(dep.record_srn) if dep.record_srn else None,

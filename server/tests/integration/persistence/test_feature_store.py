@@ -133,6 +133,94 @@ class TestFeatureStoreInsert:
             scores = {row[1] for row in fetched}
             assert scores == {0.95, 0.42, 0.78}
 
+    async def test_insert_twice_replaces_rows_for_the_record(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession
+    ):
+        """Re-inserting for the same record converges to one row set (#160).
+
+        A workflow redo after a partial failure must not duplicate rows: the
+        second insert's values win and the first insert's rows are gone.
+        """
+        from tests.integration.conftest import seed_hook_run, seed_record
+
+        store = PostgresFeatureStore(pg_engine, pg_session)
+        feature = _make_feature()
+        await store.create_table("replace_hook", feature.columns)
+
+        record_srn = "urn:osa:localhost:rec:rec-replace@1"
+        await seed_record(pg_engine, srn=record_srn)
+        run_id = await seed_hook_run(pg_engine, feature_name="replace_hook")
+
+        # First insert: three rows.
+        first = await store.insert_features(
+            "replace_hook",
+            record_srn,
+            [
+                {"score": 0.1, "label": "a"},
+                {"score": 0.2, "label": "b"},
+                {"score": 0.3, "label": "c"},
+            ],
+            run_id,
+        )
+        assert first == 3
+
+        # Redo: two different rows — these replace the first set entirely.
+        second = await store.insert_features(
+            "replace_hook",
+            record_srn,
+            [
+                {"score": 0.9, "label": "x"},
+                {"score": 0.8, "label": "y"},
+            ],
+            run_id,
+        )
+        assert second == 2
+
+        async with pg_engine.begin() as conn:
+            result = await conn.execute(
+                text(
+                    f'SELECT score, label FROM "{FEATURES_SCHEMA}"."replace_hook" '
+                    "WHERE record_srn = :srn"
+                ),
+                {"srn": record_srn},
+            )
+            fetched = result.fetchall()
+            # Only the second insert's rows remain — no duplication.
+            assert len(fetched) == 2
+            assert {row[0] for row in fetched} == {0.9, 0.8}
+            assert {row[1] for row in fetched} == {"x", "y"}
+
+    async def test_replace_only_touches_the_target_record(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession
+    ):
+        """The delete is scoped to record_srn — other records' rows survive."""
+        from tests.integration.conftest import seed_hook_run, seed_record
+
+        store = PostgresFeatureStore(pg_engine, pg_session)
+        feature = _make_feature()
+        await store.create_table("replace_scope_hook", feature.columns)
+
+        srn_a = "urn:osa:localhost:rec:rec-a@1"
+        srn_b = "urn:osa:localhost:rec:rec-b@1"
+        await seed_record(pg_engine, srn=srn_a)
+        await seed_record(pg_engine, srn=srn_b)
+        run_id = await seed_hook_run(pg_engine, feature_name="replace_scope_hook")
+
+        await store.insert_features("replace_scope_hook", srn_a, [{"score": 0.1}], run_id)
+        await store.insert_features("replace_scope_hook", srn_b, [{"score": 0.2}], run_id)
+        # Redo record A — B must be untouched.
+        await store.insert_features("replace_scope_hook", srn_a, [{"score": 0.5}], run_id)
+
+        async with pg_engine.begin() as conn:
+            result = await conn.execute(
+                text(
+                    f'SELECT record_srn, score FROM "{FEATURES_SCHEMA}"."replace_scope_hook" '
+                    "ORDER BY record_srn"
+                )
+            )
+            rows = {row[0]: row[1] for row in result.fetchall()}
+            assert rows == {srn_a: 0.5, srn_b: 0.2}
+
     async def test_insert_empty_rows_returns_zero(
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
     ):

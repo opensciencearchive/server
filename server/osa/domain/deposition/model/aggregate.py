@@ -2,7 +2,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 from osa.domain.auth.model.value import UserId
-from osa.domain.deposition.model.value import DepositionFile, DepositionStatus
+from osa.domain.deposition.model.value import (
+    DepositionFile,
+    DepositionStatus,
+    SubmissionStage,
+)
 from osa.domain.shared.error import InvalidStateError
 from osa.domain.shared.model.aggregate import Aggregate
 from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN, RecordSRN
@@ -12,6 +16,7 @@ class Deposition(Aggregate):
     srn: DepositionSRN
     convention_id: ConventionSlug
     status: DepositionStatus = DepositionStatus.DRAFT
+    stage: SubmissionStage = SubmissionStage.SUBMITTED
     metadata: dict[str, Any] = {}
     files: list[DepositionFile] = []
     record_srn: RecordSRN | None = None
@@ -47,6 +52,9 @@ class Deposition(Aggregate):
     def submit(self) -> None:
         self._require_draft()
         self.status = DepositionStatus.IN_VALIDATION
+        # A resubmission must restart the workflow from the top, discarding any
+        # checkpoint left by a prior run (#160).
+        self.stage = SubmissionStage.SUBMITTED
         self.updated_at = datetime.now(UTC)
 
     def return_to_draft(self) -> None:
@@ -55,6 +63,24 @@ class Deposition(Aggregate):
                 f"Can only return to draft from IN_VALIDATION, currently {self.status}"
             )
         self.status = DepositionStatus.DRAFT
+        self.updated_at = datetime.now(UTC)
+
+    def mark_validated(self) -> None:
+        """Advance the submission checkpoint past validation (#160)."""
+        if self.status != DepositionStatus.IN_VALIDATION:
+            raise InvalidStateError(
+                f"Can only mark validated from IN_VALIDATION, currently {self.status}"
+            )
+        self.stage = SubmissionStage.VALIDATED
+        self.updated_at = datetime.now(UTC)
+
+    def accept(self, record_srn: RecordSRN) -> None:
+        """Close the submission workflow's publish stage (#160)."""
+        if self.status != DepositionStatus.IN_VALIDATION:
+            raise InvalidStateError(f"Can only accept from IN_VALIDATION, currently {self.status}")
+        self.record_srn = record_srn
+        self.status = DepositionStatus.ACCEPTED
+        self.stage = SubmissionStage.PUBLISHED
         self.updated_at = datetime.now(UTC)
 
     def remove_all_files(self) -> None:

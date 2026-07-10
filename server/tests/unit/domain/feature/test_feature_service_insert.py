@@ -1,52 +1,27 @@
-"""Unit tests for InsertRecordFeatures event handler and FeatureService.insert_features_for_record."""
+"""Unit tests for FeatureService.insert_features_for_record.
 
-from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+Formerly co-located with the ``InsertRecordFeatures`` event handler; that handler
+was deleted when the pipeline collapsed into orchestrated workflows (#160). The
+service method it delegated to lives on — ProcessSubmission calls it directly in
+its INSERT_FEATURES stage.
+"""
+
+from unittest.mock import AsyncMock
 
 import pytest
 
-from osa.domain.feature.handler.insert_record_features import InsertRecordFeatures
 from osa.domain.feature.service.feature import FeatureService
-from osa.domain.record.event.record_published import RecordPublished
-from osa.domain.shared.event import EventId
 from osa.domain.shared.model.hook import FeatureName
 from osa.domain.shared.model.provenance import RunRef
-from osa.domain.shared.model.source import DepositionSource, IngestSource
-from osa.domain.shared.model.srn import (
-    ConventionSlug,
-    RecordSRN,
-    SchemaId,
-)
+from osa.domain.shared.model.srn import RecordSRN
 
 
 def _make_record_srn() -> RecordSRN:
     return RecordSRN.parse("urn:osa:localhost:rec:test-rec@1")
 
 
-def _make_conv_slug() -> ConventionSlug:
-    return ConventionSlug("test")
-
-
 def _make_run_ref() -> RunRef:
     return RunRef(run_id="run-abc", release_id="rel-xyz")
-
-
-def _make_schema_id() -> SchemaId:
-    return SchemaId.parse("test@1.0.0")
-
-
-def _make_event(
-    expected_features: list[str] | None = None,
-) -> RecordPublished:
-    return RecordPublished(
-        id=EventId(uuid4()),
-        record_srn=_make_record_srn(),
-        source=DepositionSource(id="urn:osa:localhost:dep:test-dep"),
-        metadata={"title": "Test"},
-        convention_id=_make_conv_slug(),
-        schema_id=_make_schema_id(),
-        expected_features=expected_features or [],
-    )
 
 
 def _make_feature_service(
@@ -57,38 +32,6 @@ def _make_feature_service(
         feature_store=feature_store or AsyncMock(),
         feature_storage=feature_storage or AsyncMock(),
     )
-
-
-def _make_handler(
-    feature_service: FeatureService | AsyncMock | None = None,
-    feature_storage: MagicMock | None = None,
-) -> InsertRecordFeatures:
-    storage = feature_storage or MagicMock()
-    if not feature_storage:
-        storage.get_hook_output_root = MagicMock(return_value="/fake/output/dir")
-    return InsertRecordFeatures(
-        feature_service=feature_service or AsyncMock(),
-        feature_storage=storage,
-    )
-
-
-class TestInsertRecordFeaturesHandler:
-    @pytest.mark.asyncio
-    async def test_delegates_to_feature_service(self):
-        """Handler delegates to FeatureService.insert_features_for_record."""
-        feature_service = AsyncMock()
-        handler = _make_handler(feature_service=feature_service)
-
-        event = _make_event(
-            expected_features=["pocket_detect"],
-        )
-        await handler.handle(event)
-
-        feature_service.insert_features_for_record.assert_called_once_with(
-            hook_output_dir="/fake/output/dir",
-            record_srn=str(event.record_srn),
-            expected_features=[FeatureName("pocket_detect")],
-        )
 
 
 class TestFeatureServiceInsertFeaturesForRecord:
@@ -235,37 +178,3 @@ class TestFeatureServiceInsertFeaturesForRecord:
 
         feature_storage.hook_features_exist.assert_not_called()
         feature_store.insert_features.assert_not_called()
-
-
-class TestInsertRecordFeaturesIngestSource:
-    """US2: InsertRecordFeatures works identically for ingest-sourced records."""
-
-    @pytest.mark.asyncio
-    async def test_ingest_source_uses_source_fields(self):
-        """Handler uses source type and id from event regardless of source type."""
-        feature_service = AsyncMock()
-        storage = MagicMock()
-        storage.get_hook_output_root.return_value = "/fake/ingest/dir"
-        handler = _make_handler(feature_service=feature_service, feature_storage=storage)
-
-        event = RecordPublished(
-            id=EventId(uuid4()),
-            record_srn=_make_record_srn(),
-            source=IngestSource(
-                id="run-123-pdb-456",
-                ingest_run_id="run123",
-                upstream_source="pdb",
-            ),
-            metadata={"title": "Ingested"},
-            convention_id=_make_conv_slug(),
-            schema_id=_make_schema_id(),
-            expected_features=["pocket_detect"],
-        )
-        await handler.handle(event)
-
-        storage.get_hook_output_root.assert_called_once_with("ingest", "run-123-pdb-456")
-        feature_service.insert_features_for_record.assert_called_once_with(
-            hook_output_dir="/fake/ingest/dir",
-            record_srn=str(_make_record_srn()),
-            expected_features=[FeatureName("pocket_detect")],
-        )

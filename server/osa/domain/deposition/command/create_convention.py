@@ -13,9 +13,11 @@ from osa.domain.deposition.model.docs import (
 )
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.service.convention import ConventionService
+from osa.domain.feature.service.feature import FeatureService
 from osa.domain.semantics.model.value import FieldDefinition
 from osa.domain.shared.authorization.gate import requires_scope
 from osa.domain.shared.command import Command, CommandHandler, Result
+from osa.domain.shared.error import ConflictError
 from osa.domain.shared.model.hook import (
     HookIdentity,
     HookName,
@@ -175,8 +177,24 @@ class DeployConventionHandler(CommandHandler[DeployConvention, ConventionCreated
     __auth__ = requires_scope("conventions:write")
     principal: Principal
     convention_service: ConventionService
+    # Cross-domain composition happens HERE at the entry point, not inside
+    # ConventionService: domains must not import each other, so the deposition
+    # service cannot create feature tables. The command handler (application-edge)
+    # is the sanctioned place to fan out across the deposition and feature domains
+    # (#160, decision 9).
+    feature_service: FeatureService
 
     async def run(self, cmd: DeployConvention) -> ConventionCreated:
+        """Deploy the convention, then materialise its feature tables.
+
+        Table creation runs AFTER ``deploy`` succeeds, one ``create_table`` per
+        declared hook, swallowing ``ConflictError`` (a table already created by a
+        prior deploy). Because deploy is a declarative upsert, a client retry
+        after a partial failure re-runs creation idempotently — and because the
+        tables exist by the time this response returns, the old "table readiness
+        is unsignalled" gap (formerly the async ``CreateFeatureTables`` handler)
+        is closed.
+        """
         built_by = str(self.principal.user_id) if self.principal.user_id else None
         convention = await self.convention_service.deploy(
             slug=ConventionSlug.from_title(cmd.title),
@@ -191,6 +209,13 @@ class DeployConventionHandler(CommandHandler[DeployConvention, ConventionCreated
             docs=cmd.docs.to_vo(),
             built_by=built_by,
         )
+        for hook in cmd.hooks:
+            identity = HookIdentity(name=hook.name, feature=hook.feature)
+            try:
+                await self.feature_service.create_table(identity)
+            except ConflictError:
+                # Table already exists (idempotent re-deploy) — safe to skip.
+                pass
         return ConventionCreated(
             slug=convention.id,
             title=convention.title,
