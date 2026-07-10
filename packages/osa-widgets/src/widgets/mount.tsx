@@ -48,9 +48,28 @@ export function Bootstrap<T>({
   return render(state.data, host);
 }
 
+export function StandaloneNotice(): ReactElement {
+  return (
+    <div className="widget-status">
+      This is an OSA MCP Apps widget. It has no data of its own — an MCP Apps host
+      (Claude, Goose, …) renders it inside a sandboxed iframe and delivers the tool
+      result over postMessage. Connect the host to the node&apos;s <code>/mcp</code>{" "}
+      endpoint instead of opening this file directly.
+    </div>
+  );
+}
+
 export function mountWidget<T>(render: RenderWidget<T>): void {
   const container = document.getElementById("root");
   if (!container) throw new Error("Widget HTML is missing the #root container");
+  const root = createRoot(container);
+  // Opened standalone (no embedding host), window.parent === window: our own
+  // ui/initialize would echo straight back and be answered -32601 by our own
+  // endpoint. Explain the situation instead of surfacing that self-reply.
+  if (window.parent === window) {
+    root.render(<StandaloneNotice />);
+    return;
+  }
   const host = WidgetHost.fromWindow(window);
-  createRoot(container).render(<Bootstrap host={host} render={render} />);
+  root.render(<Bootstrap host={host} render={render} />);
 }
