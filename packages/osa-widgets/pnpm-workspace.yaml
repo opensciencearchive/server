@@ -1,0 +1,4 @@
+# Standalone package — this file exists only to carry pnpm settings
+# (pnpm 11 reads build allowances from here, not package.json).
+allowBuilds:
+  esbuild: true
