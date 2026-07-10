@@ -77,9 +77,11 @@ domain/data/query/view.py ← ReadTablePage / GetDatasetList / GetRecordDetail /
 
 `packages/osa-widgets/` (TypeScript + React + Chart.js) compiles each widget to
 **one self-contained HTML file** — all JS/CSS inlined, no external requests —
-served via MCP `resources/read` as `text/html;profile=mcp-app`. The widgets
-speak MCP-Apps postMessage JSON-RPC to the host (`src/protocol/` is the single
-compatibility seam for the young spec).
+served via MCP `resources/read` as `text/html;profile=mcp-app`. The widget↔host
+handshake is delegated to the official `@modelcontextprotocol/ext-apps` `App`
+client (the reference implementation of the spec the hosts are built against),
+wrapped behind a narrow `WidgetHostApi` in `src/protocol/` — the single place
+the SDK is referenced.
 
 Build and stage the bundles into the server package:
 
