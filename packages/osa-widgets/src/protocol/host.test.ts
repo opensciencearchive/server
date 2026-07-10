@@ -1,170 +1,118 @@
-import { describe, expect, it } from "vitest";
+/**
+ * WidgetHost wraps the official ext-apps `App`. These tests cover only OUR
+ * glue — the SDK owns the transport/handshake and is tested upstream — by
+ * mocking `App` with a controllable double.
+ */
 
-import { JsonRpcEndpoint, type JsonRpcRequest } from "./jsonrpc";
-import { Messages, PROTOCOL_VERSION, WidgetHost } from "./host";
-import { FakeTransport } from "./jsonrpc.test";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-function makeHost(): { host: WidgetHost; transport: FakeTransport } {
-  const transport = new FakeTransport();
-  return { host: new WidgetHost(new JsonRpcEndpoint(transport)), transport };
+interface FakeApp {
+  ontoolresult: ((params: unknown) => void) | undefined;
+  connect: ReturnType<typeof vi.fn>;
+  callServerTool: ReturnType<typeof vi.fn>;
+  updateModelContext: ReturnType<typeof vi.fn>;
 }
 
-function respondTo(transport: FakeTransport, request: JsonRpcRequest, result: unknown): void {
-  transport.receive({ jsonrpc: "2.0", id: request.id, result });
+// The instance registry and fake live inside the (hoisted) factory; a module
+// export exposes the registry to the tests.
+vi.mock("@modelcontextprotocol/ext-apps", () => {
+  const instances: FakeApp[] = [];
+  class FakeAppImpl implements FakeApp {
+    ontoolresult: ((params: unknown) => void) | undefined;
+    connect = vi.fn().mockResolvedValue(undefined);
+    callServerTool = vi.fn();
+    updateModelContext = vi.fn().mockResolvedValue({});
+    constructor() {
+      instances.push(this);
+    }
+  }
+  return {
+    App: FakeAppImpl,
+    PostMessageTransport: class {
+      constructor(
+        public target: unknown,
+        public source: unknown,
+      ) {}
+    },
+    __instances: instances,
+  };
+});
+
+import * as extApps from "@modelcontextprotocol/ext-apps";
+
+import { WidgetHost } from "./host";
+
+const appInstances = (extApps as unknown as { __instances: FakeApp[] }).__instances;
+
+function makeHost(): { host: WidgetHost; app: FakeApp } {
+  appInstances.length = 0;
+  const host = WidgetHost.fromWindow(window);
+  return { host, app: appInstances[0]! };
 }
 
-describe("WidgetHost.connect", () => {
-  it("announces the protocol version in ui/initialize", () => {
-    const { host, transport } = makeHost();
-    void host.connect();
+beforeEach(() => {
+  appInstances.length = 0;
+});
 
-    const request = transport.lastSent();
-    expect(request.method).toBe(Messages.initialize);
-    expect(request.params).toEqual({ protocolVersion: PROTOCOL_VERSION });
-    expect(PROTOCOL_VERSION).toBe("2026-01-26");
+describe("connect", () => {
+  it("resolves with the tool result's structuredContent", async () => {
+    const { host, app } = makeHost();
+    const connected = host.connect();
+    // Handler was registered before connect resolved; the host pushes it now.
+    app.ontoolresult?.({ structuredContent: { rows: [1, 2, 3] } });
+    await expect(connected).resolves.toEqual({ rows: [1, 2, 3] });
   });
 
-  it("resolves render data from the initialize response `renderData` key", async () => {
-    const { host, transport } = makeHost();
+  it("falls back to the whole params when structuredContent is absent", async () => {
+    const { host, app } = makeHost();
     const connected = host.connect();
-    respondTo(transport, transport.lastSent(), { renderData: { hello: 1 } });
-
-    await expect(connected).resolves.toEqual({ hello: 1 });
+    app.ontoolresult?.({ content: [{ type: "text", text: "hi" }] });
+    await expect(connected).resolves.toEqual({ content: [{ type: "text", text: "hi" }] });
   });
 
-  it("resolves render data from `toolResult.structuredContent`", async () => {
-    const { host, transport } = makeHost();
-    const connected = host.connect();
-    respondTo(transport, transport.lastSent(), {
-      toolResult: { structuredContent: { rows: [1, 2] } },
-    });
-
-    await expect(connected).resolves.toEqual({ rows: [1, 2] });
-  });
-
-  it("resolves render data from a top-level `structuredContent`", async () => {
-    const { host, transport } = makeHost();
-    const connected = host.connect();
-    respondTo(transport, transport.lastSent(), { structuredContent: { n: 3 } });
-
-    await expect(connected).resolves.toEqual({ n: 3 });
-  });
-
-  it("falls back to a ui/render-data notification when the initialize response has no data", async () => {
-    const { host, transport } = makeHost();
-    const connected = host.connect();
-    respondTo(transport, transport.lastSent(), { capabilities: {} });
-    transport.receive({
-      jsonrpc: "2.0",
-      method: Messages.renderData,
-      params: { structuredContent: { late: true } },
-    });
-
-    await expect(connected).resolves.toEqual({ late: true });
-  });
-
-  it("accepts render-data notification params directly when there is no structuredContent wrapper", async () => {
-    const { host, transport } = makeHost();
-    const connected = host.connect();
-    transport.receive({
-      jsonrpc: "2.0",
-      method: Messages.renderData,
-      params: { bare: "params" },
-    });
-
-    await expect(connected).resolves.toEqual({ bare: "params" });
-  });
-
-  it("keeps the first data that arrives when both channels deliver", async () => {
-    const { host, transport } = makeHost();
-    const connected = host.connect();
-    transport.receive({
-      jsonrpc: "2.0",
-      method: Messages.renderData,
-      params: { structuredContent: { source: "notification" } },
-    });
-    respondTo(transport, transport.lastSent(), {
-      renderData: { source: "response" },
-    });
-
-    await expect(connected).resolves.toEqual({ source: "notification" });
-  });
-
-  it("rejects when initialize fails and no notification arrived", async () => {
-    const { host, transport } = makeHost();
-    const connected = host.connect();
-    transport.receive({
-      jsonrpc: "2.0",
-      id: transport.lastSent().id,
-      error: { code: -32000, message: "host says no" },
-    });
-
-    await expect(connected).rejects.toThrow("host says no");
+  it("rejects when the handshake fails", async () => {
+    const { host, app } = makeHost();
+    app.connect.mockRejectedValueOnce(new Error("no host"));
+    await expect(host.connect()).rejects.toThrow("no host");
   });
 });
 
-describe("WidgetHost.callTool", () => {
-  it("sends tools/call with name and arguments and returns structuredContent", async () => {
-    const { host, transport } = makeHost();
-    const pending = host.callTool<{ ok: boolean }>("fetch_page", { limit: 5 });
-
-    const request = transport.lastSent();
-    expect(request.method).toBe(Messages.callTool);
-    expect(request.params).toEqual({ name: "fetch_page", arguments: { limit: 5 } });
-
-    respondTo(transport, request, { structuredContent: { ok: true } });
-    await expect(pending).resolves.toEqual({ ok: true });
+describe("callTool", () => {
+  it("returns structuredContent on success", async () => {
+    const { host, app } = makeHost();
+    app.callServerTool.mockResolvedValue({ structuredContent: { next_cursor: "abc" } });
+    const out = await host.callTool<{ next_cursor: string }>("fetch_page", { limit: 2 });
+    expect(app.callServerTool).toHaveBeenCalledWith({
+      name: "fetch_page",
+      arguments: { limit: 2 },
+    });
+    expect(out).toEqual({ next_cursor: "abc" });
   });
 
-  it("throws the text content when the tool result isError", async () => {
-    const { host, transport } = makeHost();
-    const pending = host.callTool("fetch_page", {});
-
-    respondTo(transport, transport.lastSent(), {
+  it("throws the tool's error text when isError is set", async () => {
+    const { host, app } = makeHost();
+    app.callServerTool.mockResolvedValue({
       isError: true,
-      content: [{ type: "text", text: "no such table" }],
+      content: [{ type: "text", text: "Unknown column 'bogus'" }],
     });
-
-    await expect(pending).rejects.toThrow("no such table");
-  });
-
-  it("throws a generic message when an isError result has no text content", async () => {
-    const { host, transport } = makeHost();
-    const pending = host.callTool("fetch_page", {});
-
-    respondTo(transport, transport.lastSent(), { isError: true });
-
-    await expect(pending).rejects.toThrow(/tool call failed/i);
+    await expect(host.callTool("show_chart", {})).rejects.toThrow("Unknown column 'bogus'");
   });
 });
 
-describe("WidgetHost.updateModelContext", () => {
-  it("fires a ui/update-model-context notification", () => {
-    const { host, transport } = makeHost();
-    host.updateModelContext("user opened record urn:osa:x:rec:1");
-
-    expect(transport.sent).toEqual([
-      {
-        jsonrpc: "2.0",
-        method: Messages.updateModelContext,
-        params: { text: "user opened record urn:osa:x:rec:1" },
-      },
-    ]);
+describe("updateModelContext", () => {
+  it("sends a text content block", () => {
+    const { host, app } = makeHost();
+    host.updateModelContext("user filtered to high-ductility");
+    expect(app.updateModelContext).toHaveBeenCalledWith({
+      content: [{ type: "text", text: "user filtered to high-ductility" }],
+    });
   });
 
-  it("truncates oversized summaries to stay under ~200 chars", () => {
-    const { host, transport } = makeHost();
+  it("truncates long summaries", () => {
+    const { host, app } = makeHost();
     host.updateModelContext("x".repeat(500));
-
-    const sent = transport.sent[0] as { params: { text: string } };
-    expect(sent.params.text.length).toBeLessThanOrEqual(200);
-    expect(sent.params.text.endsWith("…")).toBe(true);
-  });
-
-  it("is fire-and-forget: no response is expected or tracked", () => {
-    const { host, transport } = makeHost();
-    host.updateModelContext("summary");
-    const sent = transport.sent[0] as Record<string, unknown>;
-    expect(sent["id"]).toBeUndefined();
+    const arg = app.updateModelContext.mock.calls[0]![0] as { content: { text: string }[] };
+    expect(arg.content[0]!.text.length).toBeLessThanOrEqual(200);
+    expect(arg.content[0]!.text.endsWith("…")).toBe(true);
   });
 });
