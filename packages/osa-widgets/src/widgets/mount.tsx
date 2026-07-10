@@ -100,15 +100,25 @@ export function mountWidget<T>(scope: string, render: RenderWidget<T>): void {
   viewLog(scope, "mounting");
   const container = document.getElementById("root");
   if (!container) throw new Error("Widget HTML is missing the #root container");
-  const root = createRoot(container);
-  // Opened standalone (no embedding host), window.parent === window: our own
-  // ui/initialize would echo straight back and be answered -32601 by our own
-  // endpoint. Explain the situation instead of surfacing that self-reply.
-  if (window.parent === window) {
-    viewLog(scope, "no embedding host (opened standalone)");
-    root.render(<StandaloneNotice />);
-    return;
+  // Any throw during setup (SDK/transport construction, React root creation)
+  // would otherwise leave a blank iframe with no clue. Paint the failure into
+  // #root directly — this path can't rely on React having mounted.
+  try {
+    const root = createRoot(container);
+    // Opened standalone (no embedding host), window.parent === window: our own
+    // ui/initialize would echo straight back and be answered -32601 by our own
+    // endpoint. Explain the situation instead of surfacing that self-reply.
+    if (window.parent === window) {
+      viewLog(scope, "no embedding host (opened standalone)");
+      root.render(<StandaloneNotice />);
+      return;
+    }
+    const host = WidgetHost.fromWindow(window);
+    root.render(<Bootstrap scope={scope} host={host} render={render} />);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    viewError(scope, "failed to mount", err);
+    container.textContent = `Widget failed to start: ${message}`;
+    container.className = "widget-status widget-error";
   }
-  const host = WidgetHost.fromWindow(window);
-  root.render(<Bootstrap scope={scope} host={host} render={render} />);
 }
