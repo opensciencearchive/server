@@ -2,8 +2,9 @@
 
 import { Fragment, useState } from "react";
 
+import { fetchPageArgs } from "../../lib/args";
 import { formatCell } from "../../lib/format";
-import type { RecordDetailData, TablePage } from "../../lib/types";
+import type { RecordDetailData, TableQuery, TablePage } from "../../lib/types";
 import type { WidgetHostApi } from "../../protocol/host";
 
 interface RecordDetailProps {
@@ -31,7 +32,7 @@ export function RecordDetail({ data, host }: RecordDetailProps) {
   async function loadSection(feature: string) {
     setSections((prev) => ({ ...prev, [feature]: { status: "loading" } }));
     try {
-      const page = await host.callTool<TablePage>("fetch_page", {
+      const query: TableQuery = {
         schema: data.schema,
         table: feature,
         filter: {
@@ -40,8 +41,10 @@ export function RecordDetail({ data, host }: RecordDetailProps) {
           op: "eq",
           value: data.record.srn,
         },
+        sort: [],
         limit: FEATURE_ROW_LIMIT,
-      });
+      };
+      const page = await host.callTool<TablePage>("fetch_page", fetchPageArgs(query));
       setSections((prev) => ({ ...prev, [feature]: { status: "loaded", page } }));
     } catch (err) {
       setSections((prev) => ({

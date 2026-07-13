@@ -155,9 +155,6 @@ def create_app(
 
     logfire.info("Starting OSA server: {name} v{version}", name=config.name, version=config.version)
 
-    # Validate all handlers have authorization declarations (fail fast)
-    validate_all_handlers()
-
     app_instance = FastAPI(
         title=config.name,
         description=config.description,
@@ -178,6 +175,11 @@ def create_app(
         *(providers or []),
         extra_handlers=extra_handlers,
     )
+
+    # Validate all handlers have authorization declarations (fail fast). Walks
+    # the container's own registry, so this needs the container built first.
+    validate_all_handlers(container)
+
     setup_dishka(container, app_instance)
 
     # Register v1 routes with /api/v1 prefix

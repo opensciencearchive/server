@@ -63,6 +63,7 @@ describe("RecordDetail", () => {
       expect(callTool).toHaveBeenCalledWith("fetch_page", {
         schema: "geo-seq",
         table: "quality",
+        sort: [],
         filter: {
           kind: "predicate",
           field: "features.quality.record_srn",
