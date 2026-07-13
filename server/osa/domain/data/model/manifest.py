@@ -50,9 +50,12 @@ IMPLICIT_RECORD_COLUMN_SPECS: tuple[ColumnSpec, ...] = (
 # Implicit columns present on every feature-table response, in wire order, ahead
 # of the hook's declared output columns. Feature rows have no SRN in v1 (data-
 # model.md §RecordSummary); ``record_srn`` is the join key back to ``records``.
+# ``run_id`` is the row's provenance FK (feature #145): which hook_run produced
+# it, resolvable to a hook_run -> hook_release for full traceability.
 IMPLICIT_FEATURE_COLUMN_SPECS: tuple[ColumnSpec, ...] = (
     ColumnSpec(name="id", type=FieldType.NUMBER),
     ColumnSpec(name="record_srn", type=FieldType.TEXT),
+    ColumnSpec(name="run_id", type=FieldType.TEXT),
     ColumnSpec(name="created_at", type=FieldType.DATE),
 )
 

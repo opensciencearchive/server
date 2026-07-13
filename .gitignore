@@ -239,3 +239,6 @@ web/.turbo/
 !.env.example
 server/osa.yaml
 .gstack/
+
+# MCP widget bundles staged into the server package (built from packages/osa-widgets)
+server/osa/application/api/mcp/bundles/

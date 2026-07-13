@@ -28,6 +28,7 @@ dependencies = [
     "python-multipart>=0.0.22",
     "slowapi>=0.1.9",
     "opentelemetry-exporter-prometheus==0.60b1",
+    "mcp>=1.28.1",
 ]
 
 [project.entry-points."osa.sources"]

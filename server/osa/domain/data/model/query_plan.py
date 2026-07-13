@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import base64
 import json
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
@@ -135,6 +136,26 @@ class QueryPlan(BaseModel):
             self.sort = list(_DEFAULT_SORTS[self.table_kind])
         return self
 
+    async def take_page(self, rows: AsyncIterator[Mapping[str, Any]]) -> PageSlice:
+        """Materialize one bounded page from *rows* per this plan's pagination.
+
+        The single owner of the ``limit + 1`` mechanic: consume up to one row
+        beyond the page to learn whether a further page exists, and derive
+        ``next_cursor`` from the last returned row via the plan keyset. Both
+        the REST paginated-JSON path and the view queries build on this, so
+        the encode side of pagination cannot fork.
+        """
+        limit = self.pagination.limit
+        page: list[Mapping[str, Any]] = []
+        truncated = False
+        async for row in rows:
+            if len(page) == limit:
+                truncated = True
+                break
+            page.append(row)
+        next_cursor = self.keyset.cursor_from_row(page[-1]) if truncated and page else None
+        return PageSlice(rows=page, next_cursor=next_cursor, truncated=truncated)
+
     @property
     def keyset(self) -> Keyset:
         """The pagination contract for this plan.
@@ -149,6 +170,15 @@ class QueryPlan(BaseModel):
             sort_column=tiebreak if primary == "id" else primary,
             tiebreak_column=tiebreak,
         )
+
+
+@dataclass
+class PageSlice:
+    """One materialized page: raw rows plus the paging state derived from them."""
+
+    rows: list[Mapping[str, Any]]
+    next_cursor: str | None
+    truncated: bool
 
 
 def encode_cursor(sort_value: Any, id_value: Any) -> str:

@@ -1,7 +1,7 @@
 import logging
 import os
 import sys
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 
 import logfire
@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy.ext.asyncio import AsyncEngine
+from starlette.routing import Route
 
 from osa.application.api.v1.errors import map_osa_error
 from osa.application.api.v1.routes import (
@@ -28,6 +29,7 @@ from osa.application.api.v1.routes import (
     validation,
 )
 from osa.application.api.v1.routes import data as data_routes
+from osa.application.api.mcp.server import McpSurface
 from osa.application.api.rest import skill as skill_routes
 from osa.application.api.v1.routes.data._limiter import limiter
 from osa.application.di import create_container
@@ -99,7 +101,13 @@ async def lifespan(app: FastAPI):
     # Run unified worker pool (pull-based event handlers + scheduled tasks)
     worker_pool = await container.get(WorkerPool)
 
-    async with worker_pool:
+    async with AsyncExitStack() as stack:
+        await stack.enter_async_context(worker_pool)
+        # MCP Apps surface (#162): renders SKILL.md instructions from the live
+        # catalog and runs the streamable-HTTP session manager.
+        mcp_surface: McpSurface | None = getattr(app.state, "mcp_surface", None)
+        if mcp_surface is not None:
+            await stack.enter_async_context(mcp_surface.lifespan())
         yield
 
     # Flush buffered telemetry (span/metric/log exporters) before teardown.
@@ -147,9 +155,6 @@ def create_app(
 
     logfire.info("Starting OSA server: {name} v{version}", name=config.name, version=config.version)
 
-    # Validate all handlers have authorization declarations (fail fast)
-    validate_all_handlers()
-
     app_instance = FastAPI(
         title=config.name,
         description=config.description,
@@ -170,6 +175,11 @@ def create_app(
         *(providers or []),
         extra_handlers=extra_handlers,
     )
+
+    # Validate all handlers have authorization declarations (fail fast). Walks
+    # the container's own registry, so this needs the container built first.
+    validate_all_handlers(container)
+
     setup_dishka(container, app_instance)
 
     # Register v1 routes with /api/v1 prefix
@@ -192,6 +202,19 @@ def create_app(
     # routers so nothing shadows the API prefix.
     app_instance.include_router(skill_routes.router)
     app_instance.include_router(metrics.router)
+
+    # MCP Apps surface (#162) — streamable-HTTP endpoint at /mcp, same
+    # unversioned tier as the skill surface. An exact-path Route (the surface
+    # object is a raw ASGI endpoint), NOT a Mount: Mount would 307-redirect
+    # bare /mcp to /mcp/, which not every MCP client follows. The session
+    # manager only accepts requests once the app lifespan has entered
+    # `mcp_surface.lifespan()`.
+    if config.mcp.enabled:
+        mcp_surface = McpSurface(container, config)
+        app_instance.state.mcp_surface = mcp_surface
+        app_instance.router.routes.append(
+            Route("/mcp", endpoint=mcp_surface, methods=["GET", "POST", "DELETE"])
+        )
 
     # POST /data/* rate limiting (slowapi). The shared limiter is attached to
     # app state and its 429 handler registered; GET routes are not limited.

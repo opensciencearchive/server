@@ -58,6 +58,21 @@ dev-down:
 open-ui:
     open http://localhost:8080
 
+# === Widgets (MCP Apps UI bundles) ===
+
+# Build the MCP widget bundles and stage them into the server package (#162).
+# The server serves these as ui://osa/* resources at /mcp; without this step a
+# node runs fine but resources/read returns a "bundle missing" error.
+widgets-build:
+    cd packages/osa-widgets && pnpm install && pnpm build
+    rm -rf server/osa/application/api/mcp/bundles
+    mkdir -p server/osa/application/api/mcp/bundles
+    cp packages/osa-widgets/dist/*.html server/osa/application/api/mcp/bundles/
+
+# Run the widget package tests
+widgets-test:
+    cd packages/osa-widgets && pnpm install && pnpm test
+
 # === Code Quality ===
 
 # Lint all code (server + web)
