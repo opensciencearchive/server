@@ -36,7 +36,7 @@ from osa.domain.data.model.view import (
 )
 from osa.domain.data.service.data_catalog import DataCatalogService
 from osa.domain.data.service.data_query import DataQueryService
-from osa.domain.shared.error import ValidationError
+from osa.domain.shared.error import ConfigurationError, ValidationError
 from osa.domain.shared.model.hook import FeatureName
 from osa.domain.shared.model.ids import RecordRef
 from osa.domain.shared.model.srn import SchemaId
@@ -177,8 +177,24 @@ class DataViewService(Service):
 
         Same ``default=str`` posture as the JSON serializer: a datetime or
         Decimal arrives as its string form, never as a Python object.
+
+        Every declared column is expected to be present in the raw row (a
+        genuine SQL NULL still arrives as a present key with value ``None``).
+        A missing key means the read path's SELECT and the manifest's
+        declared columns have drifted apart — an internal invariant
+        violation, not a value to paper over — so it's checked explicitly
+        and raised as ``ConfigurationError`` naming the exact column(s),
+        rather than defaulting to ``None`` and quietly rendering wrong data
+        (the failure mode a dropped ``run_id`` column previously hit).
         """
-        projected = {col.name: row.get(col.name) for col in columns}
+        missing = [col.name for col in columns if col.name not in row]
+        if missing:
+            raise ConfigurationError(
+                f"Declared column(s) {missing} are missing from the underlying "
+                "read for this table — the manifest and the query's SELECT have "
+                "drifted apart. This is a server bug, not a client input error."
+            )
+        projected = {col.name: row[col.name] for col in columns}
         return json.loads(json.dumps(projected, default=str))
 
     @staticmethod

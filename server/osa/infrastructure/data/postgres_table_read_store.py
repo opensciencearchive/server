@@ -268,9 +268,13 @@ class PostgresTableReadStore:
         # records via the records join.
         conditions.extend(self._features.records_scope(plan.schema_id))
 
-        # Implicit columns (id, record_srn, created_at) precede the hook's
-        # declared data columns — this is the CSV header order.
-        select_cols = [ft.c.id, ft.c.record_srn, ft.c.created_at, *data_columns(ft)]
+        # Implicit columns (id, record_srn, run_id, created_at) precede the
+        # hook's declared data columns — this is the CSV header order. run_id
+        # must be selected explicitly: it's excluded from data_columns(ft) (an
+        # auto column), but it's the row's provenance FK (feature #145) and is
+        # a declared manifest column (IMPLICIT_FEATURE_COLUMN_SPECS), so every
+        # feature read — REST and the MCP view queries alike — must project it.
+        select_cols = [ft.c.id, ft.c.record_srn, ft.c.run_id, ft.c.created_at, *data_columns(ft)]
         stmt = (
             select(*select_cols)
             .select_from(ft.join(records_table, records_table.c.srn == ft.c.record_srn))

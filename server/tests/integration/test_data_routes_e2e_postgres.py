@@ -476,7 +476,7 @@ class TestFeatureRoutesE2E:
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("application/gzip")
         lines = [ln for ln in gzip.decompress(resp.content).decode().splitlines() if ln]
-        assert lines[0].split(",")[:3] == ["id", "record_srn", "created_at"]
+        assert lines[0].split(",")[:4] == ["id", "record_srn", "run_id", "created_at"]
         assert "score" in lines[0] and "label" in lines[0]
         assert len(lines) == 1 + 3  # header + 3 rows
 

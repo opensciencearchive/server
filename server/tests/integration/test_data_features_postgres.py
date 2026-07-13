@@ -173,6 +173,10 @@ class TestStreamFeatures:
         assert first["score"] == 0.9
         assert first["label"] == "high"
         assert "id" in first and "created_at" in first
+        # Provenance (#145): every feature row's run_id must round-trip through
+        # the read path, not just be stored — this was silently dropped by the
+        # stream's SELECT clause.
+        assert str(first["run_id"]) == run_id
 
     async def test_feature_filter_narrows_results(
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
@@ -326,7 +330,7 @@ class TestFeatureCatalogAndManifest:
         assert feature_res.kind == TK.FEATURE
         assert feature_res.row_count == 1
         col_names = [c.name for c in feature_res.columns]
-        assert col_names[:3] == ["id", "record_srn", "created_at"]
+        assert col_names[:4] == ["id", "record_srn", "run_id", "created_at"]
         assert "score" in col_names and "label" in col_names
         assert feature_res.formats == ["", "csv", "csv.gz"]
 

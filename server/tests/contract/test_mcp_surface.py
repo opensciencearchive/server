@@ -61,11 +61,13 @@ SCHEMA_ID = SchemaId.parse("sample-data@1.0.0")
 SCHEMA_SRN = "urn:osa:localhost:schema:sample-data@1.0.0"
 RECORD_ID = "0198aaaa-1111"
 RECORD_SRN = f"urn:osa:localhost:rec:{RECORD_ID}@1"
+RUN_ID = "0198bbbb-2222"  # every feature row's provenance FK (feature #145)
 
 MEASUREMENT_ROWS = [
     {
         "id": i,
         "record_srn": RECORD_SRN,
+        "run_id": RUN_ID,
         "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
         "x": float(i),
         "y": float(i * i),
