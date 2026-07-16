@@ -19,6 +19,7 @@ jobs:
       server: ${{ steps.filter.outputs.server }}
       web: ${{ steps.filter.outputs.web }}
       widgets: ${{ steps.filter.outputs.widgets }}
+      observability: ${{ steps.filter.outputs.observability }}
     steps:
       - uses: actions/checkout@v6
 
@@ -32,6 +33,8 @@ jobs:
               - 'web/**'
             widgets:
               - 'packages/osa-widgets/**'
+            observability:
+              - 'deploy/observability/**'
 
   # Server (Python backend) checks
   server-lint:
@@ -219,6 +222,24 @@ jobs:
     permissions:
       contents: read
       packages: write
+
+  # Observability config (deploy/observability) — Grafana dashboard + alert rules
+  observability-config:
+    name: Observability - Validate Dashboard & Rules
+    needs: changes
+    if: needs.changes.outputs.observability == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate dashboard JSON
+        run: python3 -c "import json; json.load(open('deploy/observability/grafana-dashboard.json'))"
+
+      - name: Validate alert rules (promtool)
+        run: |
+          docker run --rm --entrypoint promtool \
+            -v "$PWD/deploy/observability:/work" \
+            prom/prometheus:latest check rules /work/alert-rules.yml
 
   # Widgets (MCP Apps UI bundles, packages/osa-widgets)
   widgets-test:

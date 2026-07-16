@@ -1,0 +1,216 @@
+# Example Prometheus alerting rules for an OSA node.
+#
+# These are a starting point, not a turnkey policy — thresholds (lag seconds,
+# error ratios, `for:` durations) should be tuned to your node's traffic and
+# SLOs before you page on them. Load them into Prometheus via `rule_files:` (or
+# translate into Grafana-managed alerts / Alertmanager as you prefer).
+#
+# Metric names follow the OpenTelemetry Prometheus exporter's normalization:
+# dots become underscores and the unit is appended, so the OTel histogram
+# `http.server.request.duration` (seconds) is scraped as
+# `http_server_request_duration_seconds{_bucket,_count,_sum}`. If your exporter
+# or semconv version normalizes differently (e.g. an older `http.server.duration`
+# or a different status-code label), adjust the HTTP expressions below.
+#
+# See docs/observability.md for the full metric reference and label vocabularies.
+
+groups:
+  - name: osa-availability
+    rules:
+      # Push-model liveness. A node that pushes OTLP (or whose /metrics stops
+      # being scraped) cannot be seen as "down" via a failed scrape — infer it
+      # from telemetry going stale. osa_workers_total is sampled every 15s by a
+      # live node, so its absence for minutes means the node (or its worker
+      # pool) is gone.
+      - alert: OSANodeTelemetryStale
+        expr: absent_over_time(osa_workers_total[5m])
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "OSA node telemetry has gone stale"
+          description: >
+            No osa_workers_total samples for 5m. The node is down, its worker
+            pool has stopped, or its telemetry export/scrape has broken. Check
+            /api/v1/ready and the process.
+
+      - alert: OSAWorkerPoolStalled
+        expr: osa_workers_total > 0 and osa_workers_busy == osa_workers_total
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Every worker loop has been busy for 10m"
+          description: >
+            osa_workers_busy has equalled osa_workers_total for 10m — the pool
+            has no free capacity. Either sustained load or a stage (hook
+            container, ingester) is parked. Correlate with osa_outbox_lag_seconds
+            and the workflow.stage spans.
+
+  - name: osa-outbox
+    rules:
+      - alert: OSAOutboxBacklogGrowing
+        expr: osa_outbox_lag_seconds > 300
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Oldest eligible outbox delivery is >5m old"
+          description: >
+            osa_outbox_lag_seconds = {{ $value | humanizeDuration }} for 10m. The
+            node is falling behind on event delivery. Check worker health and
+            whether a workflow stage is stuck.
+
+      - alert: OSAOutboxBacklogCritical
+        expr: osa_outbox_lag_seconds > 1800
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Oldest eligible outbox delivery is >30m old"
+          description: >
+            osa_outbox_lag_seconds = {{ $value | humanizeDuration }} for 10m —
+            deliveries are effectively not draining.
+
+      # NOTE: this reads a GAUGE of currently-failed deliveries, not the
+      # deliveries_total{status="failed"} COUNTER. Since #160 one retry budget
+      # spans a whole workflow and redeliveries fast-forward past cleared
+      # stages, so failed *attempts* inflate and are NOT terminal failures.
+      # Read terminal outcomes from the domain counters (see osa-pipeline).
+      - alert: OSAOutboxDeadLettered
+        expr: sum by (consumer_group) (osa_outbox_failed) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Deliveries stuck in failed state for {{ $labels.consumer_group }}"
+          description: >
+            osa_outbox_failed{consumer_group="{{ $labels.consumer_group }}"} =
+            {{ $value }} for 15m — deliveries have exhausted their retry budget
+            and are dead-lettered. These need operator attention; they will not
+            retry on their own.
+
+  - name: osa-pipeline
+    rules:
+      # Terminal ingest-run failures — the trustworthy "a run actually failed"
+      # signal (domain counter), unlike delivery-attempt failures.
+      - alert: OSAIngestRunsFailing
+        expr: sum(rate(osa_ingest_runs_total{status="failed"}[15m])) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ingest runs are reaching a terminal failed state"
+          description: >
+            Read the run's failure_kind / failure_reason from GET
+            /ingestions/{id} to see the cause.
+
+      # Heuristic checkpoint-loss detector. In steady state a redelivery should
+      # SKIP every stage a durable checkpoint already cleared; an expensive
+      # stage re-running (`ran`) *while deliveries are being retried* is the
+      # smell that a stage checkpoint didn't survive and container work was
+      # repeated. This is a heuristic — confirm with the workflow.stage spans
+      # and the "Checkpoints" dashboard panel before treating it as real.
+      #
+      # The retry side uses rate() of the failed delivery-ATTEMPT counter
+      # (osa_deliveries_total{status="failed"}) — the one signal that genuinely
+      # rises while retries are in flight. This is the deliberate exception to
+      # the "don't read terminal failures from this counter" caveat: here we
+      # want attempts-in-progress, not terminal outcomes. It must NOT be
+      # osa_outbox_failed, which is a GAUGE of currently dead-lettered
+      # deliveries (rate() over it is meaningless and stays 0 once it settles).
+      - alert: OSAWorkflowCheckpointLost
+        expr: |
+          (sum by (workflow, stage) (
+            rate(osa_workflow_stages_total{outcome="ran", stage=~"hooks|insert_features|publish"}[15m])
+          ) > 0)
+          and on() (sum(rate(osa_deliveries_total{status="failed"}[15m])) > 0)
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Expensive stage {{ $labels.workflow }}/{{ $labels.stage }} re-running during retries"
+          description: >
+            An expensive workflow stage is running while deliveries are being
+            retried, which can mean a lost stage checkpoint caused container work
+            to repeat. Confirm against the workflow.stage spans.
+
+  - name: osa-hooks
+    rules:
+      # Config/permission/image failures are operator-fixable and shouldn't wait
+      # on a long window — they will never succeed on retry.
+      - alert: OSAHookInfraFailures
+        expr: sum by (hook, kind) (rate(osa_hook_failures_total{kind=~"image_pull|rbac|config"}[10m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Hook {{ $labels.hook }} failing with {{ $labels.kind }}"
+          description: >
+            A hook is failing on an operator-fixable cause (bad image reference,
+            RBAC, or config) — retries will not clear it. Fix the hook release
+            or cluster config.
+
+      # Natural ratio, NOT clamp_min(runs, 1): clamping a sub-1/s run rate to a
+      # floor of 1 destroys the ratio for low-volume hooks (a hook with one run
+      # and one failure in 15m has a true 100% failure ratio but would evaluate
+      # ~0.0011/1). Dividing directly means the series only exists where runs
+      # exist (denominator includes failed/error runs, which osa_hook_runs_total
+      # counts), so a fully-failing low-volume hook correctly reads 1.0, while
+      # 0/0 → NaN and absent series both yield no alert.
+      - alert: OSAHookFailureRate
+        expr: |
+          sum by (hook) (rate(osa_hook_failures_total[15m]))
+          /
+          sum by (hook) (rate(osa_hook_runs_total[15m])) > 0.1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hook {{ $labels.hook }} failing >10% of runs"
+          description: "Elevated hook failure rate over 15m. Inspect kind/decision breakdown."
+
+  - name: osa-api
+    rules:
+      - alert: OSAUnhandledErrors
+        expr: sum(rate(osa_unhandled_errors_total[5m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Unhandled exceptions reaching the global error handler"
+          description: >
+            Requests are surfacing as 500s via the bare-Exception handler for
+            10m. These are bugs, not domain errors — check logs/traces.
+
+      # Label name for the status code depends on your semconv version
+      # (`http_response_status_code` in current OTel HTTP semconv).
+      # Natural ratio, NOT clamp_min(total, 1) — see OSAHookFailureRate: clamping
+      # a sub-1/s request rate would suppress a 100%-5xx low-traffic node. No
+      # traffic → no denominator series → no alert (correct).
+      - alert: OSAHighHTTPErrorRate
+        expr: |
+          sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m]))
+          /
+          sum(rate(http_server_request_duration_seconds_count[5m])) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP 5xx rate above 5%"
+          description: "More than 5% of requests are returning 5xx over 10m."
+
+  - name: osa-resources
+    rules:
+      - alert: OSADBPoolSaturated
+        expr: osa_db_pool_checked_out / clamp_min(osa_db_pool_size, 1) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SQLAlchemy connection pool >90% checked out"
+          description: >
+            osa_db_pool_checked_out is above 90% of osa_db_pool_size for 5m and
+            spilling into overflow (osa_db_pool_overflow). Requests may start
+            waiting on connections — consider raising the pool size or reducing
+            concurrency.
