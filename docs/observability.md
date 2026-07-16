@@ -321,6 +321,26 @@ without blocking delivery. Sampling is head-based via
 `OSA_OBSERVABILITY__TRACE_SAMPLE_RATE` — the decision is made once at the root
 and honored consistently down the chain.
 
+## Prebuilt dashboard & alert rules
+
+Importable monitoring config lives in
+[`deploy/observability/`](../deploy/observability/):
+
+- **`grafana-dashboard.json`** — a Grafana dashboard covering node health, the
+  outbox/queue, workflow stages, hooks, ingest throughput, and runtime
+  resources. Import it and pick your Prometheus data source (the dashboard uses
+  a `$datasource` variable; no UID is hardcoded).
+- **`alert-rules.yml`** — example Prometheus alerting rules (telemetry
+  staleness, outbox backlog, dead-lettered deliveries, terminal ingest
+  failures, hook infra failures, DB pool saturation, and a heuristic
+  checkpoint-loss detector). Thresholds are starting points — tune to your SLOs.
+
+Both encode the two #160 reading caveats (dispatch duration times a whole
+workflow; `osa_deliveries_total{status="failed"}` counts attempts, not terminal
+failures) so you don't have to rediscover them. This ships importable config,
+not a running Prometheus/Grafana stack. See
+[`deploy/observability/README.md`](../deploy/observability/README.md).
+
 ## Security notes
 
 - **`/metrics` is unauthenticated.** The Prometheus endpoint has no auth gate by
