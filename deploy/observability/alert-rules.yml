@@ -111,12 +111,20 @@ groups:
       # smell that a stage checkpoint didn't survive and container work was
       # repeated. This is a heuristic — confirm with the workflow.stage spans
       # and the "Checkpoints" dashboard panel before treating it as real.
+      #
+      # The retry side uses rate() of the failed delivery-ATTEMPT counter
+      # (osa_deliveries_total{status="failed"}) — the one signal that genuinely
+      # rises while retries are in flight. This is the deliberate exception to
+      # the "don't read terminal failures from this counter" caveat: here we
+      # want attempts-in-progress, not terminal outcomes. It must NOT be
+      # osa_outbox_failed, which is a GAUGE of currently dead-lettered
+      # deliveries (rate() over it is meaningless and stays 0 once it settles).
       - alert: OSAWorkflowCheckpointLost
         expr: |
           (sum by (workflow, stage) (
             rate(osa_workflow_stages_total{outcome="ran", stage=~"hooks|insert_features|publish"}[15m])
           ) > 0)
-          and on() (sum(rate(osa_outbox_failed[15m])) > 0)
+          and on() (sum(rate(osa_deliveries_total{status="failed"}[15m])) > 0)
         for: 15m
         labels:
           severity: warning
