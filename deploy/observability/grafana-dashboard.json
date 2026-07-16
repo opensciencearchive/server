@@ -353,7 +353,7 @@
     {
       "type": "timeseries",
       "title": "HTTP 5xx ratio",
-      "description": "Fraction of requests returning 5xx.",
+      "description": "Fraction of requests returning 5xx. Natural ratio (no clamp_min): clamping a sub-1/s request rate would hide a 100%-5xx low-traffic node. No traffic renders no series.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -400,7 +400,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(http_server_request_duration_seconds_count[5m])), 1)",
+          "expr": "sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~\"5..\"}[5m])) / sum(rate(http_server_request_duration_seconds_count[5m]))",
           "legendFormat": "5xx ratio",
           "range": true,
           "instant": false,
