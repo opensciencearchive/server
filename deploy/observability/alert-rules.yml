@@ -151,11 +151,18 @@ groups:
             RBAC, or config) — retries will not clear it. Fix the hook release
             or cluster config.
 
+      # Natural ratio, NOT clamp_min(runs, 1): clamping a sub-1/s run rate to a
+      # floor of 1 destroys the ratio for low-volume hooks (a hook with one run
+      # and one failure in 15m has a true 100% failure ratio but would evaluate
+      # ~0.0011/1). Dividing directly means the series only exists where runs
+      # exist (denominator includes failed/error runs, which osa_hook_runs_total
+      # counts), so a fully-failing low-volume hook correctly reads 1.0, while
+      # 0/0 → NaN and absent series both yield no alert.
       - alert: OSAHookFailureRate
         expr: |
           sum by (hook) (rate(osa_hook_failures_total[15m]))
           /
-          clamp_min(sum by (hook) (rate(osa_hook_runs_total[15m])), 1) > 0.1
+          sum by (hook) (rate(osa_hook_runs_total[15m])) > 0.1
         for: 15m
         labels:
           severity: warning
@@ -178,11 +185,14 @@ groups:
 
       # Label name for the status code depends on your semconv version
       # (`http_response_status_code` in current OTel HTTP semconv).
+      # Natural ratio, NOT clamp_min(total, 1) — see OSAHookFailureRate: clamping
+      # a sub-1/s request rate would suppress a 100%-5xx low-traffic node. No
+      # traffic → no denominator series → no alert (correct).
       - alert: OSAHighHTTPErrorRate
         expr: |
           sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m]))
           /
-          clamp_min(sum(rate(http_server_request_duration_seconds_count[5m])), 1) > 0.05
+          sum(rate(http_server_request_duration_seconds_count[5m])) > 0.05
         for: 10m
         labels:
           severity: warning
