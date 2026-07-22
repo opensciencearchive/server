@@ -91,3 +91,6 @@ class IngesterDefinition(ValueObject):
     limits: IngesterLimits = Field(default_factory=IngesterLimits)
     schedule: IngesterScheduleConfig | None = None
     initial_run: InitialRunConfig | None = None
+    # Reproducibility anchor for the build that produced ``image`` (parity with
+    # a hook's release ``source_ref``). ``None`` for ingesters predating the field.
+    source_ref: str | None = None
