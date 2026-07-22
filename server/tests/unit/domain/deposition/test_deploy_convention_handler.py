@@ -55,10 +55,10 @@ def _hook_payload(name: str) -> dict[str, Any]:
             "cardinality": "many",
             "columns": [{"name": "score", "json_type": "number", "required": True}],
         },
+        "config": {},
         "release": {
             "image": "ghcr.io/test/x",
             "digest": "sha256:abc",
-            "config": {},
             "source_ref": "git:abc",
         },
     }

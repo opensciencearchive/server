@@ -25,7 +25,12 @@ from osa.domain.shared.model.hook import (
     OciLimits,
     TableFeatureSpec,
 )
-from osa.domain.shared.model.source import IngesterDefinition
+from osa.domain.shared.model.source import (
+    IngesterDefinition,
+    IngesterLimits,
+    IngesterScheduleConfig,
+    InitialRunConfig,
+)
 from osa.domain.shared.model.srn import ConventionSlug, SchemaId, SchemaIdentifier
 
 
@@ -40,44 +45,70 @@ class DeployConventionSchema(BaseModel):
 
 
 class DeployConventionRelease(BaseModel):
-    """A hook's release block (== POST /hooks/{name}/releases body).
+    """A component's built release — a *pure build artifact*.
 
-    ``extra="forbid"`` + a required ``config`` make a client/server payload-shape
-    mismatch fail loudly at deploy (422, naming the offending field) rather than
-    being silently swallowed into an empty config that only fails at container
-    runtime. ``limits`` keeps its defaults — omitting resource limits is a valid,
-    explicit choice; a *misnamed* limits field is still caught by ``extra``.
+    ``config``/``limits`` are authored definition and live on the component, not
+    here (a `limits` tweak is a definition change, not a rebuild). ``extra="forbid"``
+    makes a payload-shape mismatch fail loudly at deploy (422, naming the field).
     """
 
     model_config = ConfigDict(extra="forbid")
 
     image: str
     digest: str
-    # Opaque, image-defined JSON object forwarded verbatim to the container —
-    # OSA never reads its keys. Required (don't default a dropped config to {}).
-    config: dict[str, Any]
-    limits: OciLimits = Field(default_factory=OciLimits)
     source_ref: str  # REQUIRED — reproducibility anchor (FR-005)
 
 
 class DeployConventionHook(BaseModel):
-    """One hook in the bundled deploy: identity (name + fixed feature) + release."""
+    """One hook in the bundled deploy: identity (name + fixed feature), authored
+    runtime (``config``/``limits``), and its built ``release``."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: HookName
     feature: TableFeatureSpec
+    # Opaque, image-defined JSON forwarded verbatim to the container — OSA never
+    # reads its keys. Required (don't default a dropped config to {}).
+    config: dict[str, Any]
+    limits: OciLimits = Field(default_factory=OciLimits)
     release: DeployConventionRelease
 
     def to_deploy(self) -> HookDeploy:
+        # Re-gather authored config/limits (on the hook) with the built image
+        # (in the release) into the internal runtime — internals are unchanged.
         return HookDeploy(
             identity=HookIdentity(name=self.name, feature=self.feature),
             runtime=OciConfig(
                 image=self.release.image,
                 digest=self.release.digest,
-                config=self.release.config,
-                limits=self.release.limits,
+                config=self.config,
+                limits=self.limits,
             ),
+            source_ref=self.release.source_ref,
+        )
+
+
+class DeployConventionIngester(BaseModel):
+    """The ingester in the bundled deploy — symmetric with a hook: authored
+    ``config``/``limits``/schedule + its built ``release``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str  # build-fan-out key (cloud); not persisted server-side
+    config: dict[str, Any] | None = None
+    limits: IngesterLimits = Field(default_factory=IngesterLimits)
+    schedule: IngesterScheduleConfig | None = None
+    initial_run: InitialRunConfig | None = None
+    release: DeployConventionRelease
+
+    def to_definition(self) -> IngesterDefinition:
+        return IngesterDefinition(
+            image=self.release.image,
+            digest=self.release.digest,
+            config=self.config,
+            limits=self.limits,
+            schedule=self.schedule,
+            initial_run=self.initial_run,
             source_ref=self.release.source_ref,
         )
 
@@ -156,7 +187,7 @@ class DeployConvention(Command):
     file_requirements: FileRequirements
     schema_block: DeployConventionSchema = Field(alias="schema")
     hooks: list[DeployConventionHook] = []
-    ingester: IngesterDefinition | None = None
+    ingester: DeployConventionIngester | None = None
     # Author semantics — required; documentation is mandatory (#151, FR-015).
     docs: ConventionDocsPayload
 
@@ -205,7 +236,7 @@ class DeployConventionHandler(CommandHandler[DeployConvention, ConventionCreated
             schema_version=cmd.schema_block.version,
             schema_fields=cmd.schema_block.fields,
             hooks=[h.to_deploy() for h in cmd.hooks],
-            ingester=cmd.ingester,
+            ingester=cmd.ingester.to_definition() if cmd.ingester else None,
             docs=cmd.docs.to_vo(),
             built_by=built_by,
         )
