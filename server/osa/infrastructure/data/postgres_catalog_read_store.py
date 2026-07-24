@@ -206,6 +206,7 @@ class PostgresCatalogReadStore:
         for hook_name, fschema in await self._features.feature_tables(schema_id):
             ft = build_feature_table(hook_name, fschema)
             count = await self._features.count_rows(ft, schema_id)
+            covered = await self._features.count_covered_records(ft, schema_id)
             resources.append(
                 TableResource(
                     name=hook_name,
@@ -214,6 +215,7 @@ class PostgresCatalogReadStore:
                     # hook's declared data columns — this is the CSV header order.
                     columns=[*IMPLICIT_FEATURE_COLUMN_SPECS, *self._feature_column_specs(fschema)],
                     row_count=count,
+                    records_covered=covered,
                     formats=list(_ALL_FORMATS),
                 )
             )

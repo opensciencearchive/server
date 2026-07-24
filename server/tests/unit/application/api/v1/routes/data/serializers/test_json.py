@@ -31,9 +31,12 @@ async def _collect(gen: AsyncIterator[bytes]) -> bytes:
 @pytest.mark.asyncio
 async def test_json_envelope_with_rows_and_cursor() -> None:
     rows = [{"id": "a", "mw": 1.5}, {"id": "b", "mw": 2.0}]
-    body = await _collect(JsonSerializer().stream(_aiter(rows), COLUMNS, next_cursor="CURSOR"))
+    body = await _collect(
+        JsonSerializer().stream(_aiter(rows), COLUMNS, next_cursor="CURSOR", has_more=True)
+    )
     parsed = json.loads(body)
     assert parsed["next_cursor"] == "CURSOR"
+    assert parsed["has_more"] is True
     assert parsed["rows"] == [{"id": "a", "mw": 1.5}, {"id": "b", "mw": 2.0}]
 
 
@@ -41,7 +44,16 @@ async def test_json_envelope_with_rows_and_cursor() -> None:
 async def test_json_empty_result_is_valid() -> None:
     body = await _collect(JsonSerializer().stream(_aiter([]), COLUMNS, next_cursor=None))
     parsed = json.loads(body)
-    assert parsed == {"rows": [], "next_cursor": None}
+    assert parsed == {"rows": [], "next_cursor": None, "has_more": False}
+
+
+@pytest.mark.asyncio
+async def test_json_has_more_flag_defaults_false() -> None:
+    # has_more lets an agent tell a complete page from a truncated one — the
+    # ambiguity that sent the pilot session on a long detour. Default: no more.
+    body = await _collect(JsonSerializer().stream(_aiter([{"id": "a", "mw": 1.5}]), COLUMNS))
+    parsed = json.loads(body)
+    assert parsed["has_more"] is False
 
 
 @pytest.mark.asyncio

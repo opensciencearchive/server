@@ -12,7 +12,11 @@ import json
 import re
 from urllib.parse import quote
 
-from osa.domain.data.model.manifest import SchemaManifest, TableResource
+from osa.domain.data.model.manifest import (
+    IMPLICIT_FEATURE_COLUMN_SPECS,
+    SchemaManifest,
+    TableResource,
+)
 from osa.domain.data.model.query_plan import TableKind
 from osa.domain.data.model.skill import AuthorDocs, DatasetEntry, NodeIdentity, SampleValue
 from osa.domain.shared.service import Service
@@ -20,6 +24,10 @@ from osa.domain.shared.service import Service
 # A clearly-labeled stand-in used when no real value could be sampled
 # (empty column/table — FR-021/022); the example stays syntactically valid.
 PLACEHOLDER_VALUE = "REPLACE_WITH_A_REAL_VALUE"
+
+# Auto columns on every feature table — excluded when picking a data column to
+# template a feature-filter example on.
+_IMPLICIT_FEATURE_NAMES = {c.name for c in IMPLICIT_FEATURE_COLUMN_SPECS}
 
 # Fixed documentation for the implicit records-table columns (wire order).
 _IMPLICIT_RECORD_DOCS: list[tuple[str, str, str]] = [
@@ -92,8 +100,28 @@ class SkillRenderer(Service):
         else:
             lines.append("No datasets yet.")
 
+        coverage = [(ds, fc) for ds in datasets for fc in ds.features]
+        if coverage:
+            lines.append("")
+            lines.append("Feature-table coverage (rows · records covered):")
+            lines.append("")
+            for ds, fc in coverage:
+                lines.append(
+                    f"- {ds.schema_ref} · {fc.name}: {fc.row_count} rows, "
+                    f"{fc.records_covered}/{ds.row_count} records covered"
+                )
+
         lines.append("")
         lines.append("## Access")
+        lines.append("")
+        # Start here: records hold identifiers + metadata; the science is in the
+        # feature tables, joined back on record_srn. Say so before the endpoints,
+        # so an agent doesn't download the id-only records dump expecting data.
+        lines.append(
+            "Records tables carry identifiers and metadata; the measured and derived "
+            "science lives in each schema's feature tables (listed in its Reference doc). "
+            "Join feature rows to records on `record_srn` = `records.srn`."
+        )
         lines.append("")
         lines.append(f"- Bulk:   GET  {base_url}/api/v1/data/<schema>/records.csv.gz")
         lines.append(
@@ -166,10 +194,14 @@ class SkillRenderer(Service):
         lines.extend(self._records_table_section(manifest))
 
         if features:
+            records = next(
+                (t for t in manifest.table_resources if t.kind == TableKind.RECORDS), None
+            )
+            records_total = records.row_count if records is not None else 0
             lines.append("")
             lines.append("## Feature tables")
             for feature in features:
-                lines.extend(self._feature_section(feature))
+                lines.extend(self._feature_section(feature, records_total))
 
         lines.extend(self._join_provenance_section(base_url, features))
         lines.extend(
@@ -220,14 +252,28 @@ class SkillRenderer(Service):
         return lines
 
     @staticmethod
-    def _feature_section(feature: TableResource) -> list[str]:
+    def _feature_section(feature: TableResource, records_total: int) -> list[str]:
         lines = ["", f"### {feature.name}", ""]
-        lines.append("| Column | Type | Format | Unit | Description |")
-        lines.append("|---|---|---|---|---|")
+        if feature.records_covered is not None:
+            pct = (
+                f" ({round(100 * feature.records_covered / records_total)}%)"
+                if records_total
+                else ""
+            )
+            lines.append(
+                f"{feature.row_count} rows · covers {feature.records_covered} of "
+                f"{records_total} records{pct}."
+            )
+            lines.append("")
+        # The Filter ref column is the one datum needed to filter a column, sat
+        # right next to the column: features.<hook>.<column> (the hook == the
+        # feature-table name). Usable today on this feature's own table stream.
+        lines.append("| Column | Type | Format | Unit | Description | Filter ref |")
+        lines.append("|---|---|---|---|---|---|")
         for c in feature.columns:
             lines.append(
                 f"| {c.name} | {c.type.value} | {c.format or ''} | {c.unit or ''} "
-                f"| {c.description or ''} |"
+                f"| {c.description or ''} | features.{feature.name}.{c.name} |"
             )
         return lines
 
@@ -296,6 +342,26 @@ class SkillRenderer(Service):
             )
             lines.append("")
             lines.append(f"   GET {data_base}/{schema_ref}/{feature.name}.csv.gz")
+            data_cols = [c for c in feature.columns if c.name not in _IMPLICIT_FEATURE_NAMES]
+            if data_cols:
+                n += 1
+                col = data_cols[0].name
+                fbody = json.dumps(
+                    {
+                        "filter": {
+                            "kind": "predicate",
+                            "field": f"features.{feature.name}.{col}",
+                            "op": "eq",
+                            "value": PLACEHOLDER_VALUE,
+                        }
+                    },
+                    ensure_ascii=False,
+                )
+                lines.append("")
+                lines.append(f"{n}. Filter a feature table by one of its columns:")
+                lines.append("")
+                lines.append(f"   POST {data_base}/{schema_ref}/{feature.name}")
+                lines.append(f"   {fbody}")
         n += 1
         lines.append("")
         lines.append(f"{n}. Single record:")

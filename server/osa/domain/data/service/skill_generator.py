@@ -8,8 +8,10 @@ pure :class:`SkillRenderer`. All I/O goes through the data read-store port.
 from __future__ import annotations
 
 from osa.config import Config
+from osa.domain.data.model.query_plan import TableKind
 from osa.domain.data.model.skill import (
     DatasetEntry,
+    FeatureCoverage,
     NodeIdentity,
     RootDiscovery,
     SampleValue,
@@ -65,6 +67,15 @@ class SkillGeneratorService(Service):
                     schema_ref=f"{entry.id}@{entry.version}",
                     title=manifest.title,
                     row_count=records.row_count,
+                    features=[
+                        FeatureCoverage(
+                            name=t.name,
+                            row_count=t.row_count,
+                            records_covered=t.records_covered or 0,
+                        )
+                        for t in manifest.table_resources
+                        if t.kind == TableKind.FEATURE
+                    ],
                 )
             )
             author_docs = await self.read_store.get_author_docs(schema_id)

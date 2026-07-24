@@ -30,7 +30,9 @@ class CsvGzipSerializer:
         columns: Sequence[ColumnSpec],
         *,
         next_cursor: str | None = None,
+        has_more: bool = False,
     ) -> AsyncIterator[bytes]:
+        # Streaming formats ignore paging state (next_cursor/has_more).
         compressor = zlib.compressobj(level=6, wbits=zlib.MAX_WBITS | 16)
         async for chunk in self._csv.stream(rows, columns):
             compressed = compressor.compress(chunk)

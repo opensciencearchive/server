@@ -1,8 +1,11 @@
-"""JSON serializer — paginated envelope ``{"rows": [...], "next_cursor": ...}``.
+"""JSON serializer — paginated envelope
+``{"rows": [...], "next_cursor": ..., "has_more": ...}``.
 
 Built row-by-row so the whole page is never held twice in memory. The
-``next_cursor`` is precomputed by the query service and passed in; an empty
-result yields ``{"rows": [], "next_cursor": null}`` with HTTP 200.
+``next_cursor`` and ``has_more`` are precomputed by the query service and passed
+in; an empty result yields ``{"rows": [], "next_cursor": null, "has_more": false}``
+with HTTP 200. ``has_more`` lets a consumer distinguish a *complete* page from a
+*truncated* one without inspecting the cursor.
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ class JsonSerializer:
         columns: Sequence[ColumnSpec],
         *,
         next_cursor: str | None = None,
+        has_more: bool = False,
     ) -> AsyncIterator[bytes]:
         yield b'{"rows":['
         first = True
@@ -35,4 +39,5 @@ class JsonSerializer:
                 chunk = b"," + chunk
             yield chunk
         cursor_json = json.dumps(next_cursor).encode()
-        yield b'],"next_cursor":' + cursor_json + b"}"
+        has_more_json = b"true" if has_more else b"false"
+        yield b'],"next_cursor":' + cursor_json + b',"has_more":' + has_more_json + b"}"

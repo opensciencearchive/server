@@ -49,6 +49,23 @@ async def test_legacy_read_routes_are_gone(client: AsyncClient, path: str):
     assert resp.status_code == 404
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/api/v1/data/some-schema@1.0.0/records"])
+async def test_post_filter_body_rejects_unknown_keys(client: AsyncClient, path: str):
+    """A mis-shaped filter body must 422 at the edge, never run unfiltered (BUG-1).
+
+    The documented DSL an agent might copy (``{"feature":…,"where":{"eq":…}}``) is
+    not the wire format; today it is silently dropped and the read runs unfiltered,
+    returning a plausible first page. Body validation must reject unknown top-level
+    keys before the handler (and the DB) are ever reached — so this is DB-free.
+    """
+    async with client:
+        resp = await client.post(
+            path, json={"feature": "x", "where": {"eq": {"optimum": "tolerant"}}}
+        )
+    assert resp.status_code == 422
+
+
 def test_data_surface_operation_ids_registered():
     # The factory-minted table op IDs must exist and be unique (SDK codegen).
     app = _app()

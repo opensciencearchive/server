@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from osa.domain.data.model.filter import FilterExpr
 from osa.domain.data.model.query_plan import SortDirection, SortSpec
@@ -10,7 +10,14 @@ from osa.domain.shared.error import ValidationError
 
 
 class FilterRequestBody(BaseModel):
-    """POST body shared by every table format (records + feature)."""
+    """POST body shared by every table format (records + feature).
+
+    ``extra="forbid"``: a mis-shaped body (e.g. an agent copying a wrong filter
+    DSL) must 422 at the edge rather than be silently dropped and the read run
+    unfiltered — a wrong-but-plausible 200 is the worst outcome for an agent.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     filter: FilterExpr | None = None
     cursor: str | None = None
