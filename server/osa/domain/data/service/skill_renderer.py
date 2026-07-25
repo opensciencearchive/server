@@ -19,28 +19,36 @@ from osa.domain.data.model.manifest import (
 )
 from osa.domain.data.model.query_plan import TableKind
 from osa.domain.data.model.skill import AuthorDocs, DatasetEntry, NodeIdentity, SampleValue
-from osa.domain.semantics.model.value import FieldType
 from osa.domain.shared.service import Service
-
-# A clearly-labeled stand-in used when no real value could be sampled
-# (empty column/table — FR-021/022); the example stays syntactically valid.
-PLACEHOLDER_VALUE = "REPLACE_WITH_A_REAL_VALUE"
 
 # Auto columns on every feature table — excluded when picking a data column to
 # template a feature-filter example on.
 _IMPLICIT_FEATURE_NAMES = {c.name for c in IMPLICIT_FEATURE_COLUMN_SPECS}
 
+# Swapped for a ``<column>`` token when no real value could be sampled — see
+# ``_filter_example``.
+_TEMPLATE_SENTINEL = "__OSA_TEMPLATE_VALUE__"
 
-def _example_value_for(field_type: FieldType) -> str | int | bool:
-    """A type-valid stand-in for the filter example when no real value could be
-    sampled. A numeric or boolean column needs a *castable* literal — the string
-    placeholder would make the advertised POST uncastable and 500 in PostgreSQL.
-    Text-like columns keep the clearly-labelled 'replace me' string."""
-    if field_type == FieldType.NUMBER:
-        return 0
-    if field_type == FieldType.BOOLEAN:
-        return False
-    return PLACEHOLDER_VALUE
+
+def _filter_example(field_ref: str, sample: SampleValue | None, token: str) -> tuple[str, bool]:
+    """The POST body for an ``eq`` filter example, and whether it is runnable.
+
+    With a sampled value the body is concrete, valid JSON, copy-runnable. Without
+    one (empty column) there is no real value to demonstrate, so the value is a
+    ``<token>`` placeholder — deliberately *not* valid JSON, so the example reads
+    as a fill-in template and can never be mistaken for a runnable request. A
+    fabricated literal would be worse: for a numeric/date/boolean column a
+    stand-in string is uncastable (500), and any made-up value is a meaningless
+    filter presented as real."""
+    runnable = sample is not None
+    value = sample.value if sample is not None else _TEMPLATE_SENTINEL
+    body = json.dumps(
+        {"filter": {"kind": "predicate", "field": field_ref, "op": "eq", "value": value}},
+        ensure_ascii=False,
+    )
+    if not runnable:
+        body = body.replace(f'"{_TEMPLATE_SENTINEL}"', f"<{token}>")
+    return body, runnable
 
 
 # Fixed documentation for the implicit records-table columns (wire order).
@@ -345,23 +353,14 @@ class SkillRenderer(Service):
         lines.append(f"   GET {data_base}/{schema_ref}/records.csv.gz")
         if sample_field is not None:
             n += 1
-            field_type = next(
-                (f.type for f in manifest.fields if f.name == sample_field), FieldType.TEXT
-            )
-            value = sample.value if sample is not None else _example_value_for(field_type)
-            body = json.dumps(
-                {
-                    "filter": {
-                        "kind": "predicate",
-                        "field": f"metadata.{sample_field}",
-                        "op": "eq",
-                        "value": value,
-                    }
-                },
-                ensure_ascii=False,
+            body, runnable = _filter_example(f"metadata.{sample_field}", sample, sample_field)
+            hint = (
+                "use for large tables"
+                if runnable
+                else f"replace <{sample_field}> with a real value"
             )
             lines.append("")
-            lines.append(f"{n}. Filtered query (FilterExpr POST — use for large tables):")
+            lines.append(f"{n}. Filtered query (FilterExpr POST — {hint}):")
             lines.append("")
             lines.append(f"   POST {data_base}/{schema_ref}/records")
             lines.append(f"   {body}")
@@ -378,30 +377,13 @@ class SkillRenderer(Service):
             data_cols = [c for c in feature.columns if c.name not in _IMPLICIT_FEATURE_NAMES]
             if data_cols:
                 n += 1
-                col_spec = data_cols[0]
-                col = col_spec.name
-                # Use a real sampled value (typed, castable) when the table has
-                # data, mirroring the metadata example; otherwise a type-valid
-                # placeholder — a raw string against a numeric or boolean column
-                # would be an uncastable value → server error on the runnable POST.
-                fvalue = (
-                    feature_sample.value
-                    if feature_sample is not None
-                    else _example_value_for(col_spec.type)
+                col = data_cols[0].name
+                fbody, frunnable = _filter_example(
+                    f"features.{feature.name}.{col}", feature_sample, col
                 )
-                fbody = json.dumps(
-                    {
-                        "filter": {
-                            "kind": "predicate",
-                            "field": f"features.{feature.name}.{col}",
-                            "op": "eq",
-                            "value": fvalue,
-                        }
-                    },
-                    ensure_ascii=False,
-                )
+                suffix = "" if frunnable else f" (replace <{col}> with a real value)"
                 lines.append("")
-                lines.append(f"{n}. Filter a feature table by one of its columns:")
+                lines.append(f"{n}. Filter a feature table by one of its columns{suffix}:")
                 lines.append("")
                 lines.append(f"   POST {data_base}/{schema_ref}/{feature.name}")
                 lines.append(f"   {fbody}")

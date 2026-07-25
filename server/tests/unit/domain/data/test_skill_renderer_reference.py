@@ -17,25 +17,8 @@ from osa.domain.data.model.manifest import (
 )
 from osa.domain.data.model.query_plan import TableKind
 from osa.domain.data.model.skill import AuthorDocs, ExampleDoc, SampleValue
-from osa.domain.data.service.skill_renderer import (
-    PLACEHOLDER_VALUE,
-    SkillRenderer,
-    _example_value_for,
-)
+from osa.domain.data.service.skill_renderer import SkillRenderer
 from osa.domain.semantics.model.value import FieldType
-
-
-class TestExampleValueFallback:
-    def test_numeric_is_castable_literal(self) -> None:
-        assert _example_value_for(FieldType.NUMBER) == 0
-
-    def test_boolean_is_castable_literal(self) -> None:
-        assert _example_value_for(FieldType.BOOLEAN) is False
-
-    def test_text_keeps_replace_me_string(self) -> None:
-        # Text columns accept the string, so keep the clearly-labelled marker.
-        assert _example_value_for(FieldType.TEXT) == PLACEHOLDER_VALUE
-
 
 BASE = "https://archive.university.edu"
 
@@ -223,11 +206,13 @@ class TestMechanicalExamples:
             '"op": "eq", "value": 512}}'
         ) in out
 
-    def test_filter_example_placeholder_when_no_sample(self) -> None:
-        # No sample + numeric field → a castable numeric literal (0), never the
-        # string placeholder (PostgreSQL rejects a string on a numeric column).
+    def test_filter_example_is_a_template_when_no_sample(self) -> None:
+        # No real value to demonstrate → an explicit fill-in template, not a
+        # fake-runnable POST. The <token> is deliberately not valid JSON, so it
+        # can never be mistaken for (and executed as) a real request.
         out = _render(sample=None)
-        assert '"field": "metadata.yield_strength", "op": "eq", "value": 0' in out
+        assert '"field": "metadata.yield_strength", "op": "eq", "value": <yield_strength>' in out
+        assert "replace <yield_strength> with a real value" in out
 
     def test_join_recipe_spells_out_columns(self) -> None:
         out = _render()
@@ -248,11 +233,15 @@ class TestMechanicalExamples:
         out = _render(feature_sample=SampleValue(value=-40))
         assert '"field": "features.ductility.transition_temp", "op": "eq", "value": -40' in out
 
-    def test_feature_filter_example_fallback_is_type_valid(self) -> None:
-        # Empty numeric feature column → a castable numeric literal, not the
-        # string placeholder (which PostgreSQL would reject → 500 on the POST).
+    def test_feature_filter_example_is_a_template_when_no_sample(self) -> None:
+        # Empty feature column → a fill-in template with a non-JSON <token>,
+        # never a fabricated literal presented as a runnable request.
         out = _render(feature_sample=None)
-        assert '"field": "features.ductility.transition_temp", "op": "eq", "value": 0' in out
+        assert (
+            '"field": "features.ductility.transition_temp", "op": "eq", '
+            '"value": <transition_temp>' in out
+        )
+        assert "replace <transition_temp> with a real value" in out
 
     def test_single_record_fetch(self) -> None:
         assert f"GET {BASE}/api/v1/data/records/<id>" in _render()
