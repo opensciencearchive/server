@@ -95,7 +95,9 @@ class TestOrphanSchema:
 
 
 class TestEmptyColumnSampling:
-    def test_placeholder_when_sample_is_none(self) -> None:
+    def test_template_when_sample_is_none(self) -> None:
+        # No sampled value → the filter example is an explicit fill-in template
+        # (a non-JSON <token>), not a fake-runnable POST, regardless of type.
         out = SkillRenderer().render_reference(
             manifest=_manifest_no_features(),
             docs=None,
@@ -103,7 +105,8 @@ class TestEmptyColumnSampling:
             sample_field="species",
             sample=None,
         )
-        assert '"value": "REPLACE_WITH_A_REAL_VALUE"' in out
+        assert '"value": <species>' in out
+        assert "replace <species> with a real value" in out
 
     def test_examples_still_render_without_any_field(self) -> None:
         manifest = _manifest_no_features().model_copy(update={"fields": []})

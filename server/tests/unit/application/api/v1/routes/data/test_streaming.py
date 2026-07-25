@@ -87,6 +87,7 @@ async def test_paginated_no_more_rows_null_cursor() -> None:
     resp = await build_table_response(_aiter(rows), JSON_FMT, COLUMNS, _plan(limit=50))
     parsed = json.loads(await _body(resp))
     assert parsed["next_cursor"] is None
+    assert parsed["has_more"] is False
     assert parsed["rows"] == [{"id": "a", "srn": "s1"}, {"id": "b", "srn": "s2"}]
 
 
@@ -102,6 +103,7 @@ async def test_paginated_has_more_emits_cursor() -> None:
     parsed = json.loads(await _body(resp))
     assert len(parsed["rows"]) == 2
     assert parsed["next_cursor"] is not None
+    assert parsed["has_more"] is True
     decoded = json.loads(base64.urlsafe_b64decode(parsed["next_cursor"]))
     # default RECORDS sort is created_at desc, tiebreaker srn
     assert decoded["s"] == "2026-01-02"

@@ -79,6 +79,8 @@ async def _paginated_response(
 
     serializer = fmt.make_serializer()
     return StreamingResponse(
-        serializer.stream(page_iter(), columns, next_cursor=slice_.next_cursor),
+        serializer.stream(
+            page_iter(), columns, next_cursor=slice_.next_cursor, has_more=slice_.truncated
+        ),
         media_type=fmt.media_type,
     )

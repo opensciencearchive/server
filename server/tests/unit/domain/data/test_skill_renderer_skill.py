@@ -7,7 +7,13 @@ trigger-question union; the datasets table carries live counts and
 root-relative reference links.
 """
 
-from osa.domain.data.model.skill import AuthorDocs, DatasetEntry, ExampleDoc, NodeIdentity
+from osa.domain.data.model.skill import (
+    AuthorDocs,
+    DatasetEntry,
+    ExampleDoc,
+    FeatureCoverage,
+    NodeIdentity,
+)
 from osa.domain.data.service.skill_renderer import SkillRenderer, sanitize_skill_name
 
 BASE = "https://archive.university.edu"
@@ -92,6 +98,8 @@ Test-campaign results for structural alloys.
 
 ## Access
 
+Records tables carry identifiers and metadata; the measured and derived science lives in each schema's feature tables (listed in its Reference doc). Join feature rows to records on `record_srn` = `records.srn`.
+
 - Bulk:   GET  https://archive.university.edu/api/v1/data/<schema>/records.csv.gz
 - Filter: POST https://archive.university.edu/api/v1/data/<schema>/records (FilterExpr body — use for large tables)
 - One:    GET  https://archive.university.edu/api/v1/data/records/<id>
@@ -149,3 +157,21 @@ class TestRenderSkillParts:
         )
         assert "api/v1/data/alloy-tests@2.1.0.md" in out
         assert "api/v1/data/alloy-tests.md" not in out
+
+    def test_feature_coverage_surfaced_when_present(self) -> None:
+        # A near-empty feature table must read as an obvious coverage gap, not a
+        # populated table with one row (AX-3): the pilot's predicted_oxygen case.
+        ds = DatasetEntry(
+            schema_ref="strain@1.0.0",
+            title="Strains",
+            row_count=148,
+            features=[FeatureCoverage(name="predicted_oxygen", row_count=1, records_covered=1)],
+        )
+        out = SkillRenderer().render_skill(node=_node(), base_url=BASE, datasets=[ds], docs=[])
+        assert "predicted_oxygen: 1 rows, 1/148 records covered" in out
+
+    def test_feature_coverage_absent_without_features(self) -> None:
+        out = SkillRenderer().render_skill(
+            node=_node(), base_url=BASE, datasets=[_dataset()], docs=[]
+        )
+        assert "records covered" not in out

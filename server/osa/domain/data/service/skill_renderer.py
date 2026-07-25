@@ -12,14 +12,44 @@ import json
 import re
 from urllib.parse import quote
 
-from osa.domain.data.model.manifest import SchemaManifest, TableResource
+from osa.domain.data.model.manifest import (
+    IMPLICIT_FEATURE_COLUMN_SPECS,
+    SchemaManifest,
+    TableResource,
+)
 from osa.domain.data.model.query_plan import TableKind
 from osa.domain.data.model.skill import AuthorDocs, DatasetEntry, NodeIdentity, SampleValue
 from osa.domain.shared.service import Service
 
-# A clearly-labeled stand-in used when no real value could be sampled
-# (empty column/table — FR-021/022); the example stays syntactically valid.
-PLACEHOLDER_VALUE = "REPLACE_WITH_A_REAL_VALUE"
+# Auto columns on every feature table — excluded when picking a data column to
+# template a feature-filter example on.
+_IMPLICIT_FEATURE_NAMES = {c.name for c in IMPLICIT_FEATURE_COLUMN_SPECS}
+
+# Swapped for a ``<column>`` token when no real value could be sampled — see
+# ``_filter_example``.
+_TEMPLATE_SENTINEL = "__OSA_TEMPLATE_VALUE__"
+
+
+def _filter_example(field_ref: str, sample: SampleValue | None, token: str) -> tuple[str, bool]:
+    """The POST body for an ``eq`` filter example, and whether it is runnable.
+
+    With a sampled value the body is concrete, valid JSON, copy-runnable. Without
+    one (empty column) there is no real value to demonstrate, so the value is a
+    ``<token>`` placeholder — deliberately *not* valid JSON, so the example reads
+    as a fill-in template and can never be mistaken for a runnable request. A
+    fabricated literal would be worse: for a numeric/date/boolean column a
+    stand-in string is uncastable (500), and any made-up value is a meaningless
+    filter presented as real."""
+    runnable = sample is not None
+    value = sample.value if sample is not None else _TEMPLATE_SENTINEL
+    body = json.dumps(
+        {"filter": {"kind": "predicate", "field": field_ref, "op": "eq", "value": value}},
+        ensure_ascii=False,
+    )
+    if not runnable:
+        body = body.replace(f'"{_TEMPLATE_SENTINEL}"', f"<{token}>")
+    return body, runnable
+
 
 # Fixed documentation for the implicit records-table columns (wire order).
 _IMPLICIT_RECORD_DOCS: list[tuple[str, str, str]] = [
@@ -92,8 +122,28 @@ class SkillRenderer(Service):
         else:
             lines.append("No datasets yet.")
 
+        coverage = [(ds, fc) for ds in datasets for fc in ds.features]
+        if coverage:
+            lines.append("")
+            lines.append("Feature-table coverage (rows · records covered):")
+            lines.append("")
+            for ds, fc in coverage:
+                lines.append(
+                    f"- {ds.schema_ref} · {fc.name}: {fc.row_count} rows, "
+                    f"{fc.records_covered}/{ds.row_count} records covered"
+                )
+
         lines.append("")
         lines.append("## Access")
+        lines.append("")
+        # Start here: records hold identifiers + metadata; the science is in the
+        # feature tables, joined back on record_srn. Say so before the endpoints,
+        # so an agent doesn't download the id-only records dump expecting data.
+        lines.append(
+            "Records tables carry identifiers and metadata; the measured and derived "
+            "science lives in each schema's feature tables (listed in its Reference doc). "
+            "Join feature rows to records on `record_srn` = `records.srn`."
+        )
         lines.append("")
         lines.append(f"- Bulk:   GET  {base_url}/api/v1/data/<schema>/records.csv.gz")
         lines.append(
@@ -141,6 +191,19 @@ class SkillRenderer(Service):
         metadata field (research §9). ``None`` when the schema has no fields."""
         return manifest.fields[0].name if manifest.fields else None
 
+    @staticmethod
+    def feature_example_target(manifest: SchemaManifest) -> tuple[str, str] | None:
+        """``(feature_table, column)`` the feature-filter example templates on —
+        the first data column of the first feature table. The single owner of
+        that choice, so the generator samples the same column the renderer emits.
+        ``None`` when no feature table has a data column."""
+        for t in manifest.table_resources:
+            if t.kind == TableKind.FEATURE:
+                data_cols = [c for c in t.columns if c.name not in _IMPLICIT_FEATURE_NAMES]
+                if data_cols:
+                    return t.name, data_cols[0].name
+        return None
+
     def render_reference(
         self,
         *,
@@ -149,6 +212,7 @@ class SkillRenderer(Service):
         base_url: str,
         sample_field: str | None,
         sample: SampleValue | None,
+        feature_sample: SampleValue | None = None,
     ) -> str:
         schema_ref = f"{manifest.id}@{manifest.version}"
         features = [t for t in manifest.table_resources if t.kind == TableKind.FEATURE]
@@ -166,10 +230,14 @@ class SkillRenderer(Service):
         lines.extend(self._records_table_section(manifest))
 
         if features:
+            records = next(
+                (t for t in manifest.table_resources if t.kind == TableKind.RECORDS), None
+            )
+            records_total = records.row_count if records is not None else 0
             lines.append("")
             lines.append("## Feature tables")
             for feature in features:
-                lines.extend(self._feature_section(feature))
+                lines.extend(self._feature_section(feature, records_total))
 
         lines.extend(self._join_provenance_section(base_url, features))
         lines.extend(
@@ -179,6 +247,7 @@ class SkillRenderer(Service):
                 features=features,
                 sample_field=sample_field,
                 sample=sample,
+                feature_sample=feature_sample,
             )
         )
 
@@ -220,14 +289,28 @@ class SkillRenderer(Service):
         return lines
 
     @staticmethod
-    def _feature_section(feature: TableResource) -> list[str]:
+    def _feature_section(feature: TableResource, records_total: int) -> list[str]:
         lines = ["", f"### {feature.name}", ""]
-        lines.append("| Column | Type | Format | Unit | Description |")
-        lines.append("|---|---|---|---|---|")
+        if feature.records_covered is not None:
+            pct = (
+                f" ({round(100 * feature.records_covered / records_total)}%)"
+                if records_total
+                else ""
+            )
+            lines.append(
+                f"{feature.row_count} rows · covers {feature.records_covered} of "
+                f"{records_total} records{pct}."
+            )
+            lines.append("")
+        # The Filter ref column is the one datum needed to filter a column, sat
+        # right next to the column: features.<hook>.<column> (the hook == the
+        # feature-table name). Usable today on this feature's own table stream.
+        lines.append("| Column | Type | Format | Unit | Description | Filter ref |")
+        lines.append("|---|---|---|---|---|---|")
         for c in feature.columns:
             lines.append(
                 f"| {c.name} | {c.type.value} | {c.format or ''} | {c.unit or ''} "
-                f"| {c.description or ''} |"
+                f"| {c.description or ''} | features.{feature.name}.{c.name} |"
             )
         return lines
 
@@ -256,6 +339,7 @@ class SkillRenderer(Service):
         features: list[TableResource],
         sample_field: str | None,
         sample: SampleValue | None,
+        feature_sample: SampleValue | None = None,
     ) -> list[str]:
         data_base = f"{base_url}/api/v1/data"
         # Fully-qualified <id>@<version>: the doc may have been requested at a
@@ -269,20 +353,14 @@ class SkillRenderer(Service):
         lines.append(f"   GET {data_base}/{schema_ref}/records.csv.gz")
         if sample_field is not None:
             n += 1
-            value = sample.value if sample is not None else PLACEHOLDER_VALUE
-            body = json.dumps(
-                {
-                    "filter": {
-                        "kind": "predicate",
-                        "field": f"metadata.{sample_field}",
-                        "op": "eq",
-                        "value": value,
-                    }
-                },
-                ensure_ascii=False,
+            body, runnable = _filter_example(f"metadata.{sample_field}", sample, sample_field)
+            hint = (
+                "use for large tables"
+                if runnable
+                else f"replace <{sample_field}> with a real value"
             )
             lines.append("")
-            lines.append(f"{n}. Filtered query (FilterExpr POST — use for large tables):")
+            lines.append(f"{n}. Filtered query (FilterExpr POST — {hint}):")
             lines.append("")
             lines.append(f"   POST {data_base}/{schema_ref}/records")
             lines.append(f"   {body}")
@@ -296,6 +374,19 @@ class SkillRenderer(Service):
             )
             lines.append("")
             lines.append(f"   GET {data_base}/{schema_ref}/{feature.name}.csv.gz")
+            data_cols = [c for c in feature.columns if c.name not in _IMPLICIT_FEATURE_NAMES]
+            if data_cols:
+                n += 1
+                col = data_cols[0].name
+                fbody, frunnable = _filter_example(
+                    f"features.{feature.name}.{col}", feature_sample, col
+                )
+                suffix = "" if frunnable else f" (replace <{col}> with a real value)"
+                lines.append("")
+                lines.append(f"{n}. Filter a feature table by one of its columns{suffix}:")
+                lines.append("")
+                lines.append(f"   POST {data_base}/{schema_ref}/{feature.name}")
+                lines.append(f"   {fbody}")
         n += 1
         lines.append("")
         lines.append(f"{n}. Single record:")

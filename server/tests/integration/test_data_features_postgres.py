@@ -334,6 +334,36 @@ class TestFeatureCatalogAndManifest:
         assert "score" in col_names and "label" in col_names
         assert feature_res.formats == ["", "csv", "csv.gz"]
 
+    async def test_manifest_records_covered_counts_distinct_records(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession
+    ):
+        # AX-3: two records, but only one carries feature rows — and it carries
+        # TWO. row_count counts feature rows (2); records_covered counts distinct
+        # records (1). This is the pilot's deceptive 1-of-148 case, made visible.
+        store = await _setup_schema(pg_engine, pg_session)
+        srn1 = await _publish(pg_engine, store, "rec1")
+        await _publish(pg_engine, store, "rec2")
+        await pg_session.commit()
+        run_id = await _register_hook(pg_engine, pg_session)
+        feature_store = PostgresFeatureStore(pg_engine, pg_session)
+        await feature_store.insert_features(
+            HOOK,
+            str(srn1),
+            [{"score": 0.9, "label": "a"}, {"score": 0.1, "label": "b"}],
+            run_id,
+        )
+
+        rs = PostgresCatalogReadStore(pg_session, Domain("localhost"))
+        manifest = await rs.get_schema_manifest(SCHEMA)
+        assert manifest is not None
+        feature_res = next(t for t in manifest.table_resources if t.name == HOOK)
+        assert feature_res.row_count == 2
+        assert feature_res.records_covered == 1
+        # Coverage is not a meaningful concept for the records resource itself.
+        records_res = next(t for t in manifest.table_resources if t.name == "records")
+        assert records_res.row_count == 2
+        assert records_res.records_covered is None
+
     async def test_catalog_lists_feature_resource(
         self, pg_engine: AsyncEngine, pg_session: AsyncSession
     ):

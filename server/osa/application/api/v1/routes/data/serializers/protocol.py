@@ -5,10 +5,11 @@ Serializers are stateless and have no I/O dependencies beyond stdlib (``json``,
 (column→value mappings) and the column schema that fixes wire order, and yield
 response bytes incrementally so streaming formats stay memory-bounded.
 
-Note on ``next_cursor``: cursor derivation lives in the query service (matching
-the proven discovery engine), not in the serializer. Paginated serializers
-(JSON) receive the precomputed ``next_cursor`` to embed in the envelope;
-streaming serializers (CSV, CSV.gz) ignore it.
+Note on ``next_cursor``/``has_more``: paging state is derived in the query
+service (matching the proven discovery engine), not in the serializer.
+Paginated serializers (JSON) receive the precomputed ``next_cursor`` and
+``has_more`` to embed in the envelope; streaming serializers (CSV, CSV.gz)
+ignore them.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ class Serializer(Protocol):
         columns: Sequence[ColumnSpec],
         *,
         next_cursor: str | None = None,
+        has_more: bool = False,
     ) -> AsyncIterator[bytes]:
         """Render ``rows`` as response bytes, yielded incrementally."""
         ...

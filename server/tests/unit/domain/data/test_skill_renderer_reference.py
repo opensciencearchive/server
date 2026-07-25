@@ -143,12 +143,34 @@ class TestFeatureTables:
         out = _render()
         assert "## Feature tables" in out
         assert "### ductility" in out
-        assert "| transition_temp | number | float | °C | Ductile-brittle transition |" in out
+        assert (
+            "| transition_temp | number | float | °C | Ductile-brittle transition "
+            "| features.ductility.transition_temp |" in out
+        )
 
     def test_implicit_feature_columns_listed(self) -> None:
         out = _render()
         feature_start = out.index("### ductility")
         assert "| record_srn | text |" in out[feature_start:]
+
+    def test_filter_ref_documented_per_column(self) -> None:
+        # AX-6: the exact filterable ref sits next to each feature column, so an
+        # agent never has to read server source to learn the grammar.
+        out = _render()
+        assert "| Column | Type | Format | Unit | Description | Filter ref |" in out
+        assert "features.ductility.transition_temp |" in out
+
+    def test_coverage_line_when_records_covered_present(self) -> None:
+        manifest = _manifest()
+        feature = next(t for t in manifest.table_resources if t.kind == TableKind.FEATURE)
+        feature.records_covered = 9000
+        out = _render(manifest=manifest)
+        # records total is 12480 → 72%
+        assert "9312 rows · covers 9000 of 12480 records (72%)." in out
+
+    def test_coverage_line_omitted_when_absent(self) -> None:
+        # Default manifest has records_covered=None on the feature resource.
+        assert "covers" not in _render().split("### ductility")[1].split("| Column")[0]
 
 
 class TestJoinKeysAndProvenance:
@@ -184,14 +206,42 @@ class TestMechanicalExamples:
             '"op": "eq", "value": 512}}'
         ) in out
 
-    def test_filter_example_placeholder_when_no_sample(self) -> None:
+    def test_filter_example_is_a_template_when_no_sample(self) -> None:
+        # No real value to demonstrate → an explicit fill-in template, not a
+        # fake-runnable POST. The <token> is deliberately not valid JSON, so it
+        # can never be mistaken for (and executed as) a real request.
         out = _render(sample=None)
-        assert '"value": "REPLACE_WITH_A_REAL_VALUE"' in out
+        assert '"field": "metadata.yield_strength", "op": "eq", "value": <yield_strength>' in out
+        assert "replace <yield_strength> with a real value" in out
 
     def test_join_recipe_spells_out_columns(self) -> None:
         out = _render()
         assert f"GET {BASE}/api/v1/data/alloy-tests@2.1.0/ductility.csv.gz" in out
         assert "`ductility.record_srn`" in out
+
+    def test_feature_filter_example_uses_feature_field_ref(self) -> None:
+        # AX-6: a runnable feature-column filter (POST to the feature endpoint,
+        # which supports same-hook predicates today), templated on a real column.
+        out = _render()
+        assert f"POST {BASE}/api/v1/data/alloy-tests@2.1.0/ductility" in out
+        assert '"field": "features.ductility.transition_temp"' in out
+
+    def test_feature_filter_example_uses_sampled_typed_value(self) -> None:
+        # A real sampled value keeps the example castable: transition_temp is
+        # numeric, so the value must be a JSON number, never the string
+        # placeholder (which PostgreSQL would reject for a numeric column).
+        out = _render(feature_sample=SampleValue(value=-40))
+        assert '"field": "features.ductility.transition_temp", "op": "eq", "value": -40' in out
+
+    def test_feature_filter_example_is_a_template_when_no_sample(self) -> None:
+        # Empty feature column → a fill-in template with a non-JSON <token>,
+        # never a fabricated literal presented as a runnable request.
+        out = _render(feature_sample=None)
+        assert (
+            '"field": "features.ductility.transition_temp", "op": "eq", '
+            '"value": <transition_temp>' in out
+        )
+        assert "replace <transition_temp> with a real value" in out
 
     def test_single_record_fetch(self) -> None:
         assert f"GET {BASE}/api/v1/data/records/<id>" in _render()

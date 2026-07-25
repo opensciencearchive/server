@@ -8,8 +8,10 @@ pure :class:`SkillRenderer`. All I/O goes through the data read-store port.
 from __future__ import annotations
 
 from osa.config import Config
+from osa.domain.data.model.query_plan import TableKind
 from osa.domain.data.model.skill import (
     DatasetEntry,
+    FeatureCoverage,
     NodeIdentity,
     RootDiscovery,
     SampleValue,
@@ -65,6 +67,15 @@ class SkillGeneratorService(Service):
                     schema_ref=f"{entry.id}@{entry.version}",
                     title=manifest.title,
                     row_count=records.row_count,
+                    features=[
+                        FeatureCoverage(
+                            name=t.name,
+                            row_count=t.row_count,
+                            records_covered=t.records_covered or 0,
+                        )
+                        for t in manifest.table_resources
+                        if t.kind == TableKind.FEATURE
+                    ],
                 )
             )
             author_docs = await self.read_store.get_author_docs(schema_id)
@@ -87,10 +98,16 @@ class SkillGeneratorService(Service):
         sample: SampleValue | None = None
         if sample_field is not None:
             sample = await self.read_store.sample_value(schema_id, "records", sample_field)
+        feature_target = self.renderer.feature_example_target(manifest)
+        feature_sample: SampleValue | None = None
+        if feature_target is not None:
+            feat_table, feat_col = feature_target
+            feature_sample = await self.read_store.sample_value(schema_id, feat_table, feat_col)
         return self.renderer.render_reference(
             manifest=manifest,
             docs=docs,
             base_url=self._base_url(),
             sample_field=sample_field,
             sample=sample,
+            feature_sample=feature_sample,
         )

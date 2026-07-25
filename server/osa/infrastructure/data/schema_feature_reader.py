@@ -51,6 +51,20 @@ class SchemaFeatureReader:
         )
         return int((await self.session.execute(stmt)).scalar_one())
 
+    async def count_covered_records(self, ft: sa.Table, schema_id: SchemaId) -> int:
+        """Distinct records with ≥1 row in this feature table (join coverage).
+
+        Feature tables are 1-to-many with records, so ``count_rows`` alone can't
+        tell a 1-row table that covers 1 record from one that covers many; this
+        is ``COUNT(DISTINCT record_srn)`` over the same schema-scoped join.
+        """
+        stmt = (
+            select(func.count(func.distinct(ft.c.record_srn)))
+            .select_from(ft.join(records_table, records_table.c.srn == ft.c.record_srn))
+            .where(and_(*self.records_scope(schema_id)))
+        )
+        return int((await self.session.execute(stmt)).scalar_one())
+
     @staticmethod
     def records_scope(schema_id: SchemaId) -> list[Any]:
         """Records-join conditions scoping a shared feature table to one schema."""

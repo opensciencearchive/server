@@ -67,6 +67,19 @@ class SampleValue(BaseModel):
     value: str | int | float | bool
 
 
+class FeatureCoverage(BaseModel):
+    """Per-feature-table coverage for one dataset (SKILL.md).
+
+    ``records_covered`` is how many of the dataset's ``row_count`` records have
+    ≥1 row in this feature table — the signal that turns a deceptive 1-row
+    table into an obvious coverage gap.
+    """
+
+    name: str
+    row_count: int
+    records_covered: int
+
+
 class DatasetEntry(BaseModel):
     """One row of the SKILL.md datasets table.
 
@@ -78,3 +91,4 @@ class DatasetEntry(BaseModel):
     schema_ref: str  # "<id>@<version>"
     title: str
     row_count: int
+    features: list[FeatureCoverage] = []

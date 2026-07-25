@@ -44,7 +44,9 @@ class CsvSerializer:
         columns: Sequence[ColumnSpec],
         *,
         next_cursor: str | None = None,
+        has_more: bool = False,
     ) -> AsyncIterator[bytes]:
+        # Streaming formats ignore paging state (next_cursor/has_more).
         names = [col.name for col in columns]
         encoder = _RowEncoder()
 

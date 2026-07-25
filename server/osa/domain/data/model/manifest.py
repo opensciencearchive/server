@@ -67,6 +67,11 @@ class TableResource(BaseModel):
     kind: TableKind
     columns: list[ColumnSpec]
     row_count: int
+    # Distinct records this feature table covers (COUNT(DISTINCT record_srn)).
+    # Feature-only: lets a consumer tell "empty because that's all there is" from
+    # "1 row that happens to cover 1/N records". None (omitted) on the records
+    # resource, where coverage is not a meaningful concept.
+    records_covered: int | None = None
     formats: list[str]  # URL suffixes, e.g. ["", "csv", "csv.gz"]
 
 
