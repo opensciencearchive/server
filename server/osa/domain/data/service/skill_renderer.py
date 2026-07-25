@@ -169,6 +169,19 @@ class SkillRenderer(Service):
         metadata field (research §9). ``None`` when the schema has no fields."""
         return manifest.fields[0].name if manifest.fields else None
 
+    @staticmethod
+    def feature_example_target(manifest: SchemaManifest) -> tuple[str, str] | None:
+        """``(feature_table, column)`` the feature-filter example templates on —
+        the first data column of the first feature table. The single owner of
+        that choice, so the generator samples the same column the renderer emits.
+        ``None`` when no feature table has a data column."""
+        for t in manifest.table_resources:
+            if t.kind == TableKind.FEATURE:
+                data_cols = [c for c in t.columns if c.name not in _IMPLICIT_FEATURE_NAMES]
+                if data_cols:
+                    return t.name, data_cols[0].name
+        return None
+
     def render_reference(
         self,
         *,
@@ -177,6 +190,7 @@ class SkillRenderer(Service):
         base_url: str,
         sample_field: str | None,
         sample: SampleValue | None,
+        feature_sample: SampleValue | None = None,
     ) -> str:
         schema_ref = f"{manifest.id}@{manifest.version}"
         features = [t for t in manifest.table_resources if t.kind == TableKind.FEATURE]
@@ -211,6 +225,7 @@ class SkillRenderer(Service):
                 features=features,
                 sample_field=sample_field,
                 sample=sample,
+                feature_sample=feature_sample,
             )
         )
 
@@ -302,6 +317,7 @@ class SkillRenderer(Service):
         features: list[TableResource],
         sample_field: str | None,
         sample: SampleValue | None,
+        feature_sample: SampleValue | None = None,
     ) -> list[str]:
         data_base = f"{base_url}/api/v1/data"
         # Fully-qualified <id>@<version>: the doc may have been requested at a
@@ -346,13 +362,18 @@ class SkillRenderer(Service):
             if data_cols:
                 n += 1
                 col = data_cols[0].name
+                # Use a real sampled value (typed, castable) when the table has
+                # data, mirroring the metadata example; the string placeholder is
+                # only for an empty column. A raw placeholder against a numeric or
+                # boolean column would be an uncastable value → server error.
+                fvalue = feature_sample.value if feature_sample is not None else PLACEHOLDER_VALUE
                 fbody = json.dumps(
                     {
                         "filter": {
                             "kind": "predicate",
                             "field": f"features.{feature.name}.{col}",
                             "op": "eq",
-                            "value": PLACEHOLDER_VALUE,
+                            "value": fvalue,
                         }
                     },
                     ensure_ascii=False,

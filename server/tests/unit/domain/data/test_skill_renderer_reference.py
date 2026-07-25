@@ -222,6 +222,22 @@ class TestMechanicalExamples:
         assert f"POST {BASE}/api/v1/data/alloy-tests@2.1.0/ductility" in out
         assert '"field": "features.ductility.transition_temp"' in out
 
+    def test_feature_filter_example_uses_sampled_typed_value(self) -> None:
+        # A real sampled value keeps the example castable: transition_temp is
+        # numeric, so the value must be a JSON number, never the string
+        # placeholder (which PostgreSQL would reject for a numeric column).
+        out = _render(feature_sample=SampleValue(value=-40))
+        assert '"field": "features.ductility.transition_temp", "op": "eq", "value": -40' in out
+
+    def test_feature_filter_example_placeholder_only_without_sample(self) -> None:
+        # Empty feature column → the clearly-labelled string placeholder (same
+        # posture as the metadata example), signalling "replace me".
+        out = _render(feature_sample=None)
+        assert (
+            '"field": "features.ductility.transition_temp", "op": "eq", '
+            '"value": "REPLACE_WITH_A_REAL_VALUE"' in out
+        )
+
     def test_single_record_fetch(self) -> None:
         assert f"GET {BASE}/api/v1/data/records/<id>" in _render()
 
