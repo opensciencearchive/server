@@ -17,8 +17,25 @@ from osa.domain.data.model.manifest import (
 )
 from osa.domain.data.model.query_plan import TableKind
 from osa.domain.data.model.skill import AuthorDocs, ExampleDoc, SampleValue
-from osa.domain.data.service.skill_renderer import SkillRenderer
+from osa.domain.data.service.skill_renderer import (
+    PLACEHOLDER_VALUE,
+    SkillRenderer,
+    _example_value_for,
+)
 from osa.domain.semantics.model.value import FieldType
+
+
+class TestExampleValueFallback:
+    def test_numeric_is_castable_literal(self) -> None:
+        assert _example_value_for(FieldType.NUMBER) == 0
+
+    def test_boolean_is_castable_literal(self) -> None:
+        assert _example_value_for(FieldType.BOOLEAN) is False
+
+    def test_text_keeps_replace_me_string(self) -> None:
+        # Text columns accept the string, so keep the clearly-labelled marker.
+        assert _example_value_for(FieldType.TEXT) == PLACEHOLDER_VALUE
+
 
 BASE = "https://archive.university.edu"
 
@@ -207,8 +224,10 @@ class TestMechanicalExamples:
         ) in out
 
     def test_filter_example_placeholder_when_no_sample(self) -> None:
+        # No sample + numeric field → a castable numeric literal (0), never the
+        # string placeholder (PostgreSQL rejects a string on a numeric column).
         out = _render(sample=None)
-        assert '"value": "REPLACE_WITH_A_REAL_VALUE"' in out
+        assert '"field": "metadata.yield_strength", "op": "eq", "value": 0' in out
 
     def test_join_recipe_spells_out_columns(self) -> None:
         out = _render()
@@ -229,14 +248,11 @@ class TestMechanicalExamples:
         out = _render(feature_sample=SampleValue(value=-40))
         assert '"field": "features.ductility.transition_temp", "op": "eq", "value": -40' in out
 
-    def test_feature_filter_example_placeholder_only_without_sample(self) -> None:
-        # Empty feature column → the clearly-labelled string placeholder (same
-        # posture as the metadata example), signalling "replace me".
+    def test_feature_filter_example_fallback_is_type_valid(self) -> None:
+        # Empty numeric feature column → a castable numeric literal, not the
+        # string placeholder (which PostgreSQL would reject → 500 on the POST).
         out = _render(feature_sample=None)
-        assert (
-            '"field": "features.ductility.transition_temp", "op": "eq", '
-            '"value": "REPLACE_WITH_A_REAL_VALUE"' in out
-        )
+        assert '"field": "features.ductility.transition_temp", "op": "eq", "value": 0' in out
 
     def test_single_record_fetch(self) -> None:
         assert f"GET {BASE}/api/v1/data/records/<id>" in _render()

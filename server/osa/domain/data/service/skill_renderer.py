@@ -19,6 +19,7 @@ from osa.domain.data.model.manifest import (
 )
 from osa.domain.data.model.query_plan import TableKind
 from osa.domain.data.model.skill import AuthorDocs, DatasetEntry, NodeIdentity, SampleValue
+from osa.domain.semantics.model.value import FieldType
 from osa.domain.shared.service import Service
 
 # A clearly-labeled stand-in used when no real value could be sampled
@@ -28,6 +29,19 @@ PLACEHOLDER_VALUE = "REPLACE_WITH_A_REAL_VALUE"
 # Auto columns on every feature table — excluded when picking a data column to
 # template a feature-filter example on.
 _IMPLICIT_FEATURE_NAMES = {c.name for c in IMPLICIT_FEATURE_COLUMN_SPECS}
+
+
+def _example_value_for(field_type: FieldType) -> str | int | bool:
+    """A type-valid stand-in for the filter example when no real value could be
+    sampled. A numeric or boolean column needs a *castable* literal — the string
+    placeholder would make the advertised POST uncastable and 500 in PostgreSQL.
+    Text-like columns keep the clearly-labelled 'replace me' string."""
+    if field_type == FieldType.NUMBER:
+        return 0
+    if field_type == FieldType.BOOLEAN:
+        return False
+    return PLACEHOLDER_VALUE
+
 
 # Fixed documentation for the implicit records-table columns (wire order).
 _IMPLICIT_RECORD_DOCS: list[tuple[str, str, str]] = [
@@ -331,7 +345,10 @@ class SkillRenderer(Service):
         lines.append(f"   GET {data_base}/{schema_ref}/records.csv.gz")
         if sample_field is not None:
             n += 1
-            value = sample.value if sample is not None else PLACEHOLDER_VALUE
+            field_type = next(
+                (f.type for f in manifest.fields if f.name == sample_field), FieldType.TEXT
+            )
+            value = sample.value if sample is not None else _example_value_for(field_type)
             body = json.dumps(
                 {
                     "filter": {
@@ -361,12 +378,17 @@ class SkillRenderer(Service):
             data_cols = [c for c in feature.columns if c.name not in _IMPLICIT_FEATURE_NAMES]
             if data_cols:
                 n += 1
-                col = data_cols[0].name
+                col_spec = data_cols[0]
+                col = col_spec.name
                 # Use a real sampled value (typed, castable) when the table has
-                # data, mirroring the metadata example; the string placeholder is
-                # only for an empty column. A raw placeholder against a numeric or
-                # boolean column would be an uncastable value → server error.
-                fvalue = feature_sample.value if feature_sample is not None else PLACEHOLDER_VALUE
+                # data, mirroring the metadata example; otherwise a type-valid
+                # placeholder — a raw string against a numeric or boolean column
+                # would be an uncastable value → server error on the runnable POST.
+                fvalue = (
+                    feature_sample.value
+                    if feature_sample is not None
+                    else _example_value_for(col_spec.type)
+                )
                 fbody = json.dumps(
                     {
                         "filter": {
