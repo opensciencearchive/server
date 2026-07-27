@@ -93,12 +93,15 @@ services:
     environment:
       # Server-side, read at runtime — never baked into the image.
       OSA_API_URL: http://server:8000
-      # MUST equal the server's OSA_AUTH__JWT__SECRET (both read ${JWT_SECRET})
-      # or the archive rejects the minted token.
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-must-be-32-chars-long}
-      SESSION_SECRET: ${SESSION_SECRET:-change-me-too-a-different-32-char-secret}
+      # Required (`:?`), no defaults: the dashboard is host-exposed and mints
+      # SUPERADMIN tokens, so the stack must fail closed rather than start with
+      # repository-known credentials. `:?` here forces JWT_SECRET for the whole
+      # stack, so the server never falls back to its default either.
+      # JWT_SECRET MUST equal the server's OSA_AUTH__JWT__SECRET (both ${JWT_SECRET}).
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET, shared with the server (openssl rand -hex 32)}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET (openssl rand -hex 32)}
       DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-admin}
-      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-change-me}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?set a strong DASHBOARD_PASSWORD}
     ports:
       - "${DASHBOARD_PORT:-8081}:3000"
     depends_on:

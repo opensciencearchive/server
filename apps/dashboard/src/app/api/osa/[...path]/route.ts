@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { osaApiUrl, sessionSecret } from "@/server/env";
+import { resolveAllowedTarget } from "@/server/proxy-target";
 import { SESSION_COOKIE, readSession } from "@/server/session";
 
 export const runtime = "nodejs";
@@ -11,10 +12,9 @@ export const runtime = "nodejs";
  * The browser never holds the archive token; it calls same-origin `/api/osa/*`
  * and this handler attaches the SUPERADMIN bearer from the session cookie and
  * forwards to the archive. Restricted to **GET** on a fixed **read** allowlist
- * so the long-lived superadmin token can't be replayed against write endpoints.
+ * (see `resolveAllowedTarget`) so the long-lived superadmin token can't be
+ * replayed against write endpoints or escape the allowlist via `..` traversal.
  */
-const ALLOWED_ROOTS = new Set(["stats", "data", "schemas", "hooks"]);
-
 export async function GET(
   req: NextRequest,
   ctx: { params: Promise<{ path: string[] }> },
@@ -28,11 +28,12 @@ export async function GET(
   }
 
   const { path } = await ctx.params;
-  if (path.length === 0 || !ALLOWED_ROOTS.has(path[0]!)) {
+  const target = resolveAllowedTarget(path, osaApiUrl());
+  if (target === null) {
     return NextResponse.json({ error: "not_allowed" }, { status: 403 });
   }
+  target.search = req.nextUrl.search;
 
-  const target = `${osaApiUrl()}/api/v1/${path.join("/")}${req.nextUrl.search}`;
   const upstream = await fetch(target, {
     headers: {
       authorization: `Bearer ${session.osaToken}`,
