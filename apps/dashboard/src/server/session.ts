@@ -56,6 +56,29 @@ export async function readSession(
   }
 }
 
+/** The `purpose` claim on a CLI passwordless-handoff proof (see `osa dashboard`). */
+export const HANDOFF_PURPOSE = "cli-handoff";
+
+/**
+ * Verify a CLI handoff proof: a short-lived HS256 JWT signed with the shared
+ * SESSION_SECRET, carrying `purpose: "cli-handoff"`. Only a holder of the secret
+ * can forge one, so a valid proof authenticates the CLI. Returns false on any
+ * bad signature / expiry / purpose.
+ */
+export async function verifyHandoffProof(
+  proof: string,
+  secret: string,
+): Promise<boolean> {
+  try {
+    const { payload } = await jwtVerify(proof, key(secret), {
+      algorithms: ["HS256"],
+    });
+    return payload["purpose"] === HANDOFF_PURPOSE;
+  } catch {
+    return false;
+  }
+}
+
 /** Cookie attributes. `Secure` is caller-decided (see `isSecureRequest`). */
 export function sessionCookieOptions(secure: boolean) {
   return {
