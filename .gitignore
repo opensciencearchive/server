@@ -70,6 +70,9 @@ instance/
 # Sphinx documentation
 docs/_build/
 
+# docs/ is a scratch dumping ground for now — ignore the whole directory
+docs/
+
 # PyBuilder
 .pybuilder/
 target/
