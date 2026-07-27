@@ -1,0 +1,22 @@
+.box {
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-16) var(--space-8);
+  text-align: center;
+  background: var(--color-bg);
+}
+
+.title {
+  margin-bottom: var(--space-2);
+}
+
+.description {
+  color: var(--color-text-muted);
+  max-width: 44ch;
+  margin: 0 auto var(--space-6);
+}
+
+.action {
+  display: flex;
+  justify-content: center;
+}

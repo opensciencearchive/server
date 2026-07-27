@@ -59,8 +59,13 @@ echo "entrypoint: Postgres is reachable"
 echo "entrypoint: running alembic upgrade head"
 "${VENV_BIN}/alembic" upgrade head
 
-if [[ "${OSA_DEV_MODE:-false}" == "true" ]]; then
-    echo "entrypoint: OSA_DEV_MODE=true — seeding dev admin"
+# Seed the local SUPERADMIN (admin@osa.local) when in dev mode, or when a
+# self-hosted deployment opts in via OSA_SEED_LOCAL_ADMIN=true. The self-host
+# stack sets the latter so the management dashboard (#173) — which mints a
+# token for this seeded admin — has a real SUPERADMIN to resolve to. The script
+# is idempotent, so re-running on every start is safe.
+if [[ "${OSA_DEV_MODE:-false}" == "true" || "${OSA_SEED_LOCAL_ADMIN:-false}" == "true" ]]; then
+    echo "entrypoint: seeding local admin (dev_mode=${OSA_DEV_MODE:-false}, seed_local_admin=${OSA_SEED_LOCAL_ADMIN:-false})"
     "${VENV_BIN}/python" /app/scripts/seed_dev_admin.py
 fi
 

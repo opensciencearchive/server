@@ -1,0 +1,9 @@
+{
+  "id": "deploy_9a1b2c3d4e",
+  "archive_id": "arch_c0r73xa71a",
+  "provider": "aws_eks",
+  "status": "succeeded",
+  "url": "https://cortex-atlas.amacr.in",
+  "started_at": "2026-07-25T14:02:18+00:00",
+  "completed_at": "2026-07-25T14:06:00+00:00"
+}

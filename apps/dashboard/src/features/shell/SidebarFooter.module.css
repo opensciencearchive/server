@@ -1,0 +1,20 @@
+.footerLink,
+.footerButton {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--color-text-subtle);
+  cursor: pointer;
+}
+
+.footerLink:hover,
+.footerButton:hover {
+  color: var(--color-text);
+  background: var(--color-bg-hover);
+  text-decoration: none;
+}

@@ -1,0 +1,12 @@
+# Keep the container's own (Linux) install and build outputs — never copy the
+# host's node_modules/.next over them.
+node_modules
+.next
+.git
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+coverage
+Dockerfile
+.dockerignore

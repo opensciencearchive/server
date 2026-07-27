@@ -1,0 +1,33 @@
+{
+  "id": "build_f4a1e6d902",
+  "archive_id": "arch_c0r73xa71a",
+  "convention_slug": "geo-rnaseq-v2",
+  "status": "build_failed",
+  "error_message": "component 'normalise-counts' failed: ImportError: cannot import name 'SchemaRegistry' from 'osa_sdk.schema'",
+  "convention_ref": "b2a4f60",
+  "components": [
+    {
+      "kind": "ingester",
+      "name": "geo-ingester",
+      "status": "succeeded",
+      "image_ref": "941377154785.dkr.ecr.eu-west-1.amazonaws.com/amacrin/archives/arch_c0r73xa71a/ingester/geo-ingester:build_f4a1e6d902",
+      "digest": "sha256:5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f",
+      "source_ref": "ingesters/geo_ingester.py"
+    },
+    {
+      "kind": "hook",
+      "name": "normalise-counts",
+      "status": "failed",
+      "error_message": "ImportError: cannot import name 'SchemaRegistry' from 'osa_sdk.schema' (/app/osa_sdk/schema/__init__.py)",
+      "source_ref": "hooks/normalise_counts.py"
+    },
+    {
+      "kind": "hook",
+      "name": "validate-metadata",
+      "status": "cancelled",
+      "source_ref": "hooks/validate_metadata.py"
+    }
+  ],
+  "created_at": "2026-07-25T11:40:00+00:00",
+  "updated_at": "2026-07-25T11:44:31+00:00"
+}

@@ -24,6 +24,9 @@ services:
       OSA_BASE_URL: ${OSA_BASE_URL:-http://localhost:8000}
       OSA_LOGGING__LEVEL: ${LOG_LEVEL:-INFO}
       OSA_AUTH__JWT__SECRET: ${JWT_SECRET:-change-me-in-production-must-be-32-chars-long}
+      # Seed the local SUPERADMIN (admin@osa.local) so the management dashboard
+      # (#173) can mint a token that resolves to a real SUPERADMIN.
+      OSA_SEED_LOCAL_ADMIN: "true"
       DOCKER_HOST: tcp://docker-socket-proxy:2375
     depends_on:
       db:
@@ -73,6 +76,31 @@ services:
       API_URL: http://server:8000
     ports:
       - "${WEB_PORT:-8080}:3000"
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Self-hostable management dashboard (issue #173). Node BFF: it verifies the
+  # dashboard credential, mints a SUPERADMIN archive token signed with the
+  # SHARED JWT_SECRET, and proxies authenticated reads to the server.
+  dashboard:
+    build:
+      context: ../apps/dashboard
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_IS_PLATFORM: "false"
+    environment:
+      # Server-side, read at runtime — never baked into the image.
+      OSA_API_URL: http://server:8000
+      # MUST equal the server's OSA_AUTH__JWT__SECRET (both read ${JWT_SECRET})
+      # or the archive rejects the minted token.
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-must-be-32-chars-long}
+      SESSION_SECRET: ${SESSION_SECRET:-change-me-too-a-different-32-char-secret}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-admin}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-change-me}
+    ports:
+      - "${DASHBOARD_PORT:-8081}:3000"
     depends_on:
       server:
         condition: service_healthy

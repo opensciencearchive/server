@@ -1,0 +1,7 @@
+{
+  "id": "deploy_0e1f2a3b4c",
+  "archive_id": "arch_tce11cr1sp",
+  "provider": "aws_eks",
+  "status": "pending",
+  "started_at": "2026-07-25T13:58:00+00:00"
+}

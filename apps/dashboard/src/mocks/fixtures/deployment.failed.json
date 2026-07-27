@@ -1,0 +1,9 @@
+{
+  "id": "deploy_d5e6f7a8b9",
+  "archive_id": "arch_pr073om1cs",
+  "provider": "aws_eks",
+  "status": "failed",
+  "error_message": "provisioning failed: PersistentVolumeClaim pending after 600s — storage class 'gp3' quota exceeded in eu-west-1",
+  "started_at": "2026-07-24T19:02:00+00:00",
+  "completed_at": "2026-07-24T19:12:44+00:00"
+}

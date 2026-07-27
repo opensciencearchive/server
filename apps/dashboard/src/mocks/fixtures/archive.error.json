@@ -1,0 +1,19 @@
+{
+  "id": "arch_pr073om1cs",
+  "organisation_id": "org_7f3k2mq9x1",
+  "name": "Proteomics baseline",
+  "slug": "proteomics-baseline",
+  "domain": "proteomics-baseline.amacr.in",
+  "config": {
+    "auth": {
+      "admins": {
+        "orcid": ["0000-0002-1825-0097"]
+      }
+    },
+    "deployment": null
+  },
+  "status": "error",
+  "error_message": "provisioning failed: PersistentVolumeClaim pending after 600s — storage class 'gp3' quota exceeded in eu-west-1",
+  "created_at": "2026-07-02T08:30:00+00:00",
+  "updated_at": "2026-07-24T19:12:44+00:00"
+}

@@ -98,6 +98,26 @@ web-build:
 web-lint:
     cd web && pnpm lint
 
+# Run the management dashboard independently
+dashboard-dev:
+    cd apps/dashboard && pnpm dev
+
+# Build the management dashboard for production
+dashboard-build:
+    cd apps/dashboard && pnpm build
+
+# Lint the management dashboard code
+dashboard-lint:
+    cd apps/dashboard && pnpm lint
+
+# Type-check the management dashboard
+dashboard-typecheck:
+    cd apps/dashboard && pnpm typecheck
+
+# Test the management dashboard
+dashboard-test:
+    cd apps/dashboard && pnpm test:run
+
 # === Seed ===
 
 # Seed the database with sample data (run while dev is up)
