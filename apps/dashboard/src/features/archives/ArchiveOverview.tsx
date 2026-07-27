@@ -83,9 +83,6 @@ function PlatformHero({
           <div className={styles.heroTitle}>
             <span className={styles.eyebrow}>Archive</span>
             <h1>{data.name}</h1>
-            <p className={styles.blurb}>
-              Public to read; depositors sign in with ORCID.
-            </p>
           </div>
           <div className={styles.domainRow}>
             <span className={styles.domain}>{data.domain}</span>

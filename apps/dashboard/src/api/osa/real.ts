@@ -10,11 +10,9 @@
  */
 import type { Mocked } from "@/domain/mocked";
 import type {
-  DepositionPoint,
   ObservabilitySnapshot,
   RecordStats,
   RecordTypeCount,
-  SearchOverview,
   TenantAuthView,
   TenantHook,
   TenantIngester,
@@ -55,9 +53,6 @@ export class RealOSAService implements OSAService {
   getRecordStats(archiveId: string): Promise<Mocked<RecordStats>> {
     return this.mock.getRecordStats(archiveId);
   }
-  getDepositionSeries(archiveId: string): Promise<Mocked<DepositionPoint[]>> {
-    return this.mock.getDepositionSeries(archiveId);
-  }
   getRecordTypeBreakdown(archiveId: string): Promise<Mocked<RecordTypeCount[]>> {
     return this.mock.getRecordTypeBreakdown(archiveId);
   }
@@ -72,9 +67,6 @@ export class RealOSAService implements OSAService {
   }
   listIngesters(archiveId: string): Promise<Mocked<TenantIngester[]>> {
     return this.mock.listIngesters(archiveId);
-  }
-  getSearchOverview(archiveId: string): Promise<Mocked<SearchOverview>> {
-    return this.mock.getSearchOverview(archiveId);
   }
   getObservability(archiveId: string): Promise<Mocked<ObservabilitySnapshot>> {
     return this.mock.getObservability(archiveId);

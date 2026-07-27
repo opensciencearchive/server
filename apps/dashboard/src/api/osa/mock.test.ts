@@ -11,11 +11,6 @@ describe("MockOSAService", () => {
     expect(stats.data.publishedRecords).toBeGreaterThan(0);
   });
 
-  it("returns twelve months of depositions", async () => {
-    const series = await svc.getDepositionSeries("arch_x");
-    expect(series.data).toHaveLength(12);
-  });
-
   it("validation summary is consistent with its checks", async () => {
     const v = await svc.getValidationSummary("arch_x");
     expect(v.data.checks.length).toBeGreaterThan(0);

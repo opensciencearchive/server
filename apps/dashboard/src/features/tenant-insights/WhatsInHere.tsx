@@ -2,34 +2,10 @@
 
 import Link from "next/link";
 
-import { BarChart, SampleDataChip, Skeleton, Stat } from "@/ui";
+import { SampleDataChip, Skeleton, Stat } from "@/ui";
 
-import {
-  useDepositionSeries,
-  useRecordStats,
-  useRecordTypeBreakdown,
-} from "./hooks";
+import { useRecordStats, useRecordTypeBreakdown } from "./hooks";
 import styles from "./tenant-insights.module.css";
-
-const MONTH_LABELS: Record<string, string> = {
-  "01": "Jan",
-  "02": "Feb",
-  "03": "Mar",
-  "04": "Apr",
-  "05": "May",
-  "06": "Jun",
-  "07": "Jul",
-  "08": "Aug",
-  "09": "Sep",
-  "10": "Oct",
-  "11": "Nov",
-  "12": "Dec",
-};
-
-function shortMonth(iso: string): string {
-  const month = iso.split("-")[1];
-  return (month && MONTH_LABELS[month]) ?? iso;
-}
 
 function formatBytes(bytes: number): string {
   const tb = bytes / 1e12;
@@ -41,15 +17,7 @@ function formatBytes(bytes: number): string {
 
 export function WhatsInHere({ archiveId }: { archiveId: string }) {
   const stats = useRecordStats(archiveId);
-  const series = useDepositionSeries(archiveId);
   const types = useRecordTypeBreakdown(archiveId);
-
-  const points =
-    series.data?.data.map((p) => ({ label: shortMonth(p.month), value: p.count })) ??
-    [];
-  const peak = series.data?.data.reduce<
-    (typeof series.data.data)[number] | undefined
-  >((best, p) => (best && best.count >= p.count ? best : p), undefined);
 
   const typeMax = Math.max(1, ...(types.data?.data.map((t) => t.count) ?? []));
 
@@ -74,13 +42,6 @@ export function WhatsInHere({ archiveId }: { archiveId: string }) {
               <Stat
                 label="Published records"
                 value={stats.data.data.publishedRecords.toLocaleString("en-GB")}
-                note={`+${stats.data.data.recordsThisMonth} this month`}
-                noteTone="success"
-              />
-              <Stat
-                label="Depositors"
-                value={stats.data.data.depositors.toLocaleString("en-GB")}
-                note={`${stats.data.data.labs} labs`}
               />
               <Stat
                 label="Derived features"
@@ -93,16 +54,6 @@ export function WhatsInHere({ archiveId }: { archiveId: string }) {
                 note="objects + index"
               />
             </div>
-          ) : null}
-
-          {series.isPending ? (
-            <Skeleton height="5rem" width="100%" />
-          ) : points.length > 0 ? (
-            <BarChart
-              points={points}
-              title="Depositions accepted over the last 12 months"
-              annotation={peak ? `peak ${peak.count} · ${shortMonth(peak.month)}` : undefined}
-            />
           ) : null}
         </div>
 

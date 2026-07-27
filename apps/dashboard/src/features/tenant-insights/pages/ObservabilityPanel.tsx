@@ -31,9 +31,6 @@ export function ObservabilityPanel({ archiveId }: { archiveId: string }) {
               label={snapshot.data.data.status}
               mono={false}
             />
-            <span className={styles.cardMeta}>
-              up {snapshot.data.data.uptimeDays} days
-            </span>
           </div>
 
           <div className={styles.grid}>

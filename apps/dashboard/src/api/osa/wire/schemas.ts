@@ -25,3 +25,22 @@ export const wireHookCatalogItem = z.object({
 export const wireHookCatalog = z.object({
   items: z.array(wireHookCatalogItem),
 });
+
+// GET /api/agent (BFF) — SKILL.md text + root discovery (skill.py:RootDiscovery).
+export const wireRootDiscovery = z.object({
+  node: z.object({
+    name: z.string(),
+    domain: z.string(),
+    description: z.string(),
+    osa_version: z.string(),
+  }),
+  skill_url: z.string(),
+  reference_base: z.string(),
+  data_url: z.string(),
+  openapi_url: z.string(),
+});
+
+export const wireAgentSurface = z.object({
+  skill: z.string(),
+  discovery: wireRootDiscovery,
+});

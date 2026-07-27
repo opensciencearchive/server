@@ -5,11 +5,9 @@
  */
 import { type Mocked, mocked } from "@/domain/mocked";
 import type {
-  DepositionPoint,
   ObservabilitySnapshot,
   RecordStats,
   RecordTypeCount,
-  SearchOverview,
   TenantAuthView,
   TenantHook,
   TenantIngester,
@@ -20,21 +18,6 @@ import type {
 
 import type { OSAService } from "./service";
 
-const DEPOSITIONS: DepositionPoint[] = [
-  { month: "2025-08", count: 214 },
-  { month: "2025-09", count: 342 },
-  { month: "2025-10", count: 260 },
-  { month: "2025-11", count: 451 },
-  { month: "2025-12", count: 388 },
-  { month: "2026-01", count: 612 },
-  { month: "2026-02", count: 502 },
-  { month: "2026-03", count: 377 },
-  { month: "2026-04", count: 441 },
-  { month: "2026-05", count: 350 },
-  { month: "2026-06", count: 478 },
-  { month: "2026-07", count: 318 },
-];
-
 export class MockOSAService implements OSAService {
   getRecordStats(archiveId: string): Promise<Mocked<RecordStats>> {
     void archiveId;
@@ -42,17 +25,10 @@ export class MockOSAService implements OSAService {
       mocked({
         publishedRecords: 12_481,
         recordsThisMonth: 318,
-        depositors: 214,
-        labs: 41,
         derivedFeaturesPerRecord: 3,
         storageBytes: 1.4e12,
       }),
     );
-  }
-
-  getDepositionSeries(archiveId: string): Promise<Mocked<DepositionPoint[]>> {
-    void archiveId;
-    return Promise.resolve(mocked(DEPOSITIONS));
   }
 
   getRecordTypeBreakdown(
@@ -188,27 +164,11 @@ export class MockOSAService implements OSAService {
     );
   }
 
-  getSearchOverview(archiveId: string): Promise<Mocked<SearchOverview>> {
-    void archiveId;
-    return Promise.resolve(
-      mocked({
-        indexedRecords: 12_481,
-        lastIndexedAt: new Date("2026-07-25T16:00:00Z"),
-        exampleQueries: [
-          "layer V neurons GRIN2B",
-          "type:spatial cortex BA9",
-          "depositor:0000-0002-1825-0097",
-        ],
-      }),
-    );
-  }
-
   getObservability(archiveId: string): Promise<Mocked<ObservabilitySnapshot>> {
     void archiveId;
     return Promise.resolve(
       mocked({
         status: "ready",
-        uptimeDays: 11,
         components: [
           { name: "api", status: "healthy", detail: "p99 84 ms" },
           { name: "db", status: "healthy", detail: "connections 12/100" },

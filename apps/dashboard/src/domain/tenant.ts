@@ -16,17 +16,8 @@ import type { Role } from "./organisation";
 export interface RecordStats {
   publishedRecords: number;
   recordsThisMonth: number;
-  depositors: number;
-  labs: number;
   derivedFeaturesPerRecord: number;
   storageBytes: number;
-}
-
-/** One month of accepted depositions (bar chart). */
-export interface DepositionPoint {
-  /** ISO month, e.g. "2026-03". */
-  month: string;
-  count: number;
 }
 
 export interface RecordTypeCount {
@@ -90,7 +81,6 @@ export interface ObservabilityComponent {
 
 export interface ObservabilitySnapshot {
   status: "ready" | "degraded";
-  uptimeDays: number;
   components: ObservabilityComponent[];
 }
 
@@ -125,10 +115,4 @@ export interface OrgMember {
   email: string;
   role: Role;
   joinedAt: Date;
-}
-
-export interface SearchOverview {
-  indexedRecords: number;
-  lastIndexedAt: Date | null;
-  exampleQueries: string[];
 }

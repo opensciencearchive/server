@@ -12,11 +12,9 @@
  */
 import type { Mocked } from "@/domain/mocked";
 import type {
-  DepositionPoint,
   ObservabilitySnapshot,
   RecordStats,
   RecordTypeCount,
-  SearchOverview,
   TenantAuthView,
   TenantHook,
   TenantIngester,
@@ -28,8 +26,6 @@ import type {
 export interface OSAService {
   /** @mock OSA has GET /stats + schema manifests; no tenant auth path yet. */
   getRecordStats(archiveId: string): Promise<Mocked<RecordStats>>;
-  /** @mock Derivable from OSA depositions/events; no aggregate endpoint. */
-  getDepositionSeries(archiveId: string): Promise<Mocked<DepositionPoint[]>>;
   /** @mock Derivable from OSA schema manifests. */
   getRecordTypeBreakdown(
     archiveId: string,
@@ -44,8 +40,6 @@ export interface OSAService {
   listHooks(archiveId: string): Promise<TenantHook[]>;
   /** @mock OSA models ingesters as components; no tenant auth path yet. */
   listIngesters(archiveId: string): Promise<Mocked<TenantIngester[]>>;
-  /** @mock No search-index endpoint. */
-  getSearchOverview(archiveId: string): Promise<Mocked<SearchOverview>>;
   /** @mock OSA /ready + /metrics exist; no tenant auth path yet. */
   getObservability(archiveId: string): Promise<Mocked<ObservabilitySnapshot>>;
   /** @mock The cloud API exposes only the admins list on the archive. */

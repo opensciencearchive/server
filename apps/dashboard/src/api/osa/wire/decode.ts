@@ -4,9 +4,14 @@
  */
 import type { z } from "zod";
 
+import type { AgentSurface } from "@/domain/agent";
 import type { TenantHook } from "@/domain/tenant";
 
-import { wireHookCatalog, type wireHookCatalogItem } from "./schemas";
+import {
+  wireAgentSurface,
+  wireHookCatalog,
+  type wireHookCatalogItem,
+} from "./schemas";
 
 /** Synthesize a human description from a hook's fixed feature-table contract. */
 function describeFeature(
@@ -28,4 +33,30 @@ export function decodeHookCatalog(json: unknown): TenantHook[] {
     // times (those need the ADMIN hook-runs endpoint) — closest available.
     lastRunAt: h.live_release === null ? null : new Date(h.live_release.built_at),
   }));
+}
+
+/** The `/mcp` connector URL, at the node's public origin (from skill_url). */
+function mcpUrlFrom(skillUrl: string): string {
+  try {
+    return `${new URL(skillUrl).origin}/mcp`;
+  } catch {
+    return "/mcp";
+  }
+}
+
+/** GET /api/agent (BFF) → the archive's agent-grounding surface. */
+export function decodeAgentSurface(json: unknown): AgentSurface {
+  const { skill, discovery } = wireAgentSurface.parse(json);
+  return {
+    skillMarkdown: skill,
+    node: {
+      name: discovery.node.name,
+      domain: discovery.node.domain,
+      description: discovery.node.description,
+      osaVersion: discovery.node.osa_version,
+    },
+    mcpUrl: mcpUrlFrom(discovery.skill_url),
+    skillUrl: discovery.skill_url,
+    dataUrl: discovery.data_url,
+  };
 }

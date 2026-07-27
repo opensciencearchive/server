@@ -58,7 +58,7 @@ function navSections(base: string, builds?: { count?: number }): NavSection[] {
             { label: "Validation", href: `${base}/validation` },
           ],
         },
-        { label: "Search", href: `${base}/search`, icon: "search" },
+        { label: "Agents", href: `${base}/agents`, icon: "agents" },
       ],
     },
     {
