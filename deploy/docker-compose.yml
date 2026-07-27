@@ -23,7 +23,9 @@ services:
       OSA_DATA_DIR: /data
       OSA_BASE_URL: ${OSA_BASE_URL:-http://localhost:8000}
       OSA_LOGGING__LEVEL: ${LOG_LEVEL:-INFO}
-      OSA_AUTH__JWT__SECRET: ${JWT_SECRET:-change-me-in-production-must-be-32-chars-long}
+      # Required (`:?`), no fallback: a repository-known default would let the
+      # server accept attacker-minted SUPERADMIN tokens if JWT_SECRET were unset.
+      OSA_AUTH__JWT__SECRET: ${JWT_SECRET:?set JWT_SECRET, shared with the dashboard (openssl rand -hex 32)}
       # Seed the local SUPERADMIN (admin@osa.local) so the management dashboard
       # (#173) can mint a token that resolves to a real SUPERADMIN.
       OSA_SEED_LOCAL_ADMIN: "true"
