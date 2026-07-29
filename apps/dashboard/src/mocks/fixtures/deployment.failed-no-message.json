@@ -1,0 +1,7 @@
+{
+  "id": "deploy_c4d5e6f7a8",
+  "archive_id": "arch_pr073om1cs",
+  "provider": "aws_eks",
+  "status": "failed",
+  "started_at": "2026-07-24T19:02:00+00:00"
+}

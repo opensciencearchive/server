@@ -1,0 +1,44 @@
+.card {
+  padding: 0;
+  border-color: var(--color-danger);
+  overflow: hidden;
+}
+
+.inner {
+  padding: var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  margin: 0;
+  color: var(--color-danger);
+}
+
+.description {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
+.trigger {
+  align-self: flex-start;
+}
+
+.reasonBar {
+  padding: var(--space-4) var(--space-8);
+  border-top: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-alt);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}

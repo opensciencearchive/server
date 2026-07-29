@@ -1,0 +1,14 @@
+{
+  "id": "arch_tce11cr1sp",
+  "organisation_id": "org_7f3k2mq9x1",
+  "name": "T-cell CRISPR screens",
+  "slug": "tcell-crispr",
+  "domain": "tcell-crispr.amacr.in",
+  "config": {
+    "auth": null,
+    "deployment": null
+  },
+  "status": "deploying",
+  "created_at": "2026-07-25T13:58:00+00:00",
+  "updated_at": "2026-07-25T13:58:00+00:00"
+}

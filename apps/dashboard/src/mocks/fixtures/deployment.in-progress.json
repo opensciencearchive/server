@@ -1,0 +1,7 @@
+{
+  "id": "deploy_5f6a7b8c9d",
+  "archive_id": "arch_tce11cr1sp",
+  "provider": "aws_eks",
+  "status": "in_progress",
+  "started_at": "2026-07-25T13:58:02+00:00"
+}

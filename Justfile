@@ -2,6 +2,7 @@
 # Production deployment and development orchestration commands
 
 mod server
+mod dashboard 'apps/dashboard/Justfile'
 
 default:
     @just --list

@@ -1,0 +1,25 @@
+# Management dashboard (self-hostable UI) — apps/dashboard
+# Recipes run in this directory (just module). Use via `just dashboard <recipe>`.
+
+default:
+    @just --list
+
+# Run the dev server
+dev:
+    pnpm dev
+
+# Build for production (standalone Node output)
+build:
+    pnpm build
+
+# Lint
+lint:
+    pnpm lint
+
+# Type-check
+typecheck:
+    pnpm typecheck
+
+# Run tests
+test:
+    pnpm test:run

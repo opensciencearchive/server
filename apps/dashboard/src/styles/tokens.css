@@ -1,0 +1,216 @@
+/*
+ * OSA Design System — Colors & Type
+ * Editorial 20thC science × modern devtools.
+ * Monochrome foundation, sage-green accent.
+ *
+ * Vendored from dashboard-concept/osa-tokens.css (2026-07-25).
+ * Deviation from source: the Google Fonts @import is stripped — fonts are
+ * self-hosted via next/font in app/layout.tsx, which injects
+ * --next-font-{display,body,mono}. Re-vendor by copying the source file and
+ * re-applying the font-stack override below.
+ */
+
+:root {
+  /* ───── Type stacks (next/font variables, with the source stacks as fallback) ───── */
+  --font-display: var(--next-font-display, 'DM Serif Display'), Georgia, 'Times New Roman', serif;
+  --font-body:    var(--next-font-body, 'Inter'), -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  --font-mono:    var(--next-font-mono, 'JetBrains Mono'), 'SF Mono', Menlo, Monaco, Consolas, monospace;
+
+  /* ───── Type scale (rem-based) ───── */
+  --text-xs:   0.75rem;    /* 12px */
+  --text-sm:   0.875rem;   /* 14px */
+  --text-base: 1rem;       /* 16px */
+  --text-lg:   1.125rem;   /* 18px */
+  --text-xl:   1.25rem;    /* 20px */
+  --text-2xl:  1.5rem;     /* 24px */
+  --text-3xl:  1.875rem;   /* 30px */
+  --text-4xl:  2.25rem;    /* 36px */
+  --text-5xl:  3rem;       /* 48px */
+  --text-6xl:  3.75rem;    /* 60px */
+  --text-7xl:  4.5rem;     /* 72px */
+
+  --leading-none: 1;
+  --leading-tight: 1.15;
+  --leading-snug: 1.35;
+  --leading-normal: 1.6;
+  --leading-relaxed: 1.75;
+
+  --tracking-tight:   -0.02em;
+  --tracking-normal:  0;
+  --tracking-wide:    0.025em;
+  --tracking-wider:   0.05em;
+  --tracking-widest:  0.1em;
+
+  /* ───── Colour — neutral foundation ───── */
+  --color-bg:          hsl(0, 0%, 100%);
+  --color-bg-alt:      hsl(0, 0%, 97%);
+  --color-bg-elevated: hsl(0, 0%, 100%);
+  --color-bg-hover:    hsl(0, 0%, 98%);
+  --color-bg-inset:    hsl(0, 0%, 94%);
+  --color-bg-dark:     hsl(160, 12%, 10%);
+
+  --color-text:        hsl(0, 0%, 5%);    /* near-black ink */
+  --color-text-muted:  hsl(0, 0%, 38%);
+  --color-text-subtle: hsl(0, 0%, 64%);
+
+  --color-border:         hsl(0, 0%, 88%);
+  --color-border-subtle:  hsl(0, 0%, 94%);
+  --color-border-strong:  hsl(0, 0%, 72%);
+
+  /* ───── Colour — sage-green accent (laboratory precision) ───── */
+  /* Logo is #76B39D ≈ hsl(155, 28%, 58%) */
+  --color-accent:         hsl(160, 25%, 55%);
+  --color-accent-hover:   hsl(160, 35%, 35%);
+  --color-accent-subtle:  hsl(160, 25%, 85%);
+  --color-accent-muted:   hsl(160, 25%, 75%);
+  --color-accent-ink:     hsl(160, 45%, 18%);   /* deep sage — headings on tint */
+  --color-accent-bg:      hsl(160, 25%, 97%);   /* whisper tint for panels */
+
+  /* ───── Colour — semantic ───── */
+  --color-success:       hsl(152, 50%, 38%);
+  --color-success-bg:    hsl(152, 50%, 94%);
+  --color-warning:       hsl(35, 78%, 44%);
+  --color-warning-bg:    hsl(38, 90%, 95%);
+  --color-danger:        hsl(0, 65%, 48%);
+  --color-danger-bg:     hsl(0, 70%, 96%);
+  --color-info:          hsl(210, 55%, 45%);
+  --color-info-bg:       hsl(210, 55%, 96%);
+
+  /* ───── Surfaces ───── */
+  --shadow-sm: 0 1px 2px rgba(26, 30, 28, 0.04);
+  --shadow-md: 0 4px 12px rgba(26, 30, 28, 0.06);
+  --shadow-lg: 0 8px 24px rgba(26, 30, 28, 0.08);
+  --shadow-accent: 0 2px 8px hsla(160, 30%, 40%, 0.2);
+
+  --radius-xs: 0.25rem;  /*  4px */
+  --radius-sm: 0.375rem; /*  6px */
+  --radius-md: 0.5rem;   /*  8px */
+  --radius-lg: 0.75rem;  /* 12px */
+  --radius-xl: 1rem;     /* 16px */
+  --radius-full: 9999px;
+
+  /* ───── Spacing ───── */
+  --space-1:  0.25rem;
+  --space-2:  0.5rem;
+  --space-3:  0.75rem;
+  --space-4:  1rem;
+  --space-5:  1.25rem;
+  --space-6:  1.5rem;
+  --space-8:  2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+  --space-20: 5rem;
+  --space-24: 6rem;
+
+  /* ───── Layout ───── */
+  --content-width:      42rem;  /* 672px  — optimal reading */
+  --content-width-wide: 56rem;  /* 896px  — wide prose */
+  --content-width-full: 87.5rem;/* 1400px — app-shell max */
+  --header-height:      56px;
+  --margin-width:       14rem;
+
+  /* ───── Motion ───── */
+  --transition-fast:   150ms ease;
+  --transition-base:   250ms ease;
+  --transition-slow:   400ms ease;
+  --transition-slower: 600ms ease;
+  --ease-out-expo:     cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Semantic element defaults
+   ═══════════════════════════════════════════════════════════ */
+
+html {
+  font-family: var(--font-body);
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--color-text);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  color: var(--color-text);
+  margin: 0;
+}
+
+h1 { font-size: var(--text-5xl); font-weight: 400; }
+h2 { font-size: var(--text-3xl); font-weight: 400; }
+h3 { font-size: var(--text-2xl); font-weight: 400; }
+/* h4+ swap to sans so UI labels read as devtools, not editorial */
+h4 { font-family: var(--font-body); font-size: var(--text-lg);  font-weight: 600; letter-spacing: -0.01em; }
+h5 { font-family: var(--font-body); font-size: var(--text-base); font-weight: 600; letter-spacing: 0; }
+h6 {
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wider);
+  color: var(--color-text-muted);
+}
+
+p { margin: 0 0 var(--space-4); }
+
+a {
+  color: var(--color-accent-hover);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+a:hover { color: var(--color-accent-ink); text-decoration: underline; text-underline-offset: 2px; }
+
+code, kbd, samp, pre {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+code {
+  background: var(--color-bg-alt);
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--color-border-subtle);
+}
+
+::selection {
+  background: var(--color-accent-subtle);
+  color: var(--color-text);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Utility presets
+   ═══════════════════════════════════════════════════════════ */
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-widest);
+  color: var(--color-text-subtle);
+  font-weight: 500;
+}
+
+.display {
+  font-family: var(--font-display);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+}
+
+.mono { font-family: var(--font-mono); }
+
+.srn {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--color-text-subtle);
+}

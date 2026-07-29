@@ -1,0 +1,25 @@
+{
+  "id": "build_c9a8b7c6d5",
+  "archive_id": "arch_c0r73xa71a",
+  "convention_slug": "geo-rnaseq-v2",
+  "status": "cancelled",
+  "cancelled_by": "system",
+  "cancel_reason": "superseded by build_8f3a91c2e5",
+  "convention_ref": "77aa001",
+  "components": [
+    {
+      "kind": "ingester",
+      "name": "geo-ingester",
+      "status": "cancelled",
+      "source_ref": "ingesters/geo_ingester.py"
+    },
+    {
+      "kind": "hook",
+      "name": "validate-metadata",
+      "status": "cancelled",
+      "source_ref": "hooks/validate_metadata.py"
+    }
+  ],
+  "created_at": "2026-07-25T13:59:00+00:00",
+  "updated_at": "2026-07-25T14:03:40+00:00"
+}

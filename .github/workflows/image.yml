@@ -8,6 +8,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE: ghcr.io/${{ github.repository_owner }}/osa
+  IMAGE_DASHBOARD: ghcr.io/${{ github.repository_owner }}/osa-dashboard
 
 jobs:
   build:
@@ -73,3 +74,46 @@ jobs:
           build-args: |
             OSA_VERSION=${{ github.event.release.tag_name || github.sha }}
             OSA_REVISION=${{ github.sha }}
+
+  # Self-hostable management dashboard (#173). Built as a self-host image
+  # (IS_PLATFORM=false); the CLI pulls it by release tag via OSA_IMAGE_VERSION.
+  dashboard:
+    name: Dashboard - Build & Push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: tags
+        run: |
+          SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+          TAGS="${{ env.IMAGE_DASHBOARD }}:sha-${SHA_SHORT}"
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            TAGS="${TAGS},${{ env.IMAGE_DASHBOARD }}:${{ github.event.release.tag_name }}"
+          fi
+          if [[ -n "${{ github.event.pull_request.number }}" ]]; then
+            TAGS="${TAGS},${{ env.IMAGE_DASHBOARD }}:pr-${{ github.event.pull_request.number }}"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: apps/dashboard
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=dashboard
+          cache-to: type=gha,mode=max,scope=dashboard
+          build-args: |
+            NEXT_PUBLIC_IS_PLATFORM=false
+            NEXT_PUBLIC_API_MODE=real
