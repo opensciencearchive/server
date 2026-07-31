@@ -52,14 +52,23 @@ jobs:
 
       - name: Compute tags
         id: tags
+        # Pass event metadata through env, never interpolated into the script —
+        # a release tag / branch name is untrusted input, and `${{ }}` inside a
+        # run block would let shell syntax in it execute under packages:write.
+        env:
+          IMAGE: ${{ env.IMAGE }}
+          SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
-          TAGS="${{ env.IMAGE }}:sha-${SHA_SHORT}"
-          if [[ "${{ github.event_name }}" == "release" ]]; then
-            TAGS="${TAGS},${{ env.IMAGE }}:${{ github.event.release.tag_name }}"
+          SHA_SHORT="${SHA:0:7}"
+          TAGS="${IMAGE}:sha-${SHA_SHORT}"
+          if [[ "${EVENT_NAME}" == "release" ]]; then
+            TAGS="${TAGS},${IMAGE}:${RELEASE_TAG}"
           fi
-          if [[ -n "${{ github.event.pull_request.number }}" ]]; then
-            TAGS="${TAGS},${{ env.IMAGE }}:pr-${{ github.event.pull_request.number }}"
+          if [[ -n "${PR_NUMBER}" ]]; then
+            TAGS="${TAGS},${IMAGE}:pr-${PR_NUMBER}"
           fi
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
