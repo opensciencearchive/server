@@ -23,7 +23,7 @@ function formatRatio(n: number): string {
 
 export function WhatsInHere({ archiveId }: { archiveId: string }) {
   // Self-host reads real stats; platform's are sample data (chip).
-  const isSample = useServices().isPlatform;
+  const isSample = useServices().tenantDataIsSample;
   const stats = useRecordStats(archiveId);
   const types = useRecordTypeBreakdown(archiveId);
 

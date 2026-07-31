@@ -8,7 +8,7 @@ Vercel at `https://console.amacrin.com`. It is an API client of the platform API
 
 ```bash
 pnpm install
-pnpm dev        # dev server (reads NEXT_PUBLIC_API_MODE / NEXT_PUBLIC_API_URL)
+pnpm dev        # dev server (reads NEXT_PUBLIC_API_MODE; AMACRIN_API_URL at runtime)
 pnpm test       # vitest (watch); pnpm test:run for one-shot
 pnpm typecheck  # tsc --noEmit
 pnpm lint       # eslint (incl. layer-boundary rules)
@@ -17,7 +17,8 @@ pnpm build      # next build
 
 ## Data modes (`NEXT_PUBLIC_API_MODE`)
 
-- `real` (default) — talk to the API at `NEXT_PUBLIC_API_URL`.
+- `real` (default) — talk to the control plane through the same-origin BFF proxy
+  (`/api/amacrin`), which forwards to `AMACRIN_API_URL` server-side.
 - `mock` — fully in-memory services, no network. Used for Vercel preview demos and
   the CI `next build`. Walk the whole app without a backend or Google credentials.
 - `msw` — real services with Mock Service Worker intercepting requests against the

@@ -32,4 +32,17 @@ describe("resolveAllowedTarget", () => {
     // If the traversal arrives as a single segment, it fails the root check.
     expect(resolveAllowedTarget(["stats/../users"], BASE)).toBeNull();
   });
+
+  it("allows exactly auth/config, and nothing else under auth", () => {
+    // The one non-secret auth read is proxiable...
+    expect(resolveAllowedTarget(["auth", "config"], BASE)?.pathname).toBe(
+      "/api/v1/auth/config",
+    );
+    // ...but the auth root is a single endpoint, not a subtree: the OAuth flow
+    // routes and the bare root must never be reachable.
+    expect(resolveAllowedTarget(["auth"], BASE)).toBeNull();
+    expect(resolveAllowedTarget(["auth", "login"], BASE)).toBeNull();
+    expect(resolveAllowedTarget(["auth", "token"], BASE)).toBeNull();
+    expect(resolveAllowedTarget(["auth", "config", "extra"], BASE)).toBeNull();
+  });
 });

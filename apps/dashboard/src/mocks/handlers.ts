@@ -1,8 +1,8 @@
 /**
  * MSW handlers for the real Amacrin Cloud API surface, serving the
  * wire-shaped fixtures. Host is wildcarded so the same handlers work in
- * Vitest (any test base URL) and in the browser (`msw` mode against
- * NEXT_PUBLIC_API_URL). Tests layer scenario overrides with `server.use`.
+ * Vitest (any test base URL) and in the browser (`msw` mode against the
+ * same-origin BFF proxy). Tests layer scenario overrides with `server.use`.
  */
 import { HttpResponse, http } from "msw";
 
@@ -36,17 +36,8 @@ function jsonError(status: number, error: string, message: string) {
 
 export const handlers = [
   // ── auth ────────────────────────────────────────────────────────────
-  http.post("*/api/v1/auth/refresh", () =>
-    HttpResponse.json({
-      access_token: "msw-access-token",
-      expires_in: 900,
-      token_type: "Bearer",
-    }),
-  ),
-  http.post(
-    "*/api/v1/auth/logout",
-    () => new HttpResponse(null, { status: 204 }),
-  ),
+  // Refresh/logout are the BFF's job now (#185) — the browser never calls the
+  // control plane's cookie flow, so only the identity read is mocked here.
   http.get("*/api/v1/auth/me", () => HttpResponse.json(me)),
 
   // ── organisations ───────────────────────────────────────────────────

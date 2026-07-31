@@ -54,7 +54,9 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# Server-only secrets (OSA_API_URL, JWT_SECRET, SESSION_SECRET, DASHBOARD_*) are
-# read at RUNTIME by the Node route handlers — never baked into the image.
+# Server-only config is read at RUNTIME by the Node route handlers — never baked
+# into the image. Self-host: OSA_API_URL, JWT_SECRET, SESSION_SECRET, DASHBOARD_*.
+# Platform (#185): AMACRIN_API_URL (in-cluster control-plane base) + optional
+# AMACRIN_PUBLIC_URL (browser-facing OAuth origin), SESSION_SECRET.
 
 CMD ["node", "server.js"]

@@ -8,8 +8,9 @@ import { useTenantAuthConfig } from "../hooks";
 import styles from "./pages.module.css";
 
 export function AuthenticationPanel({ archiveId }: { archiveId: string }) {
-  // Self-host reads real auth config; platform's is sample data (chip + note).
-  const isSample = useServices().isPlatform;
+  // Real in both builds now: self-host via the local archive, platform via the
+  // control-plane read-proxy's auth surface (#185). Sample only in demo/mock mode.
+  const isSample = useServices().tenantDataIsSample;
   const authConfig = useTenantAuthConfig(archiveId);
   const admins = authConfig.data?.adminOrcidIds ?? [];
 
@@ -74,8 +75,8 @@ export function AuthenticationPanel({ archiveId }: { archiveId: string }) {
         <div className={styles.note}>
           <span className={styles.noteLabel}>Note</span>
           <p>
-            This sign-in configuration is sample data. Self-hosted archives show
-            their real ORCID client id and configured administrators.
+            This sign-in configuration is sample data (demo mode). A deployed
+            archive shows its real ORCID client id and configured administrators.
           </p>
         </div>
       )}

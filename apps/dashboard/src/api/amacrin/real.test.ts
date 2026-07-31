@@ -1,8 +1,6 @@
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 
-import { SessionRefresher } from "@/api/auth/refresher";
-import { TokenStore } from "@/api/auth/token-store";
 import { HttpClient } from "@/api/http/client";
 import { SlugTakenError } from "@/api/http/errors";
 import archiveRunning from "@/mocks/fixtures/archive.running.json";
@@ -16,14 +14,7 @@ import { RealAmacrinService } from "./real";
 const BASE = "https://api.test";
 
 function makeService() {
-  const store = new TokenStore();
-  store.set("tok_abc", 900);
-  const refresher = new SessionRefresher({
-    store,
-    refreshFn: () =>
-      Promise.resolve({ accessToken: "tok_abc", expiresInSeconds: 900 }),
-  });
-  const client = new HttpClient({ baseUrl: BASE, refresher });
+  const client = new HttpClient({ baseUrl: BASE });
   return new RealAmacrinService({ baseUrl: BASE, client });
 }
 
@@ -33,23 +24,6 @@ describe("RealAmacrinService", () => {
     const session = await makeService().getMe();
     expect(session.user.email).toBe("r.bergstrom@example.ac.uk");
     expect(session.organisations).toHaveLength(3);
-  });
-
-  it("refreshSession posts with credentials so the cookie rides", async () => {
-    let credentials: RequestCredentials | null = null;
-    server.use(
-      http.post(`${BASE}/api/v1/auth/refresh`, ({ request }) => {
-        credentials = request.credentials;
-        return HttpResponse.json({
-          access_token: "tok_new",
-          expires_in: 900,
-          token_type: "Bearer",
-        });
-      }),
-    );
-    const result = await makeService().refreshSession();
-    expect(result).toEqual({ accessToken: "tok_new", expiresInSeconds: 900 });
-    expect(credentials).toBe("include");
   });
 
   it("createArchive sends the exact osa.yaml-shaped body", async () => {

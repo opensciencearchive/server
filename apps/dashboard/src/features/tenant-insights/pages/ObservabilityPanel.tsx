@@ -14,7 +14,7 @@ function componentTone(status: "healthy" | "degraded"): Tone {
 
 export function ObservabilityPanel({ archiveId }: { archiveId: string }) {
   // Self-host reads real readiness; platform's is sample data (chip + note).
-  const isSample = useServices().isPlatform;
+  const isSample = useServices().tenantDataIsSample;
   const snapshot = useObservability(archiveId);
 
   return (

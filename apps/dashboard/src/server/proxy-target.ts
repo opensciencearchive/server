@@ -13,7 +13,18 @@ export const ALLOWED_ROOTS = new Set([
   "ingesters",
   "ingestions",
   "ready",
+  "auth",
 ]);
+
+/**
+ * `auth` is a single non-secret endpoint, not a subtree: only `/auth/config`
+ * (provider + ORCID client id + admins; never the secret) is proxiable — never
+ * the OAuth flow routes (login/callback/token/refresh/me). Mirrors the exact
+ * pin in the cloud read-proxy (`read_proxy.rs`).
+ */
+const EXACT_ONLY: Record<string, string> = {
+  auth: "/api/v1/auth/config",
+};
 
 /**
  * Resolve `path` to an upstream URL under `base`, or return null if it isn't an
@@ -27,6 +38,12 @@ export function resolveAllowedTarget(path: string[], base: string): URL | null {
   if (root === undefined || !ALLOWED_ROOTS.has(root)) return null;
 
   const target = new URL(`/api/v1/${path.join("/")}`, base);
+
+  const exact = EXACT_ONLY[root];
+  if (exact !== undefined) {
+    return target.pathname === exact ? target : null;
+  }
+
   const allowedPrefix = `/api/v1/${root}`;
   if (
     target.pathname !== allowedPrefix &&

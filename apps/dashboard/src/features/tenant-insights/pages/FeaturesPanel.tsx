@@ -17,7 +17,7 @@ import styles from "./pages.module.css";
 
 export function FeaturesPanel({ archiveId }: { archiveId: string }) {
   // Self-host reads real feature tables; platform's are sample data (chip).
-  const isSample = useServices().isPlatform;
+  const isSample = useServices().tenantDataIsSample;
   const features = useTenantFeatureTables(archiveId);
   const tables = features.data ?? [];
   const totalRows = tables.reduce((sum, t) => sum + t.rows, 0);
