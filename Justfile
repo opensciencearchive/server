@@ -131,7 +131,8 @@ image-latest:
 
 # === Release ===
 
-# Cut a new release (kind: patch | minor | major). Bumps server/pyproject.toml, pushes to main, creates a GitHub release.
+# Cut a new release (kind: patch | minor | major). Bumps server/pyproject.toml + the
+# dashboard/widgets package.json in lockstep, pushes to main, creates a GitHub release.
 release kind:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -190,7 +191,15 @@ release kind:
     sed -i.bak -e "s/^version = \".*\"/version = \"${next}\"/" server/pyproject.toml
     rm -f server/pyproject.toml.bak
 
-    git add server/pyproject.toml
+    # Keep the JS packages in lockstep — their images share the release tag, so a
+    # bump here must move them too. Only the top-level `"version"` key (2-space
+    # indent) matches; nested dependency versions are untouched.
+    for pkg in apps/dashboard/package.json packages/osa-widgets/package.json; do
+        sed -i.bak -E "s/^(  \"version\": )\"[^\"]*\"/\1\"${next}\"/" "$pkg"
+        rm -f "${pkg}.bak"
+    done
+
+    git add server/pyproject.toml apps/dashboard/package.json packages/osa-widgets/package.json
     git commit -m "chore: bump version to ${next}"
     git push origin main
 
