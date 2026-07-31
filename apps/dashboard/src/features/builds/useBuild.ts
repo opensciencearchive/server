@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { usePlatformServices } from "@/api/services";
-import { isBuildTerminal } from "@/domain/build";
+import { isBuildKindTerminal, isBuildTerminal } from "@/domain/build";
 
 import { buildKeys } from "./keys";
 
@@ -20,11 +20,15 @@ export function useBuild(buildId: string) {
   });
 }
 
-/** @mock The builds list has no endpoint — Mocked<T> sample data. */
+/** The archive's build history, polling while any build is still in flight. */
 export function useBuildList(archiveId: string) {
   const { amacrin } = usePlatformServices();
   return useQuery({
     queryKey: buildKeys.list(archiveId),
     queryFn: () => amacrin.listBuilds(archiveId),
+    refetchInterval: (q) =>
+      q.state.data?.some((b) => !isBuildKindTerminal(b.statusKind))
+        ? POLL_MS
+        : false,
   });
 }

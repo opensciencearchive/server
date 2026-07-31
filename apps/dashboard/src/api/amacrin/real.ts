@@ -3,30 +3,23 @@ import { ApiError, SlugTakenError } from "@/api/http/errors";
 import type { Archive } from "@/domain/archive";
 import type { Build } from "@/domain/build";
 import type { Deployment } from "@/domain/deployment";
-import { type Mocked, mocked } from "@/domain/mocked";
 import type { Organisation } from "@/domain/organisation";
-import type {
-  BuildListItem,
-  DeploymentHistoryEntry,
-  OrgMember,
-} from "@/domain/tenant";
+import type { BuildListItem, OrgMember } from "@/domain/tenant";
 import type { Session } from "@/domain/user";
 
 import {
   decodeArchive,
   decodeArchiveList,
   decodeBuild,
+  decodeBuildList,
   decodeCreateArchiveResponse,
   decodeDeployment,
+  decodeDeploymentList,
+  decodeOrgMemberList,
   decodeOrganisation,
   decodeOrganisationList,
   decodeSession,
 } from "./wire/decode";
-import {
-  sampleBuildList,
-  sampleDeploymentHistory,
-  sampleOrgMembers,
-} from "./samples";
 import type {
   AmacrinService,
   ArchiveAuthInput,
@@ -78,6 +71,14 @@ export class RealAmacrinService implements AmacrinService {
   async getOrganisation(orgId: string): Promise<Organisation> {
     return decodeOrganisation(
       await this.client.get(`/api/v1/organisations/${orgId}`),
+    );
+  }
+
+  async listOrgMembers(orgId: string): Promise<OrgMember[]> {
+    return decodeOrgMemberList(
+      await this.client.get(
+        `/api/v1/organisations/${encodeURIComponent(orgId)}/members`,
+      ),
     );
   }
 
@@ -139,6 +140,14 @@ export class RealAmacrinService implements AmacrinService {
     );
   }
 
+  async listDeployments(archiveId: string): Promise<Deployment[]> {
+    return decodeDeploymentList(
+      await this.client.get(
+        `/api/v1/archives/${encodeURIComponent(archiveId)}/deployments`,
+      ),
+    );
+  }
+
   async destroyArchive(
     archiveId: string,
     opts?: { force?: boolean },
@@ -155,19 +164,12 @@ export class RealAmacrinService implements AmacrinService {
     return decodeBuild(await this.client.get(`/api/v1/builds/${buildId}`));
   }
 
-  // ── no backing API yet: sample data behind the Mocked brand ─────────
-
-  listBuilds(archiveId: string): Promise<Mocked<BuildListItem[]>> {
-    return Promise.resolve(mocked(sampleBuildList(archiveId)));
+  async listBuilds(archiveId: string): Promise<BuildListItem[]> {
+    return decodeBuildList(
+      await this.client.get(
+        `/api/v1/archives/${encodeURIComponent(archiveId)}/builds`,
+      ),
+    );
   }
 
-  getDeploymentHistory(
-    archiveId: string,
-  ): Promise<Mocked<DeploymentHistoryEntry[]>> {
-    return Promise.resolve(mocked(sampleDeploymentHistory(archiveId)));
-  }
-
-  listOrgMembers(orgId: string): Promise<Mocked<OrgMember[]>> {
-    return Promise.resolve(mocked(sampleOrgMembers(orgId)));
-  }
 }

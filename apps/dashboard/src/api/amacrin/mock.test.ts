@@ -85,4 +85,44 @@ describe("MockAmacrinService", () => {
       build.components.every((c) => c.status.kind === "succeeded"),
     ).toBe(true);
   });
+
+  it("listBuilds serves the archive's own builds, newest first", async () => {
+    const svc = new MockAmacrinService();
+
+    const builds = await svc.listBuilds("arch_a1p1n3c11m");
+
+    expect(builds.length).toBeGreaterThan(1);
+    expect(builds.map((b) => b.id)).toContain("build_8f3a91c2e5");
+    const createdAt = builds.map((b) => b.createdAt.getTime());
+    expect(createdAt).toEqual([...createdAt].sort((a, b) => b - a));
+  });
+
+  it("listBuilds is empty for an archive that has never built", async () => {
+    const svc = new MockAmacrinService();
+    expect(await svc.listBuilds("arch_st0pp3dxx1")).toEqual([]);
+  });
+
+  it("listDeployments grows a history: a redeploy lands on top", async () => {
+    const svc = new MockAmacrinService();
+    const archiveId = "arch_a1p1n3c11m";
+
+    const before = await svc.listDeployments(archiveId);
+    expect(before).toHaveLength(1);
+
+    await svc.deploy(archiveId);
+    const after = await svc.listDeployments(archiveId);
+
+    expect(after).toHaveLength(2);
+    expect(after[0]!.startedAt.getTime()).toBeGreaterThanOrEqual(
+      after[1]!.startedAt.getTime(),
+    );
+    expect(after[1]!.id).toBe(before[0]!.id);
+  });
+
+  it("listOrgMembers serves the organisation's roster", async () => {
+    const svc = new MockAmacrinService();
+    const roster = await svc.listOrgMembers("org_7f3k2mq9x1");
+    expect(roster.length).toBeGreaterThan(0);
+    expect(roster.every((m) => m.email.includes("@"))).toBe(true);
+  });
 });

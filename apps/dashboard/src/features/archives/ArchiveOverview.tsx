@@ -7,6 +7,7 @@ import type { Archive } from "@/domain/archive";
 import type { NodeStatus } from "@/domain/node";
 import { useOrganisation } from "../organisations/useOrganisations";
 import { useDeploymentStatus } from "../deployments/useDeploymentStatus";
+import { DeploymentHistory } from "../deployments/DeploymentHistory";
 import { DeploymentPanel } from "../deployments/DeploymentPanel";
 import { NextSteps } from "../tenant-insights/NextSteps";
 import { WhatsInHere } from "../tenant-insights/WhatsInHere";
@@ -36,6 +37,7 @@ export function ArchiveOverview({ archiveId }: { archiveId: string }) {
 
       <NextSteps archiveId={archiveId} />
       <WhatsInHere archiveId={archiveId} />
+      {isPlatform && <DeploymentHistory archiveId={archiveId} />}
     </div>
   );
 }

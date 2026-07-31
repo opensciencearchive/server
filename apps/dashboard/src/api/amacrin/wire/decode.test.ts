@@ -12,16 +12,28 @@ import deploymentFailed from "@/mocks/fixtures/deployment.failed.json";
 import deploymentInProgress from "@/mocks/fixtures/deployment.in-progress.json";
 import deploymentSucceeded from "@/mocks/fixtures/deployment.succeeded.json";
 import me from "@/mocks/fixtures/me.json";
+import members from "@/mocks/fixtures/members.json";
 import organisations from "@/mocks/fixtures/organisations.json";
 
 import {
   DecodeError,
   decodeArchive,
   decodeBuild,
+  decodeBuildList,
   decodeDeployment,
+  decodeDeploymentList,
+  decodeOrgMemberList,
   decodeOrganisationList,
   decodeSession,
 } from "./decode";
+
+/** The list endpoint serves the parent only — no components, no archive_id. */
+function toSummary(build: object): Record<string, unknown> {
+  const copy = structuredClone(build) as Record<string, unknown>;
+  delete copy["components"];
+  delete copy["archive_id"];
+  return copy;
+}
 
 describe("decodeSession (GET /auth/me)", () => {
   it("decodes user and organisations with lowercase roles", () => {
@@ -142,6 +154,59 @@ describe("decodeDeployment", () => {
       expect(d.status.completedAt).toBeNull();
     }
   });
+
+  it("carries the provisioned OSA version, and null when unrecorded", () => {
+    expect(decodeDeployment(deploymentSucceeded).osaVersion).toBe("v0.0.9");
+    expect(decodeDeployment(deploymentInProgress).osaVersion).toBeNull();
+  });
+});
+
+describe("decodeDeploymentList (GET /archives/{id}/deployments)", () => {
+  it("decodes the history in wire order", () => {
+    const rows = decodeDeploymentList([
+      deploymentSucceeded,
+      deploymentFailed,
+      deploymentInProgress,
+    ]);
+
+    expect(rows.map((d) => d.id)).toEqual([
+      "deploy_9a1b2c3d4e",
+      "deploy_d5e6f7a8b9",
+      "deploy_5f6a7b8c9d",
+    ]);
+    expect(rows.map((d) => d.status.kind)).toEqual([
+      "succeeded",
+      "failed",
+      "in_progress",
+    ]);
+    expect(rows[0]!.osaVersion).toBe("v0.0.9");
+  });
+
+  it("rejects a row with an unknown status", () => {
+    const bad = { ...structuredClone(deploymentSucceeded), status: "melted" };
+    expect(() => decodeDeploymentList([bad])).toThrow(DecodeError);
+  });
+});
+
+describe("decodeOrgMemberList (GET /organisations/{id}/members)", () => {
+  it("decodes the roster with typed roles", () => {
+    const rows = decodeOrgMemberList(members);
+
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toEqual({
+      userId: "user_01hzy3k8m2",
+      email: "r.bergstrom@example.ac.uk",
+      role: "admin",
+      joinedAt: new Date("2026-05-02T09:20:00.102938Z"),
+    });
+    expect(rows.map((m) => m.role)).toEqual(["admin", "owner", "member"]);
+  });
+
+  it("rejects an unknown role rather than rendering it raw", () => {
+    const bad = structuredClone(members);
+    bad[0]!.role = "overlord";
+    expect(() => decodeOrgMemberList(bad)).toThrow(DecodeError);
+  });
 });
 
 describe("decodeBuild", () => {
@@ -218,5 +283,45 @@ describe("decodeBuild", () => {
     const bad = structuredClone(buildPublished);
     delete (bad.components[0] as Record<string, unknown>)["image_ref"];
     expect(() => decodeBuild(bad)).toThrow(DecodeError);
+  });
+});
+
+describe("decodeBuildList (GET /archives/{id}/builds)", () => {
+  it("decodes parent-only rows in wire order", () => {
+    const rows = decodeBuildList([
+      toSummary(buildPublished),
+      toSummary(buildFailed),
+      toSummary(buildCancelled),
+    ]);
+
+    expect(rows.map((r) => r.id)).toEqual([
+      "build_8f3a91c2e5",
+      "build_f4a1e6d902",
+      "build_c9a8b7c6d5",
+    ]);
+    expect(rows[0]).toEqual({
+      id: "build_8f3a91c2e5",
+      conventionSlug: "geo-rnaseq-v2",
+      conventionRef: "4c1e77b",
+      statusKind: "published",
+      createdAt: new Date("2026-07-25T14:01:30+00:00"),
+    });
+    expect(rows.map((r) => r.statusKind)).toEqual([
+      "published",
+      "build_failed",
+      "cancelled",
+    ]);
+  });
+
+  it("keeps conventionRef null when the wire omits it", () => {
+    const bare = toSummary(buildPublished);
+    delete bare["convention_ref"];
+    expect(decodeBuildList([bare])[0]!.conventionRef).toBeNull();
+  });
+
+  it("rejects a row with an unknown status", () => {
+    const bad = toSummary(buildPublished);
+    bad["status"] = "teleported";
+    expect(() => decodeBuildList([bad])).toThrow(DecodeError);
   });
 });

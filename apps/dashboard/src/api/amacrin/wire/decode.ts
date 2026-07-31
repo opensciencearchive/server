@@ -23,16 +23,21 @@ import type {
 } from "@/domain/build";
 import type { Deployment, DeploymentStatus } from "@/domain/deployment";
 import { type Organisation, isRole } from "@/domain/organisation";
+import type { BuildListItem, OrgMember } from "@/domain/tenant";
 import type { Session } from "@/domain/user";
 
 import {
   wireArchive,
   wireArchiveList,
   wireBuild,
+  wireBuildList,
+  wireBuildSummary,
   wireComponentBuild,
   wireCreateArchiveResponse,
   wireDeployment,
+  wireDeploymentList,
   wireMeResponse,
+  wireOrgMemberList,
   wireOrganisation,
   wireOrganisationList,
 } from "./schemas";
@@ -94,6 +99,20 @@ export function decodeOrganisationList(raw: unknown): Organisation[] {
   return parse(wireOrganisationList, raw, "organisation list").organisations.map(
     toOrganisation,
   );
+}
+
+export function decodeOrgMemberList(raw: unknown): OrgMember[] {
+  return parse(wireOrgMemberList, raw, "member list").map((wire) => {
+    if (!isRole(wire.role)) {
+      throw new DecodeError(`unknown role "${wire.role}"`);
+    }
+    return {
+      userId: wire.user_id,
+      email: wire.email,
+      role: wire.role,
+      joinedAt: parseDate(wire.joined_at, "member"),
+    };
+  });
 }
 
 export function decodeSession(raw: unknown): Session {
@@ -209,8 +228,16 @@ export function decodeDeployment(raw: unknown): Deployment {
     archiveId: wire.archive_id,
     provider: "aws_eks",
     status,
+    osaVersion: wire.osa_version ?? null,
     startedAt: parseDate(wire.started_at, "deployment"),
   };
+}
+
+/** The archive's deployment history, newest first as the server orders it. */
+export function decodeDeploymentList(raw: unknown): Deployment[] {
+  return parse(wireDeploymentList, raw, "deployment list").map((d) =>
+    decodeDeployment(d),
+  );
 }
 
 export function decodeCreateArchiveResponse(raw: unknown): {
@@ -266,7 +293,7 @@ function toComponentKind(kind: string, name: string): ComponentKind {
   return kind;
 }
 
-function toBuildStatus(wire: z.output<typeof wireBuild>): BuildStatus {
+function toBuildStatus(wire: z.output<typeof wireBuildSummary>): BuildStatus {
   switch (wire.status) {
     case "queued":
     case "building":
@@ -322,4 +349,18 @@ export function decodeBuild(raw: unknown): Build {
     createdAt: parseDate(wire.created_at, "build"),
     updatedAt: parseDate(wire.updated_at, "build"),
   };
+}
+
+/**
+ * The build history. Rows are parent-only — the list carries the status kind,
+ * not the full variant; per-component detail rides `decodeBuild`.
+ */
+export function decodeBuildList(raw: unknown): BuildListItem[] {
+  return parse(wireBuildList, raw, "build list").map((wire) => ({
+    id: wire.id,
+    conventionSlug: wire.convention_slug,
+    conventionRef: wire.convention_ref ?? null,
+    statusKind: toBuildStatus(wire).kind,
+    createdAt: parseDate(wire.created_at, "build"),
+  }));
 }

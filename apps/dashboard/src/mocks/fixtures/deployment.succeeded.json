@@ -4,6 +4,7 @@
   "provider": "aws_eks",
   "status": "succeeded",
   "url": "https://alpine-climate.amacr.in",
+  "osa_version": "v0.0.9",
   "started_at": "2026-07-25T14:02:18+00:00",
   "completed_at": "2026-07-25T14:06:00+00:00"
 }

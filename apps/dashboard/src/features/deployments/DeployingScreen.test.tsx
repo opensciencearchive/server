@@ -29,6 +29,7 @@ function deployment(status: DeploymentStatus): Deployment {
     archiveId: "arch_1",
     provider: "aws_eks",
     status,
+    osaVersion: null,
     startedAt: new Date(0),
   };
 }

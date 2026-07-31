@@ -31,8 +31,12 @@ const TERMINAL_BUILD_KINDS: ReadonlySet<BuildStatusKind> = new Set([
   "cancelled",
 ]);
 
+export function isBuildKindTerminal(kind: BuildStatusKind): boolean {
+  return TERMINAL_BUILD_KINDS.has(kind);
+}
+
 export function isBuildTerminal(status: BuildStatus): boolean {
-  return TERMINAL_BUILD_KINDS.has(status.kind);
+  return isBuildKindTerminal(status.kind);
 }
 
 export type ComponentKind = "hook" | "ingester";

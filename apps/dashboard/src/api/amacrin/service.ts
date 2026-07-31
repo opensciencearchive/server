@@ -1,22 +1,15 @@
 /**
  * AmacrinService — the cloud control plane (api.amacrin.com).
  *
- * Real methods map 1:1 to routes on the Rust server. Methods returning
- * `Mocked<T>` have NO backing endpoint yet (see the @mock tags and issue
- * #77's exclusions) — both implementations serve sample data for them, and
- * deleting the `Mocked<…>` wrapper once an endpoint ships turns every call
- * site into a compile error.
+ * Every method maps 1:1 to a route on the Rust server; there is no sample
+ * data behind this interface. `MockAmacrinService` is an in-memory double of
+ * the same surface for demos and tests.
  */
 import type { Archive } from "@/domain/archive";
 import type { Build } from "@/domain/build";
 import type { Deployment } from "@/domain/deployment";
-import type { Mocked } from "@/domain/mocked";
 import type { Organisation } from "@/domain/organisation";
-import type {
-  BuildListItem,
-  DeploymentHistoryEntry,
-  OrgMember,
-} from "@/domain/tenant";
+import type { BuildListItem, OrgMember } from "@/domain/tenant";
 import type { Session } from "@/domain/user";
 
 /** ORCID sign-in credentials + admins, as supplied on create or rotation. */
@@ -44,6 +37,8 @@ export interface AmacrinService {
   createOrganisation(name: string): Promise<Organisation>;
   /** GET /organisations/{id} */
   getOrganisation(orgId: string): Promise<Organisation>;
+  /** GET /organisations/{id}/members — the roster, oldest first. */
+  listOrgMembers(orgId: string): Promise<OrgMember[]>;
 
   // ── archives ────────────────────────────────────── real endpoints ──
   /** GET /organisations/{id}/archives */
@@ -67,6 +62,8 @@ export interface AmacrinService {
   deploy(archiveId: string, auth?: ArchiveAuthInput): Promise<Deployment>;
   /** GET /archives/{id}/status — latest deployment. */
   getDeploymentStatus(archiveId: string): Promise<Deployment>;
+  /** GET /archives/{id}/deployments — deployment history, newest first. */
+  listDeployments(archiveId: string): Promise<Deployment[]>;
   /** POST /archives/{id}/destroy — the only removal path (Owner only). */
   destroyArchive(
     archiveId: string,
@@ -76,14 +73,6 @@ export interface AmacrinService {
   // ── builds ──────────────────────────────────────── real endpoints ──
   /** GET /builds/{id} — parent status + per-component breakdown. */
   getBuild(buildId: string): Promise<Build>;
-
-  // ── no backing API yet ──────────────────────────── sample data ─────
-  /** @mock No builds-list endpoint exists (top exclusion in #77). */
-  listBuilds(archiveId: string): Promise<Mocked<BuildListItem[]>>;
-  /** @mock The API serves only the latest deployment, never history. */
-  getDeploymentHistory(
-    archiveId: string,
-  ): Promise<Mocked<DeploymentHistoryEntry[]>>;
-  /** @mock Membership management is API-deferred; no members endpoint. */
-  listOrgMembers(orgId: string): Promise<Mocked<OrgMember[]>>;
+  /** GET /archives/{id}/builds — build history, newest first, parent only. */
+  listBuilds(archiveId: string): Promise<BuildListItem[]>;
 }
