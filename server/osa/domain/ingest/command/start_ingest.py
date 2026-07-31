@@ -1,7 +1,6 @@
 """StartIngest command — initiates a bulk ingestion run for a convention."""
 
-from osa.domain.auth.model.role import Role
-from osa.domain.shared.authorization.gate import at_least
+from osa.domain.shared.authorization.gate import requires_scope
 from osa.domain.shared.command import Command, CommandHandler, Result
 
 
@@ -25,7 +24,11 @@ class IngestRunCreated(Result):
 class StartIngestHandler(CommandHandler[StartIngest, IngestRunCreated]):
     """Thin command handler — delegates to IngestService."""
 
-    __auth__ = at_least(Role.ADMIN)
+    # Triggering an ingestion run is authorized by the ``ingestions:write``
+    # M2M scope OR an ADMIN role (server#190). The scope lets the hosted
+    # control plane broker CLI/dashboard triggers with a per-node, single-scope
+    # token; ADMIN keeps human/self-host access unchanged.
+    __auth__ = requires_scope("ingestions:write")
 
     # TODO: do we ned these imports to be lazy?
     from osa.domain.auth.model.principal import Principal
