@@ -2,25 +2,19 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { decodeAgentSurface } from "@/api/osa/wire/decode";
+import { useServices } from "@/api/services";
 import type { AgentSurface } from "@/domain/agent";
 
 /**
- * The archive's agent-grounding surface (SKILL.md + root discovery), fetched via
- * the BFF `/api/agent` route. Real in self-host; in a platform build there is no
- * local archive to reach, so the query errors and the page shows an empty state.
+ * The archive's agent-grounding surface (SKILL.md + root discovery), read
+ * through the same read proxy as every other archive call — self-host via
+ * `/api/osa/agent/*`, platform via the control-plane read-proxy. The dashboard
+ * never addresses an archive's origin directly.
  */
-export function useAgentSurface() {
+export function useAgentSurface(archiveId: string) {
+  const { osa } = useServices();
   return useQuery<AgentSurface>({
-    queryKey: ["agent-surface"],
-    queryFn: async () => {
-      const res = await fetch("/api/agent", {
-        headers: { accept: "application/json" },
-      });
-      if (!res.ok) {
-        throw new Error(`Agent surface request failed (${res.status})`);
-      }
-      return decodeAgentSurface(await res.json());
-    },
+    queryKey: ["archives", archiveId, "agent-surface"],
+    queryFn: () => osa.getAgentSurface(archiveId),
   });
 }

@@ -65,7 +65,7 @@ function mcpUrlFrom(skillUrl: string): string {
   }
 }
 
-/** GET /api/agent (BFF) → the archive's agent-grounding surface. */
+/** `agent/skill` + `agent/discovery` → the archive's agent-grounding surface. */
 export function decodeAgentSurface(json: unknown): AgentSurface {
   const { skill, discovery } = wireAgentSurface.parse(json);
   return {

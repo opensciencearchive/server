@@ -8,6 +8,7 @@
  * Both return the same plain domain types; a panel shows the sample-data
  * affordance based on `useServices().isPlatform`, not on the data.
  */
+import type { AgentSurface } from "@/domain/agent";
 import type {
   FeatureTable,
   IngestionRun,
@@ -41,4 +42,10 @@ export interface OSAService {
   getObservability(archiveId: string): Promise<ObservabilitySnapshot>;
   /** GET /auth/config (BFF) — provider, ORCID client id, admin list. */
   getAuthConfig(archiveId: string): Promise<TenantAuthView>;
+  /**
+   * The archive's agent-grounding surface: `SKILL.md` + root discovery,
+   * proxied through the `agent/skill` and `agent/discovery` aliases (both are
+   * public and unversioned, so they live at the archive root).
+   */
+  getAgentSurface(archiveId: string): Promise<AgentSurface>;
 }

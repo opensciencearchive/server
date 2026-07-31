@@ -4,6 +4,7 @@
  * `<SampleDataChip/>` beside it. Self-host uses `RealOSAService` instead, so this
  * sample data never appears when connected to a real archive.
  */
+import type { AgentSurface } from "@/domain/agent";
 import type {
   FeatureTable,
   IngestionRun,
@@ -17,6 +18,24 @@ import type {
 } from "@/domain/tenant";
 
 import type { OSAService } from "./service";
+
+/** Shaped like a real generated SKILL.md, trimmed to what the sheet renders. */
+const SAMPLE_SKILL = `# Alpine climate network
+
+An open archive of mountain weather station observations.
+
+## Datasets
+
+| Schema | Records |
+| --- | --- |
+| station-timeseries | 128,400 |
+| radiosonde-profile | 3,180 |
+
+## Access
+
+- Bulk:   GET https://alpine-climate.amacr.in/api/v1/data/station-timeseries/records.csv.gz
+- One:    GET https://alpine-climate.amacr.in/api/v1/data/records/<id>
+`;
 
 const SAMPLE_SCHEMAS = [
   "station-timeseries@2.1.0",
@@ -178,6 +197,23 @@ export class MockOSAService implements OSAService {
       provider: "orcid",
       clientId: "APP-K91F2LQ8XZ40MNRT",
       adminOrcidIds: ["0000-0002-1825-0097", "0000-0001-5109-3700"],
+    });
+  }
+
+  getAgentSurface(archiveId: string): Promise<AgentSurface> {
+    void archiveId;
+    const origin = "https://alpine-climate.amacr.in";
+    return Promise.resolve({
+      skillMarkdown: SAMPLE_SKILL,
+      node: {
+        name: "Alpine climate network",
+        domain: "alpine-climate.amacr.in",
+        description: "Mountain weather station observations and soundings.",
+        osaVersion: "0.0.9",
+      },
+      mcpUrl: `${origin}/mcp`,
+      skillUrl: `${origin}/SKILL.md`,
+      dataUrl: `${origin}/api/v1/data`,
     });
   }
 }

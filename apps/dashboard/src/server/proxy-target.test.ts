@@ -33,6 +33,21 @@ describe("resolveAllowedTarget", () => {
     expect(resolveAllowedTarget(["stats/../users"], BASE)).toBeNull();
   });
 
+  it("maps the two agent docs to the archive root, not under /api/v1", () => {
+    // SKILL.md and root discovery are public and unversioned — same aliases the
+    // cloud read-proxy accepts, so both builds speak one vocabulary.
+    expect(resolveAllowedTarget(["agent", "skill"], BASE)?.pathname).toBe(
+      "/SKILL.md",
+    );
+    expect(resolveAllowedTarget(["agent", "discovery"], BASE)?.pathname).toBe(
+      "/",
+    );
+    // Two endpoints, not a subtree.
+    expect(resolveAllowedTarget(["agent"], BASE)).toBeNull();
+    expect(resolveAllowedTarget(["agent", "skill", "extra"], BASE)).toBeNull();
+    expect(resolveAllowedTarget(["agent", "anything"], BASE)).toBeNull();
+  });
+
   it("allows exactly auth/config, and nothing else under auth", () => {
     // The one non-secret auth read is proxiable...
     expect(resolveAllowedTarget(["auth", "config"], BASE)?.pathname).toBe(

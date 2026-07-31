@@ -27,7 +27,8 @@ export const wireHookCatalog = z.object({
   items: z.array(wireHookCatalogItem),
 });
 
-// GET /api/agent (BFF) — SKILL.md text + root discovery (skill.py:RootDiscovery).
+// The agent surface: SKILL.md text + root discovery (skill.py:RootDiscovery),
+// read through the proxy's `agent/skill` + `agent/discovery` aliases.
 export const wireRootDiscovery = z.object({
   node: z.object({
     name: z.string(),

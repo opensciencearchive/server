@@ -4,6 +4,11 @@ import { AgentPanel } from "@/features/agent/AgentPanel";
 
 export const metadata: Metadata = { title: "Agents" };
 
-export default function AgentsPage() {
-  return <AgentPanel />;
+export default async function AgentsPage({
+  params,
+}: {
+  params: Promise<{ archiveId: string }>;
+}) {
+  const { archiveId } = await params;
+  return <AgentPanel archiveId={archiveId} />;
 }
