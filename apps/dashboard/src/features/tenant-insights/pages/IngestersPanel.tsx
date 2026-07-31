@@ -1,60 +1,71 @@
 "use client";
 
-import Link from "next/link";
-
-import { Card, PageHeader, SampleDataChip, Skeleton } from "@/ui";
+import { Card, EmptyState, PageHeader, SampleDataChip, Skeleton } from "@/ui";
+import { useServices } from "@/api/services";
+import { icons } from "@/features/shell/icons";
 
 import { useTenantIngesters } from "../hooks";
 import styles from "./pages.module.css";
 
+function shortDigest(digest: string): string {
+  const bare = digest.replace(/^sha256:/, "");
+  return bare.length > 12 ? bare.slice(0, 12) : bare;
+}
+
 export function IngestersPanel({ archiveId }: { archiveId: string }) {
+  // Self-host reads real ingesters; platform's are sample data (chip + note).
+  const isSample = useServices().isPlatform;
   const ingesters = useTenantIngesters(archiveId);
-  const base = `/archives/${archiveId}`;
+  const list = ingesters.data ?? [];
 
   return (
     <div className={styles.page}>
       <PageHeader
+        icon={icons.ingesters}
         title="Ingesters"
         description="Ingesters import external datasets and normalise them into the archive's convention."
-        actions={<SampleDataChip />}
+        actions={isSample ? <SampleDataChip /> : undefined}
       />
 
       {ingesters.isPending ? (
         <Skeleton height="10rem" width="100%" />
-      ) : ingesters.data ? (
+      ) : list.length > 0 ? (
         <div className={styles.grid}>
-          {ingesters.data.data.map((ingester) => (
+          {list.map((ingester) => (
             <Card key={ingester.name} className={styles.gridCard}>
               <span className={styles.cardName}>{ingester.name}</span>
               <p className={styles.cardDesc}>{ingester.description}</p>
               <div className={styles.chips}>
-                {ingester.acceptedFormats.map((format) => (
-                  <span key={format} className={styles.chip}>
-                    {format}
-                  </span>
-                ))}
+                <span className={styles.chip}>{ingester.schema}</span>
+                {ingester.schedule && (
+                  <span className={styles.chip}>cron {ingester.schedule}</span>
+                )}
               </div>
               <span className={styles.cardMeta}>
-                live{" "}
-                <Link
-                  className={styles.buildLink}
-                  href={`${base}/builds/${ingester.liveVersion}`}
-                >
-                  {ingester.liveVersion}
-                </Link>
+                <span className="mono">
+                  {ingester.image}@{shortDigest(ingester.digest)}
+                </span>
               </span>
             </Card>
           ))}
         </div>
-      ) : null}
+      ) : (
+        <EmptyState
+          icon={icons.ingesters}
+          title="No ingesters configured"
+          description="Ingesters appear here when a convention declares a source to import from."
+        />
+      )}
 
-      <div className={styles.note}>
-        <span className={styles.noteLabel}>Note</span>
-        <p>
-          This ingester list is sample data. Live ingesters are read from the
-          archive&apos;s OSA instance when the tenant API connection ships.
-        </p>
-      </div>
+      {isSample && (
+        <div className={styles.note}>
+          <span className={styles.noteLabel}>Note</span>
+          <p>
+            This ingester list is sample data. Self-hosted archives show their
+            real configured ingesters here.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

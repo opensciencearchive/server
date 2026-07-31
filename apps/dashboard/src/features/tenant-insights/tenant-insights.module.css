@@ -164,6 +164,24 @@
   overflow: hidden;
 }
 
+/* Section-header glyph (Overview: "What's in here", "Next steps"). */
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.sectionIcon {
+  display: inline-flex;
+  align-self: center;
+  color: var(--color-text-subtle);
+}
+
+.sectionIcon svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
 .stepCard {
   display: flex;
   flex-direction: column;
@@ -172,6 +190,22 @@
   border-right: 1px solid var(--color-border-subtle);
   color: inherit;
   transition: background var(--transition-fast);
+}
+
+/* Per-step glyph atop each Next-steps card. */
+.stepIcon {
+  display: inline-flex;
+  color: var(--color-text-subtle);
+  margin-bottom: var(--space-1);
+}
+
+.stepIcon svg {
+  width: 1.3rem;
+  height: 1.3rem;
+}
+
+.stepCard:hover .stepIcon {
+  color: var(--color-accent);
 }
 
 .stepCard:last-child {

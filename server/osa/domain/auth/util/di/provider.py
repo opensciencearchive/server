@@ -33,6 +33,7 @@ from osa.domain.auth.port.repository import (
     UserRepository,
 )
 from osa.domain.auth.port.role_repository import RoleAssignmentRepository
+from osa.domain.auth.query.get_auth_config import GetAuthConfigHandler
 from osa.domain.auth.query.get_user_roles import GetUserRolesHandler
 from osa.domain.auth.service.auth import AuthService
 from osa.domain.auth.service.authorization import AuthorizationService
@@ -63,6 +64,7 @@ class AuthProvider(Provider):
 
     # Query Handlers
     get_user_roles_handler = provide(GetUserRolesHandler, scope=Scope.UOW)
+    get_auth_config_handler = provide(GetAuthConfigHandler, scope=Scope.UOW)
 
     # Services
     authorization_service = provide(AuthorizationService, scope=Scope.UOW)

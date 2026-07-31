@@ -14,6 +14,11 @@ from osa.domain.ingest.query.get_ingestion import (
     GetIngestionHandler,
     IngestRunDetail,
 )
+from osa.domain.ingest.query.list_ingestions import (
+    IngestRunList,
+    ListIngestions,
+    ListIngestionsHandler,
+)
 
 router = APIRouter(prefix="/ingestions", tags=["Ingestions"], route_class=DishkaRoute)
 
@@ -24,6 +29,14 @@ async def start_ingest(
     handler: FromDishka[StartIngestHandler],
 ) -> IngestRunCreated:
     return await handler.run(body)
+
+
+@router.get("", response_model=IngestRunList)
+async def list_ingestions(
+    handler: FromDishka[ListIngestionsHandler],
+) -> IngestRunList:
+    """List recent ingest runs, including pending/running ones. ADMIN only."""
+    return await handler.run(ListIngestions())
 
 
 @router.get("/{ingest_run_id}", response_model=IngestRunDetail)

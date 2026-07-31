@@ -28,6 +28,11 @@ class IngestRunRepository(Port, Protocol):
         ...
 
     @abstractmethod
+    async def list(self, *, limit: int = 50) -> list[IngestRun]:
+        """List ingest runs, most recently started first."""
+        ...
+
+    @abstractmethod
     async def get_running_for_convention(self, convention_id: str) -> IngestRun | None:
         """Get a running ingest run for a convention, if any."""
         ...

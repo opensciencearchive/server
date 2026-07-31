@@ -1,17 +1,16 @@
 /**
- * OSAService — data living INSIDE a tenant OSA instance (records,
- * validation, search, hooks, usage).
+ * OSAService — data living INSIDE a tenant OSA instance (records, features,
+ * hooks, ingesters, observability, sign-in).
  *
- * The open-source OSA server exposes endpoints for much of this
- * (`/api/v1/stats`, schema manifests, `/hooks`, validation runs), but the
- * dashboard has NO authenticated path to tenant instances today — so every
- * method returns `Mocked<T>` and the only implementation is
- * `MockOSAService`. When a dashboard→tenant auth path ships, add
- * `RealOSAService`, delete the `Mocked<…>` wrappers method by method, and
- * fix the resulting compile errors — that is the whole migration.
+ * Two implementations: `RealOSAService` (self-host — reads the archive's real
+ * endpoints through the BFF proxy) and `MockOSAService` (platform — sample data,
+ * surfaced with a `<SampleDataChip/>` until the control-plane read path ships).
+ * Both return the same plain domain types; a panel shows the sample-data
+ * affordance based on `useServices().isPlatform`, not on the data.
  */
-import type { Mocked } from "@/domain/mocked";
 import type {
+  FeatureTable,
+  IngestionRun,
   ObservabilitySnapshot,
   RecordStats,
   RecordTypeCount,
@@ -19,29 +18,27 @@ import type {
   TenantHook,
   TenantIngester,
   TenantRecord,
-  UsageStats,
-  ValidationSummary,
 } from "@/domain/tenant";
 
 export interface OSAService {
-  /** @mock OSA has GET /stats + schema manifests; no tenant auth path yet. */
-  getRecordStats(archiveId: string): Promise<Mocked<RecordStats>>;
-  /** @mock Derivable from OSA schema manifests. */
-  getRecordTypeBreakdown(
-    archiveId: string,
-  ): Promise<Mocked<RecordTypeCount[]>>;
-  /** @mock OSA validation runs are per-run; no check×pass/fail aggregate. */
-  getValidationSummary(archiveId: string): Promise<Mocked<ValidationSummary>>;
-  /** @mock No analytics endpoints on OSA (only Prometheus /metrics). */
-  getUsageStats(archiveId: string): Promise<Mocked<UsageStats>>;
-  /** @mock OSA has GET /data/{schema}/records; no tenant auth path yet. */
-  listRecords(archiveId: string): Promise<Mocked<TenantRecord[]>>;
-  /** REAL in self-host via GET /hooks (through the BFF proxy). */
+  /** GET /stats — record counts + the materialized storage/feature snapshot. */
+  getRecordStats(archiveId: string): Promise<RecordStats>;
+  /** GET /data catalog + per-schema manifests — records by schema. */
+  getRecordTypeBreakdown(archiveId: string): Promise<RecordTypeCount[]>;
+  /** GET /data catalog — the published schema ids (records browser selector). */
+  listSchemas(archiveId: string): Promise<string[]>;
+  /** GET /data/{schema}/records — published records for one schema. */
+  listRecords(archiveId: string, schema: string): Promise<TenantRecord[]>;
+  /** GET /data + manifests — the registered derived-feature tables. */
+  listFeatureTables(archiveId: string): Promise<FeatureTable[]>;
+  /** GET /hooks — the hook catalog with live versions. */
   listHooks(archiveId: string): Promise<TenantHook[]>;
-  /** @mock OSA models ingesters as components; no tenant auth path yet. */
-  listIngesters(archiveId: string): Promise<Mocked<TenantIngester[]>>;
-  /** @mock OSA /ready + /metrics exist; no tenant auth path yet. */
-  getObservability(archiveId: string): Promise<Mocked<ObservabilitySnapshot>>;
-  /** @mock The cloud API exposes only the admins list on the archive. */
-  getAuthConfig(archiveId: string): Promise<Mocked<TenantAuthView>>;
+  /** GET /ingesters — the ingester catalog (one per convention with a source). */
+  listIngesters(archiveId: string): Promise<TenantIngester[]>;
+  /** GET /ingestions — recent ingest runs, including in-progress. ADMIN only. */
+  listIngestionRuns(archiveId: string): Promise<IngestionRun[]>;
+  /** GET /ready — component health snapshot. */
+  getObservability(archiveId: string): Promise<ObservabilitySnapshot>;
+  /** GET /auth/config (BFF) — provider, ORCID client id, admin list. */
+  getAuthConfig(archiveId: string): Promise<TenantAuthView>;
 }

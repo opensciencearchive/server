@@ -117,3 +117,51 @@
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
 }
+
+/* ── Self-host status panel (hero right) ── */
+
+.statusPanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  height: 100%;
+  justify-content: center;
+}
+
+.statusHeadline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-display, inherit);
+  font-size: var(--text-3xl);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.statusDot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: var(--radius-full);
+  flex: none;
+}
+
+.statusDotReady {
+  background: var(--color-success);
+  box-shadow: 0 0 0 4px var(--color-success-bg);
+}
+
+.statusDotDegraded {
+  background: var(--color-warning);
+  box-shadow: 0 0 0 4px var(--color-warning-bg);
+}
+
+.statusDotUnknown {
+  background: var(--color-text-subtle);
+}
+
+.statusNote {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  max-width: 20rem;
+}

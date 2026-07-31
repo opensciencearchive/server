@@ -63,7 +63,7 @@ export function CreateOrgDialog({
               invalid={invalid}
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Marsh Lab"
+              placeholder="e.g. Summit Lab"
               autoFocus
             />
           )}

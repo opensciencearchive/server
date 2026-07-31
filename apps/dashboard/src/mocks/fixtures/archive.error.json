@@ -1,9 +1,9 @@
 {
   "id": "arch_pr073om1cs",
   "organisation_id": "org_7f3k2mq9x1",
-  "name": "Proteomics baseline",
-  "slug": "proteomics-baseline",
-  "domain": "proteomics-baseline.amacr.in",
+  "name": "Soil moisture baseline",
+  "slug": "soil-moisture-baseline",
+  "domain": "soil-moisture-baseline.amacr.in",
   "config": {
     "auth": {
       "admins": {

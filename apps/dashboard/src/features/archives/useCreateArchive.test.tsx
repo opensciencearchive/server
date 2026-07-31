@@ -15,7 +15,7 @@ describe("useCreateArchive", () => {
     result.current.mutate({
       orgId: "org_7f3k2mq9x1",
       input: {
-        name: "Cortex cell atlas",
+        name: "Alpine climate network",
         slug: "fresh-atlas",
         orcid: { clientId: "APP-1", clientSecret: "sekret" },
         adminOrcidIds: [],
@@ -41,7 +41,7 @@ describe("useCreateArchive", () => {
       orgId: "org_7f3k2mq9x1",
       input: {
         name: "Duplicate",
-        slug: "cortex-atlas",
+        slug: "alpine-climate",
         orcid: { clientId: "APP-1", clientSecret: "sekret" },
         adminOrcidIds: [],
       },
@@ -50,7 +50,7 @@ describe("useCreateArchive", () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error).toMatchObject({
       name: "SlugTakenError",
-      slug: "cortex-atlas",
+      slug: "alpine-climate",
     });
   });
 });

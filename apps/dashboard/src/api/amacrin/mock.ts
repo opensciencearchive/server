@@ -285,9 +285,9 @@ export class MockAmacrinService implements AmacrinService {
   }
 
   private seed(): void {
-    const marshLab: Organisation = {
+    const summitLab: Organisation = {
       id: "org_7f3k2mq9x1",
-      name: "Marsh Lab",
+      name: "Summit Lab",
       role: "admin",
       createdAt: new Date("2026-05-02T09:20:00Z"),
     };
@@ -297,29 +297,29 @@ export class MockAmacrinService implements AmacrinService {
       role: "owner",
       createdAt: new Date("2026-05-02T09:14:00Z"),
     };
-    const cryoEm: Organisation = {
-      id: "org_cry0emc0ns",
-      name: "Cryo-EM Consortium",
+    const radarConsortium: Organisation = {
+      id: "org_rad4rc0nsm",
+      name: "Radar Array Consortium",
       role: "member",
       createdAt: new Date("2026-04-11T16:40:12Z"),
     };
-    for (const org of [marshLab, personal, cryoEm]) {
+    for (const org of [summitLab, personal, radarConsortium]) {
       this.organisations.set(org.id, org);
     }
 
     this.seedArchive({
-      id: "arch_c0r73xa71a",
-      organisationId: marshLab.id,
-      name: "Cortex cell atlas",
-      slug: "cortex-atlas",
+      id: "arch_a1p1n3c11m",
+      organisationId: summitLab.id,
+      name: "Alpine climate network",
+      slug: "alpine-climate",
       status: { kind: "running" },
       orcidAdmins: ["0000-0002-1825-0097", "0000-0001-5109-3700"],
     });
     this.seedArchive({
-      id: "arch_pr073om1cs",
-      organisationId: marshLab.id,
-      name: "Proteomics baseline",
-      slug: "proteomics-baseline",
+      id: "arch_so1lmo1s7r",
+      organisationId: summitLab.id,
+      name: "Soil moisture baseline",
+      slug: "soil-moisture-baseline",
       status: {
         kind: "error",
         message:
@@ -328,10 +328,10 @@ export class MockAmacrinService implements AmacrinService {
       orcidAdmins: ["0000-0002-1825-0097"],
     });
     this.seedArchive({
-      id: "arch_m1crosc0py",
+      id: "arch_sky1mag3ry",
       organisationId: personal.id,
-      name: "Microscopy scratchpad",
-      slug: "microscopy-scratch",
+      name: "Sky imagery scratchpad",
+      slug: "sky-imagery-scratch",
       status: { kind: "running" },
       orcidAdmins: [],
     });
@@ -344,10 +344,10 @@ export class MockAmacrinService implements AmacrinService {
       orcidAdmins: [],
     });
     this.seedArchive({
-      id: "arch_tce11cr1sp",
-      organisationId: cryoEm.id,
-      name: "T-cell CRISPR screens",
-      slug: "tcell-crispr",
+      id: "arch_d0pp13rswp",
+      organisationId: radarConsortium.id,
+      name: "Doppler radar sweeps",
+      slug: "doppler-sweeps",
       status: { kind: "deploying" },
       orcidAdmins: ["0000-0003-1415-9265"],
     });
@@ -413,7 +413,7 @@ export class MockAmacrinService implements AmacrinService {
       name,
       status: {
         kind: "succeeded",
-        imageRef: `941377154785.dkr.ecr.eu-west-1.amazonaws.com/amacrin/archives/arch_c0r73xa71a/${kind}/${name}:${buildId}`,
+        imageRef: `941377154785.dkr.ecr.eu-west-1.amazonaws.com/amacrin/archives/arch_a1p1n3c11m/${kind}/${name}:${buildId}`,
         digest: `sha256:${name.replace(/-/g, "").padEnd(64, "0").slice(0, 64)}`,
       },
       sourceRef: `${kind === "hook" ? "hooks" : "ingesters"}/${name.replace(/-/g, "_")}.py`,
@@ -421,7 +421,7 @@ export class MockAmacrinService implements AmacrinService {
 
     this.builds.set("build_8f3a91c2e5", {
       id: "build_8f3a91c2e5",
-      archiveId: "arch_c0r73xa71a",
+      archiveId: "arch_a1p1n3c11m",
       conventionSlug: "geo-rnaseq-v2",
       conventionRef: "4c1e77b",
       status: {
@@ -429,7 +429,7 @@ export class MockAmacrinService implements AmacrinService {
         publishedAt: new Date("2026-07-25T14:05:12Z"),
       },
       components: [
-        succeeded("ingester", "geo-ingester", "build_8f3a91c2e5"),
+        succeeded("ingester", "ghcn-ingester", "build_8f3a91c2e5"),
         succeeded("hook", "validate-metadata", "build_8f3a91c2e5"),
         succeeded("hook", "resolve-ontology", "build_8f3a91c2e5"),
       ],
@@ -439,19 +439,19 @@ export class MockAmacrinService implements AmacrinService {
 
     this.builds.set("build_f4a1e6d902", {
       id: "build_f4a1e6d902",
-      archiveId: "arch_c0r73xa71a",
+      archiveId: "arch_a1p1n3c11m",
       conventionSlug: "geo-rnaseq-v2",
       conventionRef: "b2a4f60",
       status: {
         kind: "build_failed",
         errorMessage:
-          "component 'normalise-counts' failed: ImportError: cannot import name 'SchemaRegistry' from 'osa_sdk.schema'",
+          "component 'normalise-units' failed: ImportError: cannot import name 'SchemaRegistry' from 'osa_sdk.schema'",
       },
       components: [
-        succeeded("ingester", "geo-ingester", "build_f4a1e6d902"),
+        succeeded("ingester", "ghcn-ingester", "build_f4a1e6d902"),
         {
           kind: "hook",
-          name: "normalise-counts",
+          name: "normalise-units",
           status: {
             kind: "failed",
             errorMessage:
@@ -472,7 +472,7 @@ export class MockAmacrinService implements AmacrinService {
 
     this.builds.set("build_c9a8b7c6d5", {
       id: "build_c9a8b7c6d5",
-      archiveId: "arch_c0r73xa71a",
+      archiveId: "arch_a1p1n3c11m",
       conventionSlug: "geo-rnaseq-v2",
       conventionRef: "77aa001",
       status: {
@@ -483,7 +483,7 @@ export class MockAmacrinService implements AmacrinService {
       components: [
         {
           kind: "ingester",
-          name: "geo-ingester",
+          name: "ghcn-ingester",
           status: { kind: "cancelled" },
           sourceRef: "ingesters/geo_ingester.py",
         },
@@ -500,14 +500,14 @@ export class MockAmacrinService implements AmacrinService {
 
     this.builds.set("build_b1u2i3l4d5", {
       id: "build_b1u2i3l4d5",
-      archiveId: "arch_c0r73xa71a",
+      archiveId: "arch_a1p1n3c11m",
       conventionSlug: "geo-rnaseq-v2",
       conventionRef: "9e8d7c6",
       status: { kind: "building" },
       components: [
         {
           kind: "ingester",
-          name: "geo-ingester",
+          name: "ghcn-ingester",
           status: { kind: "building" },
           sourceRef: "ingesters/geo_ingester.py",
         },

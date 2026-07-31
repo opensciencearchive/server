@@ -428,6 +428,8 @@ class WorkerPool:
         self._sampler = sampler
         self._sampler_interval = sampler_interval
         self._telemetry_sampler_task: asyncio.Task | None = None
+        self._statistics_interval = 300.0  # 5 minutes
+        self._statistics_task: asyncio.Task | None = None
         self._shutdown = False
         self._scheduler: AsyncScheduler | None = None
         self._exit_stack: AsyncExitStack | None = None
@@ -547,6 +549,11 @@ class WorkerPool:
             self._run_device_auth_cleanup(), name="device-auth-cleanup"
         )
 
+        # Start instance-statistics refresh task (materializes O(rows) aggregates)
+        self._statistics_task = asyncio.create_task(
+            self._run_statistics_refresh(), name="statistics-refresh"
+        )
+
         # Start telemetry gauge sampler (only when observability is wired in)
         if self._sampler is not None:
             self._telemetry_sampler_task = asyncio.create_task(
@@ -586,6 +593,13 @@ class WorkerPool:
             self._telemetry_sampler_task.cancel()
             try:
                 await self._telemetry_sampler_task
+            except asyncio.CancelledError:
+                pass
+
+        if self._statistics_task and not self._statistics_task.done():
+            self._statistics_task.cancel()
+            try:
+                await self._statistics_task
             except asyncio.CancelledError:
                 pass
 
@@ -705,3 +719,23 @@ class WorkerPool:
                 break
             except Exception as e:
                 logger.error(f"Device auth cleanup failed: {e}")
+
+    async def _run_statistics_refresh(self) -> None:
+        """Periodically refresh the materialized instance-statistics snapshot."""
+        from osa.domain.record.port.statistics_store import StatisticsStore
+
+        while not self._shutdown:
+            try:
+                await asyncio.sleep(self._statistics_interval)
+
+                if self._shutdown or self._container is None:
+                    break
+
+                async with self._container(scope=Scope.UOW, context={Identity: System()}) as scope:
+                    store = await scope.get(StatisticsStore)
+                    await store.refresh()
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Statistics refresh failed: {e}")

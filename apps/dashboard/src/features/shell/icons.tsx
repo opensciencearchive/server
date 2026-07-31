@@ -54,9 +54,20 @@ export const icons = {
       <path d="M1.5 7.5h2.5l1.5-4 2.5 8 1.5-4h4" />
     </Icon>
   ),
+  features: (
+    <Icon>
+      <rect x="2" y="2.5" width="11" height="10" rx="1" />
+      <path d="M2 5.5h11M6 5.5v7M2 9h11" />
+    </Icon>
+  ),
   ingesters: (
     <Icon>
       <path d="M7.5 2v7M4.5 6.5l3 3 3-3M2.5 12.5h10" />
+    </Icon>
+  ),
+  ingestions: (
+    <Icon>
+      <path d="M13 7.5a5.5 5.5 0 1 1-1.6-3.9M13 2v3h-3" />
     </Icon>
   ),
   builds: (

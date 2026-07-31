@@ -44,7 +44,7 @@ a compose file with a pinned `OSA_IMAGE_TAG`, not via ad-hoc `docker pull`.
    ~5 minutes. The full commit SHA is embedded in the image's
    `org.opencontainers.image.revision` label for traceability.
 
-6. Update downstream deployments (cultivarium pilot, etc.) to bump
+6. Update downstream deployments (hosted archives, pilot nodes) to bump
    `OSA_IMAGE_TAG` to the new version.
 
 ## Verifying a published image

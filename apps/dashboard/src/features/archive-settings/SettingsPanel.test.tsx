@@ -13,8 +13,8 @@ describe("SettingsPanel", () => {
     const services = makeTestServices();
     const destroySpy = vi.spyOn(services.amacrin, "destroyArchive");
 
-    // arch_m1crosc0py is in Personal (org_p3rs0na1aa), where the caller is Owner.
-    renderWithProviders(<SettingsPanel archiveId="arch_m1crosc0py" />, {
+    // arch_sky1mag3ry is in Personal (org_p3rs0na1aa), where the caller is Owner.
+    renderWithProviders(<SettingsPanel archiveId="arch_sky1mag3ry" />, {
       services,
     });
 
@@ -26,7 +26,7 @@ describe("SettingsPanel", () => {
 
     const dialog = await screen.findByRole("dialog");
     expect(
-      within(dialog).getByText(/Destroy Microscopy scratchpad\?/i),
+      within(dialog).getByText(/Destroy Sky imagery scratchpad\?/i),
     ).toBeInTheDocument();
 
     const confirmButton = within(dialog).getByRole("button", {
@@ -34,18 +34,18 @@ describe("SettingsPanel", () => {
     });
     expect(confirmButton).toBeDisabled();
 
-    const confirmInput = within(dialog).getByLabelText(/microscopy-scratch/i);
-    await user.type(confirmInput, "microscopy-wrong");
+    const confirmInput = within(dialog).getByLabelText(/sky-imagery-scratch/i);
+    await user.type(confirmInput, "sky-imagery-wrong");
     expect(confirmButton).toBeDisabled();
 
     await user.clear(confirmInput);
-    await user.type(confirmInput, "microscopy-scratch");
+    await user.type(confirmInput, "sky-imagery-scratch");
     expect(confirmButton).toBeEnabled();
 
     await user.click(confirmButton);
 
     await waitFor(() =>
-      expect(destroySpy).toHaveBeenCalledWith("arch_m1crosc0py"),
+      expect(destroySpy).toHaveBeenCalledWith("arch_sky1mag3ry"),
     );
     await waitFor(() =>
       expect(mockRouter.push).toHaveBeenCalledWith(
@@ -55,8 +55,8 @@ describe("SettingsPanel", () => {
   });
 
   it("disables destroy for a non-Owner with the owner-only reason", async () => {
-    // arch_c0r73xa71a is in Marsh Lab (org_7f3k2mq9x1), where the caller is Admin.
-    renderWithProviders(<SettingsPanel archiveId="arch_c0r73xa71a" />);
+    // arch_a1p1n3c11m is in Summit Lab (org_7f3k2mq9x1), where the caller is Admin.
+    renderWithProviders(<SettingsPanel archiveId="arch_a1p1n3c11m" />);
 
     const destroyButton = await screen.findByRole("button", {
       name: /destroy archive/i,
@@ -70,8 +70,8 @@ describe("SettingsPanel", () => {
   });
 
   it("disables redeploy and destroy while deploying, with reasons", async () => {
-    // arch_tce11cr1sp is deploying.
-    renderWithProviders(<SettingsPanel archiveId="arch_tce11cr1sp" />);
+    // arch_d0pp13rswp is deploying.
+    renderWithProviders(<SettingsPanel archiveId="arch_d0pp13rswp" />);
 
     await screen.findByRole("button", { name: /destroy archive/i });
 
@@ -99,8 +99,8 @@ describe("SettingsPanel", () => {
     const services = makeTestServices();
     const deploySpy = vi.spyOn(services.amacrin, "deploy");
 
-    // arch_m1crosc0py is running (rotation enabled) and owned by the caller.
-    renderWithProviders(<SettingsPanel archiveId="arch_m1crosc0py" />, {
+    // arch_sky1mag3ry is running (rotation enabled) and owned by the caller.
+    renderWithProviders(<SettingsPanel archiveId="arch_sky1mag3ry" />, {
       services,
     });
 
@@ -123,7 +123,7 @@ describe("SettingsPanel", () => {
     );
 
     await waitFor(() =>
-      expect(deploySpy).toHaveBeenCalledWith("arch_m1crosc0py", {
+      expect(deploySpy).toHaveBeenCalledWith("arch_sky1mag3ry", {
         orcid: {
           clientId: "APP-ABC123DEF456",
           clientSecret: "super-secret-value",
@@ -143,7 +143,7 @@ describe("SettingsPanel", () => {
     const services = makeTestServices();
     const deploySpy = vi.spyOn(services.amacrin, "deploy");
 
-    renderWithProviders(<SettingsPanel archiveId="arch_m1crosc0py" />, {
+    renderWithProviders(<SettingsPanel archiveId="arch_sky1mag3ry" />, {
       services,
     });
 
@@ -152,7 +152,7 @@ describe("SettingsPanel", () => {
     );
 
     await waitFor(() =>
-      expect(deploySpy).toHaveBeenCalledWith("arch_m1crosc0py", undefined),
+      expect(deploySpy).toHaveBeenCalledWith("arch_sky1mag3ry", undefined),
     );
   });
 });

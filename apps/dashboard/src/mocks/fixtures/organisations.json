@@ -2,7 +2,7 @@
   "organisations": [
     {
       "id": "org_7f3k2mq9x1",
-      "name": "Marsh Lab",
+      "name": "Summit Lab",
       "role": "admin",
       "created_at": "2026-05-02T09:20:00.102938Z"
     },
@@ -13,8 +13,8 @@
       "created_at": "2026-05-02T09:14:00.998877Z"
     },
     {
-      "id": "org_cry0emc0ns",
-      "name": "Cryo-EM Consortium",
+      "id": "org_rad4rc0nsm",
+      "name": "Radar Array Consortium",
       "role": "member",
       "created_at": "2026-04-11T16:40:12.000000Z"
     }

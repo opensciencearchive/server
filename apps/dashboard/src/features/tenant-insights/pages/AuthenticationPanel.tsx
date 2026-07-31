@@ -1,21 +1,22 @@
 "use client";
 
-import Link from "next/link";
-
-import { useArchive } from "@/features/archives/useArchives";
 import { Badge, Card, CopyButton, PageHeader, SampleDataChip, Skeleton } from "@/ui";
+import { useServices } from "@/api/services";
+import { icons } from "@/features/shell/icons";
 
 import { useTenantAuthConfig } from "../hooks";
 import styles from "./pages.module.css";
 
 export function AuthenticationPanel({ archiveId }: { archiveId: string }) {
-  const archive = useArchive(archiveId);
+  // Self-host reads real auth config; platform's is sample data (chip + note).
+  const isSample = useServices().isPlatform;
   const authConfig = useTenantAuthConfig(archiveId);
-  const base = `/archives/${archiveId}`;
+  const admins = authConfig.data?.adminOrcidIds ?? [];
 
   return (
     <div className={styles.page}>
       <PageHeader
+        icon={icons.authentication}
         title="Archive sign-in"
         description="How researchers sign in to this archive to deposit and manage records."
       />
@@ -29,14 +30,14 @@ export function AuthenticationPanel({ archiveId }: { archiveId: string }) {
             </dd>
           </div>
           <div className={styles.row}>
-            <dt>
-              Client ID <SampleDataChip />
-            </dt>
+            <dt>Client ID {isSample && <SampleDataChip />}</dt>
             <dd>
               {authConfig.isPending ? (
                 <Skeleton height="1.5rem" width="16rem" />
               ) : authConfig.data ? (
-                <span className="mono">{authConfig.data.data.clientId}</span>
+                <span className="mono">
+                  {authConfig.data.clientId || "Not configured"}
+                </span>
               ) : null}
             </dd>
           </div>
@@ -51,35 +52,33 @@ export function AuthenticationPanel({ archiveId }: { archiveId: string }) {
 
       <h2 className={styles.sectionTitle}>Administrators</h2>
       <Card className={styles.card}>
-        {archive.isPending ? (
+        {authConfig.isPending ? (
           <Skeleton height="4rem" width="100%" />
-        ) : archive.data ? (
-          archive.data.orcidAdmins.length > 0 ? (
-            <ul className={styles.adminList}>
-              {archive.data.orcidAdmins.map((orcid) => (
-                <li key={orcid} className={styles.adminRow}>
-                  <span className="mono">{orcid}</span>
-                  <CopyButton value={orcid} label="Copy" size="sm" />
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className={styles.cardDesc}>
-              No administrators are configured for this archive.
-            </p>
-          )
-        ) : null}
+        ) : admins.length > 0 ? (
+          <ul className={styles.adminList}>
+            {admins.map((orcid) => (
+              <li key={orcid} className={styles.adminRow}>
+                <span className="mono">{orcid}</span>
+                <CopyButton value={orcid} label="Copy" size="sm" />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className={styles.cardDesc}>
+            No administrators are configured for this archive.
+          </p>
+        )}
       </Card>
 
-      <div className={styles.note}>
-        <span className={styles.noteLabel}>Note</span>
-        <p>
-          The administrator ORCID iDs come from this archive&apos;s configuration
-          and are live. The client secret is sealed and never shown — rotate
-          credentials from{" "}
-          <Link href={`${base}/settings`}>Settings</Link>.
-        </p>
-      </div>
+      {isSample && (
+        <div className={styles.note}>
+          <span className={styles.noteLabel}>Note</span>
+          <p>
+            This sign-in configuration is sample data. Self-hosted archives show
+            their real ORCID client id and configured administrators.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

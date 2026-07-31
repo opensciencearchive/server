@@ -36,6 +36,11 @@ from osa.domain.auth.command.token import (
     RefreshTokensHandler,
 )
 from osa.domain.auth.model.value import CurrentUser
+from osa.domain.auth.query.get_auth_config import (
+    AuthConfigResult,
+    GetAuthConfig,
+    GetAuthConfigHandler,
+)
 from osa.domain.auth.port.provider_registry import ProviderRegistry
 from osa.domain.auth.port.role_repository import RoleAssignmentRepository
 from osa.domain.auth.service.auth import AuthService
@@ -337,6 +342,17 @@ async def get_me(
         external_id=current_user.identity.external_id,
         roles=roles,
     )
+
+
+@router.get("/config", response_model=AuthConfigResult)
+async def get_auth_config(
+    handler: FromDishka[GetAuthConfigHandler],
+) -> AuthConfigResult:
+    """The node's sign-in configuration (provider, ORCID client id, admins).
+
+    ADMIN-gated; never returns the client secret.
+    """
+    return await handler.run(GetAuthConfig())
 
 
 # ============================================================================

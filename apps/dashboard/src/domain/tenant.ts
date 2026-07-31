@@ -1,12 +1,12 @@
 /**
  * Tenant-archive concepts — what lives INSIDE an OSA instance (records,
- * validation, usage) plus platform-shaped data the cloud API cannot serve
- * yet (build lists, deployment history, members).
+ * features, hooks, ingesters, observability, sign-in) plus platform-shaped data
+ * the cloud API cannot serve yet (build lists, deployment history, members).
  *
- * Every consumer of these types receives them wrapped in `Mocked<T>`
- * (domain/mocked.ts): the open-source OSA server has endpoints for some of
- * this, but the dashboard has no auth path to tenant instances today, and
- * the cloud API has no list/aggregate endpoints for the rest.
+ * In self-host, `RealOSAService` fills these from the archive's real endpoints.
+ * On the platform build, `MockOSAService` returns sample values (surfaced with a
+ * `<SampleDataChip/>`), since the tenant read path through the control plane
+ * hasn't shipped. The `Build*`/`Deployment*`/`OrgMember` types remain cloud-only.
  */
 
 import type { BuildStatusKind } from "./build";
@@ -25,38 +25,21 @@ export interface RecordTypeCount {
   count: number;
 }
 
-export interface ValidationCheck {
-  name: string;
-  /** Which convention or policy defines the check. */
-  definedBy: string;
-  passing: number;
-  failing: number;
-}
-
-export interface ValidationSummary {
-  /** Share of records passing every check, 0–100. */
-  passRatePercent: number;
-  lastFullPassAt: Date | null;
-  checks: ValidationCheck[];
-}
-
-/** "Who's using it" usage stats. */
-export interface UsageStats {
-  recordDownloads: number;
-  uniqueClients: number;
-  apiQueries: number;
-  /** Share of API queries from agents, 0–1. */
-  agentQueryShare: number;
-  bulkExports: number;
-  mirroringNodes: number;
-}
-
+/** A published record row, schema-agnostic: id + created date + its metadata. */
 export interface TenantRecord {
   id: string;
-  title: string;
-  type: string;
-  depositor: string;
-  depositedAt: Date;
+  schema: string;
+  createdAt: Date;
+  /** The record's metadata fields (schema-specific), keyed by field name. */
+  fields: Record<string, unknown>;
+}
+
+/** A registered derived-feature table (one per hook, per schema). */
+export interface FeatureTable {
+  name: string;
+  schema: string;
+  columns: number;
+  rows: number;
 }
 
 export interface TenantHook {
@@ -68,9 +51,29 @@ export interface TenantHook {
 
 export interface TenantIngester {
   name: string;
-  liveVersion: string;
+  schema: string;
   description: string;
-  acceptedFormats: string[];
+  image: string;
+  digest: string;
+  /** Cron expression, or null for a manual/one-shot ingester. */
+  schedule: string | null;
+}
+
+export type IngestionStatus = "pending" | "running" | "completed" | "failed";
+
+/** One ingest run. `pending`/`running` are still in-progress. */
+export interface IngestionRun {
+  id: string;
+  convention: string;
+  status: IngestionStatus;
+  ingestionFinished: boolean;
+  batchesIngested: number;
+  batchesCompleted: number;
+  batchesFailed: number;
+  publishedCount: number;
+  startedAt: Date;
+  completedAt: Date | null;
+  failureReason: string | null;
 }
 
 export interface ObservabilityComponent {

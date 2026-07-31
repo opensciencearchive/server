@@ -1,10 +1,12 @@
 /**
- * MockOSAService — the only OSAService implementation until a
- * dashboard→tenant auth path exists. Sample data tells the Cortex-cell-atlas
- * story from the design mockup; deterministic on purpose.
+ * MockOSAService — the platform-build OSAService. Returns deterministic sample
+ * data (the Alpine-climate-network story from the design mockup); panels surface a
+ * `<SampleDataChip/>` beside it. Self-host uses `RealOSAService` instead, so this
+ * sample data never appears when connected to a real archive.
  */
-import { type Mocked, mocked } from "@/domain/mocked";
 import type {
+  FeatureTable,
+  IngestionRun,
   ObservabilitySnapshot,
   RecordStats,
   RecordTypeCount,
@@ -12,123 +14,73 @@ import type {
   TenantHook,
   TenantIngester,
   TenantRecord,
-  UsageStats,
-  ValidationSummary,
 } from "@/domain/tenant";
 
 import type { OSAService } from "./service";
 
+const SAMPLE_SCHEMAS = [
+  "station-timeseries@2.1.0",
+  "radiosonde-profile@1.3.0",
+  "station-metadata@1.0.0",
+];
+
 export class MockOSAService implements OSAService {
-  getRecordStats(archiveId: string): Promise<Mocked<RecordStats>> {
+  getRecordStats(archiveId: string): Promise<RecordStats> {
     void archiveId;
-    return Promise.resolve(
-      mocked({
-        publishedRecords: 12_481,
-        recordsThisMonth: 318,
-        derivedFeaturesPerRecord: 3,
-        storageBytes: 1.4e12,
-      }),
-    );
+    return Promise.resolve({
+      publishedRecords: 12_481,
+      recordsThisMonth: 318,
+      derivedFeaturesPerRecord: 3,
+      storageBytes: 1.4e12,
+    });
   }
 
-  getRecordTypeBreakdown(
-    archiveId: string,
-  ): Promise<Mocked<RecordTypeCount[]>> {
+  getRecordTypeBreakdown(archiveId: string): Promise<RecordTypeCount[]> {
     void archiveId;
-    return Promise.resolve(
-      mocked([
-        { type: "Single-cell RNA-seq", count: 7204 },
-        { type: "Spatial transcriptomics", count: 3118 },
-        { type: "Bulk RNA-seq", count: 1502 },
-        { type: "Imaging", count: 657 },
-      ]),
-    );
+    return Promise.resolve([
+      { type: "Surface station timeseries", count: 7204 },
+      { type: "Radiosonde profiles", count: 3118 },
+      { type: "Snowpack sensors", count: 1502 },
+      { type: "Sky imagery", count: 657 },
+    ]);
   }
 
-  getValidationSummary(archiveId: string): Promise<Mocked<ValidationSummary>> {
+  listSchemas(archiveId: string): Promise<string[]> {
     void archiveId;
-    return Promise.resolve(
-      mocked({
-        passRatePercent: 99.9,
-        lastFullPassAt: new Date("2026-07-25T16:22:00Z"),
-        checks: [
-          {
-            name: "Ontology terms resolve",
-            definedBy: "geo-rnaseq-v2",
-            passing: 12_481,
-            failing: 0,
-          },
-          {
-            name: "Counts matrix well-formed",
-            definedBy: "geo-rnaseq-v2",
-            passing: 12_481,
-            failing: 0,
-          },
-          {
-            name: "Assay metadata complete",
-            definedBy: "geo-rnaseq-v2",
-            passing: 12_469,
-            failing: 12,
-          },
-          {
-            name: "Donor consent recorded",
-            definedBy: "marsh-lab-policy",
-            passing: 12_481,
-            failing: 0,
-          },
-        ],
-      }),
-    );
+    return Promise.resolve(SAMPLE_SCHEMAS);
   }
 
-  getUsageStats(archiveId: string): Promise<Mocked<UsageStats>> {
+  listRecords(archiveId: string, schema: string): Promise<TenantRecord[]> {
     void archiveId;
-    return Promise.resolve(
-      mocked({
-        recordDownloads: 8940,
-        uniqueClients: 1204,
-        apiQueries: 14_902,
-        agentQueryShare: 0.62,
-        bulkExports: 62,
-        mirroringNodes: 2,
-      }),
-    );
+    return Promise.resolve([
+      {
+        id: "9f2c4a1e",
+        schema,
+        createdAt: new Date("2026-07-24T10:31:00Z"),
+        fields: { title: "Col du Lac surface timeseries", station: "ST-1042", readings: 8420 },
+      },
+      {
+        id: "1a2b3c4d",
+        schema,
+        createdAt: new Date("2026-07-23T15:02:00Z"),
+        fields: { title: "Radiosonde ascent series", site: "SD-9", flight: 3 },
+      },
+      {
+        id: "5e6f7a8b",
+        schema,
+        createdAt: new Date("2026-07-22T09:47:00Z"),
+        fields: { title: "Snowpack sensor batch 12", protocol: "SR50A v3" },
+      },
+    ]);
   }
 
-  listRecords(archiveId: string): Promise<Mocked<TenantRecord[]>> {
+  listFeatureTables(archiveId: string): Promise<FeatureTable[]> {
     void archiveId;
-    return Promise.resolve(
-      mocked([
-        {
-          id: "srn:rec:9f2c4a1e",
-          title: "Prefrontal cortex snRNA-seq, donor H-1042",
-          type: "Single-cell RNA-seq",
-          depositor: "0000-0002-1825-0097",
-          depositedAt: new Date("2026-07-24T10:31:00Z"),
-        },
-        {
-          id: "srn:rec:1a2b3c4d",
-          title: "Visium spatial series, BA9 section 3",
-          type: "Spatial transcriptomics",
-          depositor: "0000-0001-5109-3700",
-          depositedAt: new Date("2026-07-23T15:02:00Z"),
-        },
-        {
-          id: "srn:rec:5e6f7a8b",
-          title: "Bulk RNA-seq, cortical organoid batch 12",
-          type: "Bulk RNA-seq",
-          depositor: "0000-0003-1415-9265",
-          depositedAt: new Date("2026-07-22T09:47:00Z"),
-        },
-        {
-          id: "srn:rec:3c4d5e6f",
-          title: "Immunofluorescence panel, layer V neurons",
-          type: "Imaging",
-          depositor: "0000-0002-7183-4581",
-          depositedAt: new Date("2026-07-21T18:20:00Z"),
-        },
-      ]),
-    );
+    return Promise.resolve([
+      { name: "qc-metrics", schema: "station-timeseries@2.1.0", columns: 6, rows: 7204 },
+      { name: "hourly-aggregates", schema: "station-timeseries@2.1.0", columns: 4, rows: 214_880 },
+      { name: "ascent-profile", schema: "radiosonde-profile@1.3.0", columns: 3, rows: 3118 },
+    ]);
   }
 
   listHooks(archiveId: string): Promise<TenantHook[]> {
@@ -137,56 +89,95 @@ export class MockOSAService implements OSAService {
       {
         name: "validate-metadata",
         liveVersion: "build_8f3a91c2e5",
-        description: "Rejects depositions with incomplete assay metadata.",
+        description: "Rejects depositions with incomplete station metadata.",
         lastRunAt: new Date("2026-07-25T16:20:00Z"),
       },
       {
         name: "resolve-ontology",
         liveVersion: "build_8f3a91c2e5",
-        description: "Resolves tissue and cell-type terms against UBERON/CL.",
+        description: "Resolves instrument and variable terms against CF standard names.",
         lastRunAt: new Date("2026-07-25T16:21:30Z"),
       },
     ]);
   }
 
-  listIngesters(archiveId: string): Promise<Mocked<TenantIngester[]>> {
+  listIngesters(archiveId: string): Promise<TenantIngester[]> {
     void archiveId;
-    return Promise.resolve(
-      mocked([
-        {
-          name: "geo-ingester",
-          liveVersion: "build_8f3a91c2e5",
-          description:
-            "Imports GEO series and normalises them into the archive convention.",
-          acceptedFormats: ["SOFT", "MINiML", "supplementary TAR"],
-        },
-      ]),
-    );
+    return Promise.resolve([
+      {
+        name: "GHCN ingester",
+        schema: "station-timeseries@2.1.0",
+        description: "Imports GHCN station series and normalises them into the convention.",
+        image: "ghcr.io/summit-lab/ghcn-ingester",
+        digest: "sha256:8f3a91c2e5b4",
+        schedule: "0 3 * * *",
+      },
+    ]);
   }
 
-  getObservability(archiveId: string): Promise<Mocked<ObservabilitySnapshot>> {
+  listIngestionRuns(archiveId: string): Promise<IngestionRun[]> {
     void archiveId;
-    return Promise.resolve(
-      mocked({
-        status: "ready",
-        components: [
-          { name: "api", status: "healthy", detail: "p99 84 ms" },
-          { name: "db", status: "healthy", detail: "connections 12/100" },
-          { name: "workers", status: "healthy", detail: "queue depth 0" },
-          { name: "runner", status: "healthy", detail: "2 hooks live" },
-        ],
-      }),
-    );
+    return Promise.resolve([
+      {
+        id: "ing_7f3a91c2e5",
+        convention: "station-timeseries@2.1.0",
+        status: "running",
+        ingestionFinished: false,
+        batchesIngested: 12,
+        batchesCompleted: 9,
+        batchesFailed: 0,
+        publishedCount: 8_940,
+        startedAt: new Date("2026-07-27T09:15:00Z"),
+        completedAt: null,
+        failureReason: null,
+      },
+      {
+        id: "ing_4dde94d9aa",
+        convention: "station-timeseries@2.1.0",
+        status: "completed",
+        ingestionFinished: true,
+        batchesIngested: 20,
+        batchesCompleted: 20,
+        batchesFailed: 0,
+        publishedCount: 19_204,
+        startedAt: new Date("2026-07-25T22:40:00Z"),
+        completedAt: new Date("2026-07-25T23:12:00Z"),
+        failureReason: null,
+      },
+      {
+        id: "ing_1a2b3c4d5e",
+        convention: "station-timeseries@2.1.0",
+        status: "failed",
+        ingestionFinished: false,
+        batchesIngested: 3,
+        batchesCompleted: 2,
+        batchesFailed: 1,
+        publishedCount: 1_920,
+        startedAt: new Date("2026-07-24T11:02:00Z"),
+        completedAt: new Date("2026-07-24T11:09:00Z"),
+        failureReason: "hook runner out of memory on batch 3 after 2 retries",
+      },
+    ]);
   }
 
-  getAuthConfig(archiveId: string): Promise<Mocked<TenantAuthView>> {
+  getObservability(archiveId: string): Promise<ObservabilitySnapshot> {
     void archiveId;
-    return Promise.resolve(
-      mocked({
-        provider: "orcid",
-        clientId: "APP-K91F2LQ8XZ40MNRT",
-        adminOrcidIds: ["0000-0002-1825-0097", "0000-0001-5109-3700"],
-      }),
-    );
+    return Promise.resolve({
+      status: "ready",
+      components: [
+        { name: "db", status: "healthy", detail: "connections 12/100" },
+        { name: "workers", status: "healthy", detail: "queue depth 0" },
+        { name: "runner", status: "healthy", detail: "not checked" },
+      ],
+    });
+  }
+
+  getAuthConfig(archiveId: string): Promise<TenantAuthView> {
+    void archiveId;
+    return Promise.resolve({
+      provider: "orcid",
+      clientId: "APP-K91F2LQ8XZ40MNRT",
+      adminOrcidIds: ["0000-0002-1825-0097", "0000-0001-5109-3700"],
+    });
   }
 }

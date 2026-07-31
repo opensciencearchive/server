@@ -1,15 +1,15 @@
 {
   "id": "build_8f3a91c2e5",
-  "archive_id": "arch_c0r73xa71a",
+  "archive_id": "arch_a1p1n3c11m",
   "convention_slug": "geo-rnaseq-v2",
   "status": "published",
   "convention_ref": "4c1e77b",
   "components": [
     {
       "kind": "ingester",
-      "name": "geo-ingester",
+      "name": "ghcn-ingester",
       "status": "succeeded",
-      "image_ref": "941377154785.dkr.ecr.eu-west-1.amazonaws.com/amacrin/archives/arch_c0r73xa71a/ingester/geo-ingester:build_8f3a91c2e5",
+      "image_ref": "941377154785.dkr.ecr.eu-west-1.amazonaws.com/amacrin/archives/arch_a1p1n3c11m/ingester/ghcn-ingester:build_8f3a91c2e5",
       "digest": "sha256:9f2c4a1e8b07d3f6a5c2e9b1d4f7a0c3e6b9d2f5a8c1e4b7d0a3f6c9e2b5d8f1",
       "source_ref": "ingesters/geo_ingester.py"
     },
@@ -17,7 +17,7 @@
       "kind": "hook",
       "name": "validate-metadata",
       "status": "succeeded",
-      "image_ref": "941377154785.dkr.ecr.eu-west-1.amazonaws.com/amacrin/archives/arch_c0r73xa71a/hook/validate-metadata:build_8f3a91c2e5",
+      "image_ref": "941377154785.dkr.ecr.eu-west-1.amazonaws.com/amacrin/archives/arch_a1p1n3c11m/hook/validate-metadata:build_8f3a91c2e5",
       "digest": "sha256:1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b",
       "source_ref": "hooks/validate_metadata.py"
     },
@@ -25,7 +25,7 @@
       "kind": "hook",
       "name": "resolve-ontology",
       "status": "succeeded",
-      "image_ref": "941377154785.dkr.ecr.eu-west-1.amazonaws.com/amacrin/archives/arch_c0r73xa71a/hook/resolve-ontology:build_8f3a91c2e5",
+      "image_ref": "941377154785.dkr.ecr.eu-west-1.amazonaws.com/amacrin/archives/arch_a1p1n3c11m/hook/resolve-ontology:build_8f3a91c2e5",
       "digest": "sha256:3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d",
       "source_ref": "hooks/resolve_ontology.py"
     }

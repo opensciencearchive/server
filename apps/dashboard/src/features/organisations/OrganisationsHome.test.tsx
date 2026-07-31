@@ -9,16 +9,16 @@ describe("OrganisationsHome", () => {
   it("renders an org card per organisation with role and status rollups", async () => {
     renderWithProviders(<OrganisationsHome />);
 
-    expect(await screen.findByText("Marsh Lab")).toBeInTheDocument();
+    expect(await screen.findByText("Summit Lab")).toBeInTheDocument();
     expect(screen.getByText("Personal")).toBeInTheDocument();
-    expect(screen.getByText("Cryo-EM Consortium")).toBeInTheDocument();
+    expect(screen.getByText("Radar Array Consortium")).toBeInTheDocument();
 
-    // Marsh Lab (seeded): 1 running + 1 error
-    const marshCard = screen.getByText("Marsh Lab").closest("a")!;
-    expect(marshCard).toHaveTextContent("2 archives");
-    expect(marshCard).toHaveTextContent("1 running");
-    expect(marshCard).toHaveTextContent("1 error");
-    expect(marshCard).toHaveTextContent("admin");
+    // Summit Lab (seeded): 1 running + 1 error
+    const summitCard = screen.getByText("Summit Lab").closest("a")!;
+    expect(summitCard).toHaveTextContent("2 archives");
+    expect(summitCard).toHaveTextContent("1 running");
+    expect(summitCard).toHaveTextContent("1 error");
+    expect(summitCard).toHaveTextContent("admin");
   });
 
   it("states that membership is read-only in v1", async () => {

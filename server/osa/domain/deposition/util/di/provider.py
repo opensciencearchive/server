@@ -18,6 +18,7 @@ from osa.domain.deposition.query.get_convention import GetConventionHandler
 from osa.domain.deposition.query.get_deposition import GetDepositionHandler
 from osa.domain.deposition.query.list_conventions import ListConventionsHandler
 from osa.domain.deposition.query.list_depositions import ListDepositionsHandler
+from osa.domain.deposition.query.list_ingesters import ListIngestersHandler
 from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.validation.service.hook_registry import HookRegistryService
 from osa.domain.deposition.service.deposition import DepositionService
@@ -85,5 +86,6 @@ class DepositionProvider(Provider):
     download_template_handler = provide(DownloadTemplateHandler, scope=Scope.UOW)
     get_convention_handler = provide(GetConventionHandler, scope=Scope.UOW)
     list_conventions_handler = provide(ListConventionsHandler, scope=Scope.UOW)
+    list_ingesters_handler = provide(ListIngestersHandler, scope=Scope.UOW)
     list_depositions_handler = provide(ListDepositionsHandler, scope=Scope.UOW)
     download_file_handler = provide(DownloadFileHandler, scope=Scope.UOW)

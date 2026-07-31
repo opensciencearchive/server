@@ -16,7 +16,7 @@ describe("BuildDetail", () => {
 
     // All three succeeded components appear with sha256 digests.
     const table = screen.getByRole("table");
-    expect(within(table).getByText("geo-ingester")).toBeInTheDocument();
+    expect(within(table).getByText("ghcn-ingester")).toBeInTheDocument();
     expect(within(table).getByText("validate-metadata")).toBeInTheDocument();
     expect(within(table).getByText("resolve-ontology")).toBeInTheDocument();
 
@@ -33,7 +33,7 @@ describe("BuildDetail", () => {
     expect(publishedStep).toHaveAttribute("data-state", "complete");
   });
 
-  it("renders a failed build verbatim: ImportError, danger normalise-counts row, sibling explanation", async () => {
+  it("renders a failed build verbatim: ImportError, danger normalise-units row, sibling explanation", async () => {
     renderWithProviders(<BuildDetail buildId="build_f4a1e6d902" />);
 
     expect(await screen.findByText("build_f4a1e6d902")).toBeInTheDocument();
@@ -42,7 +42,7 @@ describe("BuildDetail", () => {
     // Parent error message shown verbatim.
     expect(
       screen.getByText(
-        /component 'normalise-counts' failed: ImportError: cannot import name 'SchemaRegistry' from 'osa_sdk\.schema'/,
+        /component 'normalise-units' failed: ImportError: cannot import name 'SchemaRegistry' from 'osa_sdk\.schema'/,
       ),
     ).toBeInTheDocument();
 
@@ -55,7 +55,7 @@ describe("BuildDetail", () => {
     ).toBeInTheDocument();
 
     // The failed row is danger-toned.
-    const failedName = within(table).getByText("normalise-counts");
+    const failedName = within(table).getByText("normalise-units");
     const row = failedName.closest("tr")!;
     expect(row.className).toMatch(/danger/i);
 

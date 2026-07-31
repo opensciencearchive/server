@@ -1,6 +1,6 @@
 {
   "id": "build_c9a8b7c6d5",
-  "archive_id": "arch_c0r73xa71a",
+  "archive_id": "arch_a1p1n3c11m",
   "convention_slug": "geo-rnaseq-v2",
   "status": "cancelled",
   "cancelled_by": "system",
@@ -9,7 +9,7 @@
   "components": [
     {
       "kind": "ingester",
-      "name": "geo-ingester",
+      "name": "ghcn-ingester",
       "status": "cancelled",
       "source_ref": "ingesters/geo_ingester.py"
     },

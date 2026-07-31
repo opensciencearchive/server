@@ -8,12 +8,12 @@ import { ArchiveShell } from "./ArchiveShell";
 describe("ArchiveShell", () => {
   it("platform: shows the org breadcrumb and the Builds nav item", async () => {
     renderWithProviders(
-      <ArchiveShell archiveId="arch_c0r73xa71a">
+      <ArchiveShell archiveId="arch_a1p1n3c11m">
         <div>body</div>
       </ArchiveShell>,
     );
 
-    expect(await screen.findByText("Marsh Lab")).toBeInTheDocument();
+    expect(await screen.findByText("Summit Lab")).toBeInTheDocument();
     // Accessible name may include a count chip once builds load ("Builds 14").
     expect(screen.getByRole("link", { name: /Builds/ })).toBeInTheDocument();
   });
@@ -34,7 +34,7 @@ describe("ArchiveShell", () => {
     expect(
       screen.queryByRole("link", { name: /Builds/ }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText("Marsh Lab")).not.toBeInTheDocument();
+    expect(screen.queryByText("Summit Lab")).not.toBeInTheDocument();
     expect(screen.queryByText(/visit archive/i)).not.toBeInTheDocument();
   });
 });

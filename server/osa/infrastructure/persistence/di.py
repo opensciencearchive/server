@@ -15,6 +15,7 @@ from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.metadata.service.metadata import MetadataService
 from osa.domain.record.port.feature_reader import FeatureReader
 from osa.domain.record.port.repository import RecordRepository
+from osa.domain.record.port.statistics_store import StatisticsStore
 from osa.domain.record.query.get_record import GetRecordHandler
 from osa.domain.record.query.get_stats import GetStatsHandler
 from osa.domain.record.service import RecordService
@@ -35,6 +36,7 @@ from osa.domain.data.port.data_read_store import (
     DataTableReadStore,
 )
 from osa.infrastructure.data.postgres_catalog_read_store import PostgresCatalogReadStore
+from osa.infrastructure.data.postgres_statistics_store import PostgresStatisticsStore
 from osa.infrastructure.data.postgres_table_read_store import PostgresTableReadStore
 from osa.infrastructure.persistence.adapter.readers import (
     OntologyReaderAdapter,
@@ -203,6 +205,10 @@ class PersistenceProvider(Provider):
         self, session: AsyncSession, config: Config
     ) -> PostgresCatalogReadStore:
         return PostgresCatalogReadStore(session=session, node_domain=Domain(config.domain))
+
+    @provide(scope=Scope.UOW, provides=StatisticsStore)
+    def get_statistics_store(self, session: AsyncSession) -> PostgresStatisticsStore:
+        return PostgresStatisticsStore(session=session)
 
     # Record query handlers
     get_record_handler = provide(GetRecordHandler, scope=Scope.UOW)

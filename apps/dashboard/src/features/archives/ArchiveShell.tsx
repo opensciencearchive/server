@@ -53,10 +53,7 @@ function navSections(base: string, builds?: { count?: number }): NavSection[] {
           label: "Records",
           href: `${base}/records`,
           icon: "records",
-          children: [
-            { label: "Features", href: `${base}/features` },
-            { label: "Validation", href: `${base}/validation` },
-          ],
+          children: [{ label: "Features", href: `${base}/features` }],
         },
         { label: "Agents", href: `${base}/agents`, icon: "agents" },
       ],
@@ -65,6 +62,7 @@ function navSections(base: string, builds?: { count?: number }): NavSection[] {
       items: [
         { label: "Hooks", href: `${base}/hooks`, icon: "hooks" },
         { label: "Ingesters", href: `${base}/ingesters`, icon: "ingesters" },
+        { label: "Ingestions", href: `${base}/ingestions`, icon: "ingestions" },
         ...buildsItem,
         {
           label: "Observability",

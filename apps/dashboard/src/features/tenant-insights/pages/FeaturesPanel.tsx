@@ -1,96 +1,94 @@
 "use client";
 
-import { DataTable, PageHeader, SampleDataChip, Skeleton, Stat } from "@/ui";
+import {
+  DataTable,
+  EmptyState,
+  PageHeader,
+  SampleDataChip,
+  Skeleton,
+  Stat,
+} from "@/ui";
+import { useServices } from "@/api/services";
+import type { FeatureTable } from "@/domain/tenant";
+import { icons } from "@/features/shell/icons";
 
-import { useRecordStats } from "../hooks";
+import { useTenantFeatureTables } from "../hooks";
 import styles from "./pages.module.css";
 
-/**
- * Features are computed per record by the archive's hooks. The names below
- * are sample data, chosen to be consistent with the seeded hooks
- * (validate-metadata, resolve-ontology) — not a live feature registry.
- */
-interface DerivedFeature {
-  name: string;
-  producedBy: string;
-  description: string;
-}
-
-const SAMPLE_FEATURES: DerivedFeature[] = [
-  {
-    name: "qc-metrics",
-    producedBy: "validate-metadata",
-    description: "Per-record quality scores from the metadata completeness check.",
-  },
-  {
-    name: "ontology-mappings",
-    producedBy: "resolve-ontology",
-    description: "Tissue and cell-type terms resolved against UBERON/CL.",
-  },
-  {
-    name: "assay-summary",
-    producedBy: "validate-metadata",
-    description: "Normalised assay descriptors extracted at deposition time.",
-  },
-];
-
 export function FeaturesPanel({ archiveId }: { archiveId: string }) {
-  const stats = useRecordStats(archiveId);
+  // Self-host reads real feature tables; platform's are sample data (chip).
+  const isSample = useServices().isPlatform;
+  const features = useTenantFeatureTables(archiveId);
+  const tables = features.data ?? [];
+  const totalRows = tables.reduce((sum, t) => sum + t.rows, 0);
 
   return (
     <div className={styles.page}>
       <PageHeader
+        icon={icons.features}
         title="Features"
-        description="Derived features are computed per record by the archive's hooks as depositions land."
-        actions={<SampleDataChip />}
+        description="Derived features are computed per record by the archive's hooks, one table per hook."
+        actions={isSample ? <SampleDataChip /> : undefined}
       />
 
-      {stats.isPending ? (
-        <Skeleton height="5rem" width="100%" />
-      ) : stats.data ? (
+      {!features.isPending && tables.length > 0 && (
         <div className={[styles.stats, styles.statsWide].join(" ")}>
+          <Stat label="Feature tables" value={tables.length} />
           <Stat
-            label="Derived features per record"
-            value={stats.data.data.derivedFeaturesPerRecord}
-          />
-          <Stat
-            label="Published records"
-            value={stats.data.data.publishedRecords.toLocaleString("en-GB")}
-            note="each carrying the features below"
+            label="Total feature rows"
+            value={totalRows.toLocaleString("en-GB")}
           />
         </div>
-      ) : null}
+      )}
 
-      <DataTable<DerivedFeature>
-        columns={[
-          {
-            key: "name",
-            header: "Feature",
-            render: (f) => <span className="mono">{f.name}</span>,
-          },
-          {
-            key: "producedBy",
-            header: "Produced by",
-            render: (f) => <span className="mono">{f.producedBy}</span>,
-          },
-          {
-            key: "description",
-            header: "Description",
-            render: (f) => f.description,
-          },
-        ]}
-        rows={SAMPLE_FEATURES}
-        rowKey={(f) => f.name}
-      />
+      {features.isPending ? (
+        <Skeleton height="10rem" width="100%" />
+      ) : tables.length > 0 ? (
+        <DataTable<FeatureTable>
+          columns={[
+            {
+              key: "name",
+              header: "Feature",
+              render: (f) => <span className="mono">{f.name}</span>,
+            },
+            {
+              key: "schema",
+              header: "Schema",
+              render: (f) => <span className="mono">{f.schema}</span>,
+            },
+            {
+              key: "columns",
+              header: "Columns",
+              align: "right",
+              render: (f) => f.columns,
+            },
+            {
+              key: "rows",
+              header: "Rows",
+              align: "right",
+              render: (f) => f.rows.toLocaleString("en-GB"),
+            },
+          ]}
+          rows={tables}
+          rowKey={(f) => `${f.schema}/${f.name}`}
+        />
+      ) : (
+        <EmptyState
+          icon={icons.features}
+          title="No feature tables yet"
+          description="Feature tables appear here once a convention registers a hook that produces them."
+        />
+      )}
 
-      <div className={styles.note}>
-        <span className={styles.noteLabel}>Note</span>
-        <p>
-          These feature names are sample data consistent with the archive&apos;s
-          seeded hooks. The live feature set is read from the OSA instance once
-          the tenant API connection ships.
-        </p>
-      </div>
+      {isSample && (
+        <div className={styles.note}>
+          <span className={styles.noteLabel}>Note</span>
+          <p>
+            These feature tables are sample data. Self-hosted archives show their
+            real registered feature tables here.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

@@ -184,7 +184,7 @@ export function CreateArchiveForm({
                 id={id}
                 aria-describedby={describedBy}
                 invalid={invalid}
-                placeholder="e.g. Cortex cell atlas"
+                placeholder="e.g. Alpine climate network"
                 {...register("name")}
               />
             )}
@@ -214,7 +214,7 @@ export function CreateArchiveForm({
                     autoCapitalize="off"
                     autoCorrect="off"
                     spellCheck={false}
-                    placeholder="cortex-atlas"
+                    placeholder="alpine-climate"
                     {...register("slug", {
                       onChange: () => {
                         if (errors.slug) clearErrors("slug");

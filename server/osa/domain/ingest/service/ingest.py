@@ -114,6 +114,10 @@ class IngestService(Service):
             raise NotFoundError(f"Ingest run not found: {ingest_run_id}")
         return ingest_run
 
+    async def list_ingestions(self, *, limit: int = 50) -> list[IngestRun]:
+        """List ingest runs, most recently started first."""
+        return await self.ingest_repo.list(limit=limit)
+
     async def ensure_running(self, ingest_run_id: IngestRunId) -> IngestRun:
         """Transition a PENDING run to RUNNING (idempotent), returning the run."""
         run = await self.get_ingestion(ingest_run_id)
