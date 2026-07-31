@@ -40,6 +40,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
-    if sa.inspect(op.get_bind()).has_table("instance_statistics"):
-        op.drop_table("instance_statistics")
+    """Downgrade schema — intentionally a no-op.
+
+    ``upgrade()`` only *ensures* ``instance_statistics`` exists (it skips the
+    create when the table was already present from an earlier inlined form of
+    the initial migration). Dropping it here would destroy a table this revision
+    may not have created. The table is a rebuildable snapshot cache, so leaving
+    it in place on downgrade is harmless and keeps the up/down/up cycle
+    consistent with the idempotent create above.
+    """
