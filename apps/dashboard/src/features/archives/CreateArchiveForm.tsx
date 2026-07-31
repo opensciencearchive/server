@@ -105,7 +105,10 @@ export function CreateArchiveForm({
       },
       {
         onSuccess: ({ archive }) => {
-          router.push(`/archives/${archive.id}`);
+          // The archive is created but still deploying — send the operator to a
+          // centered progress screen that polls and opens the dashboard when it
+          // succeeds, rather than a half-empty dashboard.
+          router.push(`/deploying/${archive.id}`);
         },
         onError: (error) => {
           if (error instanceof SlugTakenError) {

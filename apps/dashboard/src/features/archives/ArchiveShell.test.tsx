@@ -37,4 +37,20 @@ describe("ArchiveShell", () => {
     expect(screen.queryByText("Summit Lab")).not.toBeInTheDocument();
     expect(screen.queryByText(/visit archive/i)).not.toBeInTheDocument();
   });
+
+  it("platform: shows a centered not-found notice for an unknown archive", async () => {
+    // The mock rejects an unknown id with a 404 ApiError, like production.
+    renderWithProviders(
+      <ArchiveShell archiveId="arch_does_not_exist">
+        <div>panel content</div>
+      </ArchiveShell>,
+    );
+
+    expect(await screen.findByText("Archive not found")).toBeInTheDocument();
+    // Neither the sidebar chrome nor the child panels mount.
+    expect(
+      screen.queryByRole("link", { name: "Overview" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("panel content")).not.toBeInTheDocument();
+  });
 });

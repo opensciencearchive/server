@@ -89,7 +89,7 @@ describe("CreateArchiveForm", () => {
 
     await waitFor(() =>
       expect(mockRouter.push).toHaveBeenCalledWith(
-        expect.stringMatching(/^\/archives\/arch_/),
+        expect.stringMatching(/^\/deploying\/arch_/),
       ),
     );
   });
