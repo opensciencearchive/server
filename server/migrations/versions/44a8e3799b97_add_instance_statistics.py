@@ -20,7 +20,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
+    """Upgrade schema.
+
+    Idempotent create: a database stamped at ``c6d9f4c0c3ab`` may already hold
+    ``instance_statistics`` if it ran an earlier form of the initial migration
+    that inlined the table. Skip the create in that case so the corrective
+    revision can't fail with a duplicate-relation error.
+    """
+    if sa.inspect(op.get_bind()).has_table("instance_statistics"):
+        return
     op.create_table(
         "instance_statistics",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -33,4 +41,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_table("instance_statistics")
+    if sa.inspect(op.get_bind()).has_table("instance_statistics"):
+        op.drop_table("instance_statistics")
