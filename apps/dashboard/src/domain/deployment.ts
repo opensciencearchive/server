@@ -14,6 +14,8 @@ export interface Deployment {
   archiveId: string;
   provider: "aws_eks";
   status: DeploymentStatus;
+  /** OSA server version this deployment provisioned — recorded on success. */
+  osaVersion: string | null;
   startedAt: Date;
 }
 

@@ -9,20 +9,10 @@ import { ApiError, SlugTakenError } from "@/api/http/errors";
 import type { Archive } from "@/domain/archive";
 import type { Build, ComponentBuild } from "@/domain/build";
 import type { Deployment } from "@/domain/deployment";
-import { type Mocked, mocked } from "@/domain/mocked";
 import type { Organisation } from "@/domain/organisation";
-import type {
-  BuildListItem,
-  DeploymentHistoryEntry,
-  OrgMember,
-} from "@/domain/tenant";
+import type { BuildListItem, OrgMember } from "@/domain/tenant";
 import type { Session } from "@/domain/user";
 
-import {
-  sampleBuildList,
-  sampleDeploymentHistory,
-  sampleOrgMembers,
-} from "./samples";
 import type {
   AmacrinService,
   ArchiveAuthInput,
@@ -39,15 +29,29 @@ function notFound(what: string): ApiError {
   });
 }
 
+/** The OSA server version the mock control plane provisions. */
+const MOCK_OSA_VERSION = "v0.0.9";
+
+/** The signed-in user, as a member of any org they create. */
+const SELF_MEMBER: OrgMember = {
+  userId: "user_mock000001",
+  email: "r.bergstrom@example.ac.uk",
+  role: "owner",
+  joinedAt: new Date("2026-05-02T09:14:00Z"),
+};
+
 interface MockArchiveState {
   archive: Archive;
   deployment: Deployment;
+  /** Superseded deployments, newest first — grows on every redeploy. */
+  past: Deployment[];
   /** Remaining status polls before the deployment advances a stage. */
   pollsUntilAdvance: number;
 }
 
 export class MockAmacrinService implements AmacrinService {
   private readonly organisations = new Map<string, Organisation>();
+  private readonly members = new Map<string, OrgMember[]>();
   private readonly archives = new Map<string, MockArchiveState>();
   private readonly builds = new Map<string, Build>();
   private buildPolls = 0;
@@ -90,6 +94,12 @@ export class MockAmacrinService implements AmacrinService {
   getOrganisation(orgId: string): Promise<Organisation> {
     const org = this.organisations.get(orgId);
     return org ? Promise.resolve(org) : Promise.reject(notFound("organisation"));
+  }
+
+  listOrgMembers(orgId: string): Promise<OrgMember[]> {
+    const org = this.organisations.get(orgId);
+    if (!org) return Promise.reject(notFound("organisation"));
+    return Promise.resolve(this.members.get(orgId) ?? [SELF_MEMBER]);
   }
 
   // ── archives ────────────────────────────────────────────────────────
@@ -158,11 +168,13 @@ export class MockAmacrinService implements AmacrinService {
       archiveId,
       provider: "aws_eks",
       status: { kind: "pending" },
+      osaVersion: null,
       startedAt: T0,
     };
     this.archives.set(archiveId, {
       archive,
       deployment,
+      past: [],
       pollsUntilAdvance: 2,
     });
     return Promise.resolve({ archive, deployment });
@@ -177,12 +189,16 @@ export class MockAmacrinService implements AmacrinService {
       status: { kind: "deploying" },
       updatedAt: T0,
     };
+    state.past = [state.deployment, ...state.past];
     state.deployment = {
       id: this.mintId("deploy"),
       archiveId,
       provider: "aws_eks",
       status: { kind: "pending" },
-      startedAt: T0,
+      osaVersion: null,
+      // No clock in the mock: a redeploy starts a minute after the one it
+      // supersedes, so the history stays ordered newest-first.
+      startedAt: new Date(state.past[0]!.startedAt.getTime() + 60_000),
     };
     state.pollsUntilAdvance = 2;
     return Promise.resolve(state.deployment);
@@ -193,6 +209,12 @@ export class MockAmacrinService implements AmacrinService {
     if (!state) return Promise.reject(notFound("archive"));
     this.advanceDeployment(state);
     return Promise.resolve(state.deployment);
+  }
+
+  listDeployments(archiveId: string): Promise<Deployment[]> {
+    const state = this.archives.get(archiveId);
+    if (!state) return Promise.reject(notFound("archive"));
+    return Promise.resolve([state.deployment, ...state.past]);
   }
 
   destroyArchive(
@@ -223,20 +245,18 @@ export class MockAmacrinService implements AmacrinService {
     return Promise.resolve(this.builds.get(buildId)!);
   }
 
-  // ── no backing API yet: sample data behind the Mocked brand ─────────
-
-  listBuilds(archiveId: string): Promise<Mocked<BuildListItem[]>> {
-    return Promise.resolve(mocked(sampleBuildList(archiveId)));
-  }
-
-  getDeploymentHistory(
-    archiveId: string,
-  ): Promise<Mocked<DeploymentHistoryEntry[]>> {
-    return Promise.resolve(mocked(sampleDeploymentHistory(archiveId)));
-  }
-
-  listOrgMembers(orgId: string): Promise<Mocked<OrgMember[]>> {
-    return Promise.resolve(mocked(sampleOrgMembers(orgId)));
+  listBuilds(archiveId: string): Promise<BuildListItem[]> {
+    const rows = [...this.builds.values()]
+      .filter((b) => b.archiveId === archiveId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .map((b) => ({
+        id: b.id,
+        conventionSlug: b.conventionSlug,
+        conventionRef: b.conventionRef,
+        statusKind: b.status.kind,
+        createdAt: b.createdAt,
+      }));
+    return Promise.resolve(rows);
   }
 
   // ── internals ───────────────────────────────────────────────────────
@@ -262,6 +282,7 @@ export class MockAmacrinService implements AmacrinService {
         url: `https://${state.archive.domain}`,
         completedAt: new Date("2026-07-25T14:03:42Z"),
       },
+      osaVersion: MOCK_OSA_VERSION,
     };
     state.archive = { ...state.archive, status: { kind: "running" } };
   }
@@ -294,6 +315,33 @@ export class MockAmacrinService implements AmacrinService {
     for (const org of [summitLab, personal, radarConsortium]) {
       this.organisations.set(org.id, org);
     }
+
+    // Rosters are oldest-first, as the control plane serves them.
+    this.members.set(summitLab.id, [
+      {
+        userId: "user_01hzy4p1n7",
+        email: "p.marsh@example.ac.uk",
+        role: "owner",
+        joinedAt: new Date("2026-04-28T11:00:00Z"),
+      },
+      { ...SELF_MEMBER, role: "admin", joinedAt: new Date("2026-05-02T09:20:00Z") },
+      {
+        userId: "user_01hzy9q2r4",
+        email: "t.oliveira@example.ac.uk",
+        role: "member",
+        joinedAt: new Date("2026-06-10T15:45:00Z"),
+      },
+    ]);
+    this.members.set(personal.id, [SELF_MEMBER]);
+    this.members.set(radarConsortium.id, [
+      {
+        userId: "user_01hzyc4d8k",
+        email: "a.nakamura@example.ac.uk",
+        role: "owner",
+        joinedAt: new Date("2026-04-11T16:40:12Z"),
+      },
+      { ...SELF_MEMBER, role: "member", joinedAt: new Date("2026-06-02T08:30:00Z") },
+    ]);
 
     this.seedArchive({
       id: "arch_a1p1n3c11m",
@@ -382,11 +430,13 @@ export class MockAmacrinService implements AmacrinService {
               completedAt: new Date("2026-07-25T14:06:00Z"),
             }
           : { kind: "pending" },
+      osaVersion: settled ? MOCK_OSA_VERSION : null,
       startedAt: new Date("2026-07-25T14:02:18Z"),
     };
     this.archives.set(args.id, {
       archive,
       deployment,
+      past: [],
       pollsUntilAdvance: 2,
     });
   }

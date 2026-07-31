@@ -1,14 +1,10 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-
-import { usePlatformServices } from "@/api/services";
 import type { Deployment, DeploymentStatus } from "@/domain/deployment";
 import { deploymentDurationMs } from "@/domain/deployment";
-import { Button, CopyButton, SampleDataChip, Skeleton } from "@/ui";
+import { Button, CopyButton, Skeleton } from "@/ui";
 
 import { useArchive } from "../archives/useArchives";
-import { archiveKeys } from "../archives/keys";
 import { useDeploymentStatus } from "./useDeploymentStatus";
 import { useRedeploy } from "./useRedeploy";
 import styles from "./DeploymentPanel.module.css";
@@ -82,7 +78,6 @@ export function DeploymentPanel({ archiveId }: { archiveId: string }) {
 
       {kind === "succeeded" ? (
         <RunningView
-          archiveId={archiveId}
           deployment={deployment}
           onRedeploy={onRedeploy}
           redeploying={redeploy.isPending}
@@ -103,12 +98,10 @@ export function DeploymentPanel({ archiveId }: { archiveId: string }) {
 }
 
 function RunningView({
-  archiveId,
   deployment,
   onRedeploy,
   redeploying,
 }: {
-  archiveId: string;
   deployment: Deployment;
   onRedeploy: () => void;
   redeploying: boolean;
@@ -116,14 +109,6 @@ function RunningView({
   const status = deployment.status;
   const completedAt = status.kind === "succeeded" ? status.completedAt : null;
   const durationMs = deploymentDurationMs(deployment);
-
-  // The convention ref only exists in the (Mocked) deployment history.
-  const { amacrin } = usePlatformServices();
-  const history = useQuery({
-    queryKey: [...archiveKeys.detail(archiveId), "history"],
-    queryFn: () => amacrin.getDeploymentHistory(archiveId),
-  });
-  const fromRef = history.data?.data[0]?.fromRef ?? null;
 
   return (
     <div className={styles.runningBody}>
@@ -139,10 +124,8 @@ function RunningView({
           <dd className={styles.mono}>{completedAt ? formatDateTime(completedAt) : "—"}</dd>
         </div>
         <div className={styles.row}>
-          <dt>
-            From {fromRef && <SampleDataChip />}
-          </dt>
-          <dd className={styles.mono}>{fromRef ?? "—"}</dd>
+          <dt>Version</dt>
+          <dd className={styles.mono}>{deployment.osaVersion ?? "—"}</dd>
         </div>
         <div className={styles.row}>
           <dt>Took</dt>

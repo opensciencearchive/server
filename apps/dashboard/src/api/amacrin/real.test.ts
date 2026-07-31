@@ -4,9 +4,12 @@ import { describe, expect, it } from "vitest";
 import { HttpClient } from "@/api/http/client";
 import { SlugTakenError } from "@/api/http/errors";
 import archiveRunning from "@/mocks/fixtures/archive.running.json";
+import buildCancelled from "@/mocks/fixtures/build.cancelled.json";
 import buildPublished from "@/mocks/fixtures/build.published.json";
+import deploymentFailed from "@/mocks/fixtures/deployment.failed.json";
 import deploymentSucceeded from "@/mocks/fixtures/deployment.succeeded.json";
 import me from "@/mocks/fixtures/me.json";
+import members from "@/mocks/fixtures/members.json";
 import { server } from "@/mocks/server";
 
 import { RealAmacrinService } from "./real";
@@ -155,14 +158,68 @@ describe("RealAmacrinService", () => {
     expect(build.components).toHaveLength(3);
   });
 
-  it("mock-marked methods return Mocked-branded sample data", async () => {
-    const service = makeService();
-    const builds = await service.listBuilds("arch_1");
-    expect(builds.__mock).toBe(true);
-    expect(builds.data.length).toBeGreaterThan(0);
-    const members = await service.listOrgMembers("org_1");
-    expect(members.__mock).toBe(true);
-    const history = await service.getDeploymentHistory("arch_1");
-    expect(history.__mock).toBe(true);
+  it("listBuilds decodes the archive's history from parent-only rows", async () => {
+    const summary = (build: object) => {
+      const copy = structuredClone(build) as Record<string, unknown>;
+      delete copy["components"];
+      delete copy["archive_id"];
+      return copy;
+    };
+    server.use(
+      http.get(`${BASE}/api/v1/archives/arch_1/builds`, () =>
+        HttpResponse.json([summary(buildPublished), summary(buildCancelled)]),
+      ),
+    );
+
+    const builds = await makeService().listBuilds("arch_1");
+
+    expect(builds.map((b) => b.id)).toEqual([
+      "build_8f3a91c2e5",
+      "build_c9a8b7c6d5",
+    ]);
+    expect(builds[0]!.statusKind).toBe("published");
+    expect(builds[1]!.statusKind).toBe("cancelled");
+  });
+
+  it("listBuilds percent-encodes the archive id in the path", async () => {
+    let url: URL | null = null;
+    server.use(
+      http.get(`${BASE}/api/v1/archives/:id/builds`, ({ request }) => {
+        url = new URL(request.url);
+        return HttpResponse.json([]);
+      }),
+    );
+    await makeService().listBuilds("arch/1");
+    expect(url!.pathname).toBe("/api/v1/archives/arch%2F1/builds");
+  });
+
+  it("listDeployments decodes the archive's deployment history", async () => {
+    server.use(
+      http.get(`${BASE}/api/v1/archives/arch_1/deployments`, () =>
+        HttpResponse.json([deploymentSucceeded, deploymentFailed]),
+      ),
+    );
+
+    const history = await makeService().listDeployments("arch_1");
+
+    expect(history.map((d) => d.status.kind)).toEqual(["succeeded", "failed"]);
+    expect(history[0]!.osaVersion).toBe("v0.0.9");
+  });
+
+  it("listOrgMembers decodes the organisation's roster", async () => {
+    server.use(
+      http.get(`${BASE}/api/v1/organisations/org_1/members`, () =>
+        HttpResponse.json(members),
+      ),
+    );
+
+    const roster = await makeService().listOrgMembers("org_1");
+
+    expect(roster.map((m) => m.email)).toEqual([
+      "r.bergstrom@example.ac.uk",
+      "p.marsh@example.ac.uk",
+      "t.oliveira@example.ac.uk",
+    ]);
+    expect(roster[1]!.role).toBe("owner");
   });
 });

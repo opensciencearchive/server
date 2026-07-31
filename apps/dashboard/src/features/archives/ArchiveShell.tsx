@@ -159,7 +159,7 @@ function PlatformArchiveShell({ archiveId, children }: ShellProps) {
         <SidebarNav
           sections={navSections(
             base,
-            builds.data ? { count: builds.data.data.length } : {},
+            builds.data ? { count: builds.data.length } : {},
           )}
         />
       }

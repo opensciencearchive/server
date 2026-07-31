@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 
-import { Badge, DataTable, PageHeader, SampleDataChip, Skeleton } from "@/ui";
+import { Badge, DataTable, EmptyState, PageHeader, Skeleton } from "@/ui";
 import type { BuildListItem } from "@/domain/tenant";
+import { icons } from "@/features/shell/icons";
 
 import { buildStatusTone } from "./status";
 import { useBuildList } from "./useBuild";
@@ -25,12 +26,11 @@ export function BuildsList({ archiveId }: { archiveId: string }) {
       <PageHeader
         title="Builds"
         description="Every deploy attempt of a convention — its components, status and provenance."
-        actions={<SampleDataChip />}
       />
 
       {builds.isPending ? (
         <Skeleton height="12rem" width="100%" />
-      ) : builds.data ? (
+      ) : builds.data && builds.data.length > 0 ? (
         <DataTable<BuildListItem>
           columns={[
             {
@@ -70,19 +70,27 @@ export function BuildsList({ archiveId }: { archiveId: string }) {
               render: (b) => formatDate(b.createdAt),
             },
           ]}
-          rows={builds.data.data}
+          rows={builds.data}
           rowKey={(b) => b.id}
         />
-      ) : null}
-
-      <div className={styles.note}>
-        <span className={styles.noteLabel}>Note</span>
-        <p>
-          Build history needs a list API — this table is sample data. Real builds
-          are reached from the link that <span className="mono">osa deploy</span>{" "}
-          prints when it submits a convention.
-        </p>
-      </div>
+      ) : builds.isError ? (
+        <EmptyState
+          icon={icons.builds}
+          title="Build history unavailable"
+          description="The control plane did not return this archive's builds. Refresh to try again."
+        />
+      ) : (
+        <EmptyState
+          icon={icons.builds}
+          title="No builds yet"
+          description={
+            <>
+              A build appears here each time <span className="mono">osa deploy</span>{" "}
+              submits a convention to this archive.
+            </>
+          }
+        />
+      )}
     </div>
   );
 }

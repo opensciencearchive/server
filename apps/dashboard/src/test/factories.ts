@@ -40,6 +40,7 @@ export function buildDeployment(over?: Partial<Deployment>): Deployment {
       url: "https://alpine-climate.amacr.in",
       completedAt: new Date("2026-07-25T14:06:00Z"),
     },
+    osaVersion: "v0.0.9",
     startedAt: new Date("2026-07-25T14:02:18Z"),
     ...over,
   };

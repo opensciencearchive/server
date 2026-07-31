@@ -71,9 +71,22 @@ export const wireDeployment = z.object({
   status: z.string(),
   url: z.string().nullish(),
   error_message: z.string().nullish(),
+  /** Tag of the provisioned OSA image — recorded on success only. */
+  osa_version: z.string().nullish(),
   started_at: z.string(),
   completed_at: z.string().nullish(),
 });
+
+export const wireDeploymentList = z.array(wireDeployment);
+
+export const wireOrgMember = z.object({
+  user_id: z.string(),
+  email: z.string(),
+  role: z.string(),
+  joined_at: z.string(),
+});
+
+export const wireOrgMemberList = z.array(wireOrgMember);
 
 export const wireCreateArchiveResponse = z.object({
   archive: wireArchive,
@@ -90,19 +103,25 @@ export const wireComponentBuild = z.object({
   error_message: z.string().nullish(),
 });
 
-export const wireBuild = z.object({
+/** One row of the build history — the parent build, no components. */
+export const wireBuildSummary = z.object({
   id: z.string(),
-  archive_id: z.string(),
   convention_slug: z.string(),
   status: z.string(),
   error_message: z.string().nullish(),
   cancelled_by: z.string().nullish(),
   cancel_reason: z.string().nullish(),
   convention_ref: z.string().nullish(),
-  components: z.array(wireComponentBuild),
   published_at: z.string().nullish(),
   created_at: z.string(),
   updated_at: z.string(),
+});
+
+export const wireBuildList = z.array(wireBuildSummary);
+
+export const wireBuild = wireBuildSummary.extend({
+  archive_id: z.string(),
+  components: z.array(wireComponentBuild),
 });
 
 export const wireErrorResponse = z.object({

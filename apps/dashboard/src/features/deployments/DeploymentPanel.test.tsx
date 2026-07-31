@@ -13,8 +13,9 @@ describe("DeploymentPanel", () => {
     expect(
       screen.getByRole("button", { name: /redeploy/i }),
     ).toBeInTheDocument();
-    // "From" ref comes from Mocked deployment history → sample-data affordance.
-    expect(await screen.findByText("geo-rnaseq-v2@4c1e77b")).toBeInTheDocument();
+    // The provisioned OSA version is real data on the deployment itself.
+    expect(await screen.findByText("v0.0.9")).toBeInTheDocument();
+    expect(screen.queryByText(/sample data/i)).not.toBeInTheDocument();
   });
 
   it("renders the provisioning timeline and the close-tab note while deploying", async () => {

@@ -1,0 +1,20 @@
+[
+  {
+    "user_id": "user_01hzy3k8m2",
+    "email": "r.bergstrom@example.ac.uk",
+    "role": "admin",
+    "joined_at": "2026-05-02T09:20:00.102938Z"
+  },
+  {
+    "user_id": "user_01hzy4p1n7",
+    "email": "p.marsh@example.ac.uk",
+    "role": "owner",
+    "joined_at": "2026-04-28T11:00:00.000000Z"
+  },
+  {
+    "user_id": "user_01hzy9q2r4",
+    "email": "t.oliveira@example.ac.uk",
+    "role": "member",
+    "joined_at": "2026-06-10T15:45:00.000000Z"
+  }
+]

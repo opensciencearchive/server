@@ -18,6 +18,7 @@ import deploymentInProgress from "./fixtures/deployment.in-progress.json";
 import deploymentPending from "./fixtures/deployment.pending.json";
 import deploymentSucceeded from "./fixtures/deployment.succeeded.json";
 import me from "./fixtures/me.json";
+import members from "./fixtures/members.json";
 import organisations from "./fixtures/organisations.json";
 
 const ARCHIVES = [archiveRunning, archiveError, archiveDeploying];
@@ -60,6 +61,9 @@ export const handlers = [
       ? HttpResponse.json(org)
       : jsonError(404, "not_found", `organisation '${String(params["orgId"])}' not found`);
   }),
+  http.get("*/api/v1/organisations/:orgId/members", () =>
+    HttpResponse.json(members),
+  ),
   http.get("*/api/v1/organisations/:orgId/archives", ({ params }) => {
     return HttpResponse.json(
       ARCHIVES.filter((a) => a.organisation_id === params["orgId"]),
@@ -113,6 +117,10 @@ export const handlers = [
       { status: 202 },
     ),
   ),
+  http.get("*/api/v1/archives/:id/deployments", ({ params }) => {
+    const deployment = DEPLOYMENTS_BY_ARCHIVE[String(params["id"])];
+    return HttpResponse.json(deployment ? [deployment] : []);
+  }),
   http.get("*/api/v1/archives/:id/status", ({ params }) => {
     const deployment = DEPLOYMENTS_BY_ARCHIVE[String(params["id"])];
     return deployment
@@ -131,6 +139,20 @@ export const handlers = [
   }),
 
   // ── builds ──────────────────────────────────────────────────────────
+  // The list is parent-only: components ride GET /builds/{id}.
+  http.get("*/api/v1/archives/:id/builds", ({ params }) => {
+    const rows = BUILDS.filter((b) => b.archive_id === params["id"])
+      .map((build) => {
+        const parent = structuredClone(build) as Record<string, unknown>;
+        delete parent["components"];
+        delete parent["archive_id"];
+        return parent;
+      })
+      .sort((a, b) =>
+        String(b["created_at"]).localeCompare(String(a["created_at"])),
+      );
+    return HttpResponse.json(rows);
+  }),
   http.get("*/api/v1/builds/:id", ({ params }) => {
     const build = BUILDS.find((b) => b.id === params["id"]);
     return build

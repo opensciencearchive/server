@@ -1,12 +1,12 @@
 /**
  * Tenant-archive concepts — what lives INSIDE an OSA instance (records,
- * features, hooks, ingesters, observability, sign-in) plus platform-shaped data
- * the cloud API cannot serve yet (build lists, deployment history, members).
+ * features, hooks, ingesters, observability, sign-in), plus the cloud-only
+ * `BuildListItem`/`OrgMember` rows served by the control plane.
  *
- * In self-host, `RealOSAService` fills these from the archive's real endpoints.
- * On the platform build, `MockOSAService` returns sample values (surfaced with a
- * `<SampleDataChip/>`), since the tenant read path through the control plane
- * hasn't shipped. The `Build*`/`Deployment*`/`OrgMember` types remain cloud-only.
+ * In self-host, `RealOSAService` fills the tenant types from the archive's real
+ * endpoints. On the platform build, `MockOSAService` returns sample values
+ * (surfaced with a `<SampleDataChip/>`), since the tenant read path through the
+ * control plane hasn't shipped.
  */
 
 import type { BuildStatusKind } from "./build";
@@ -94,7 +94,7 @@ export interface TenantAuthView {
   adminOrcidIds: string[];
 }
 
-/** A row in the (API-less) builds list. */
+/** A row in the builds list — the parent build only, no components. */
 export interface BuildListItem {
   id: string;
   conventionSlug: string;
@@ -103,18 +103,12 @@ export interface BuildListItem {
   createdAt: Date;
 }
 
-/** A past deployment (the cloud API only serves the latest). */
-export interface DeploymentHistoryEntry {
-  id: string;
-  deployedAt: Date;
-  fromRef: string;
-  durationSeconds: number;
-  outcome: "succeeded" | "failed";
-}
-
-/** An organisation member (membership API is deferred). */
+/**
+ * One row of an organisation's membership roster. The control plane knows
+ * people by email — there are no display names to show.
+ */
 export interface OrgMember {
-  name: string;
+  userId: string;
   email: string;
   role: Role;
   joinedAt: Date;

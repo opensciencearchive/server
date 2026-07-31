@@ -1,8 +1,9 @@
 import styles from "./SampleDataChip.module.css";
 
 /**
- * Marks a section rendered from `Mocked<T>` data — no backing API yet.
- * Every unwrap of a Mocked value should surface one of these.
+ * Marks a section rendered from sample values rather than the archive's own
+ * data — the tenant read path (`MockOSAService`, `tenantDataIsSample`) on a
+ * platform build. Control-plane surfaces are all real and never show this.
  */
 export function SampleDataChip() {
   return (
