@@ -1,6 +1,6 @@
 {
   "name": "@opensciencearchive/osa-widgets",
-  "version": "0.0.10",
+  "version": "0.0.11",
   "private": true,
   "description": "MCP Apps widget library for the OSA platform — self-contained HTML widget bundles",
   "type": "module",
