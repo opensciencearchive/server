@@ -32,6 +32,7 @@ describe("useCreateOrganisation", () => {
     result.current.mutate({ name: "New Lab" });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.sessionRefreshed).toBe(true);
     expect(fetchSpy).toHaveBeenCalledWith("/api/auth/refresh", { method: "POST" });
     expect(calls[0]).toBe("fetch:/api/auth/refresh");
     expect(calls.indexOf("fetch:/api/auth/refresh")).toBeLessThan(
@@ -39,7 +40,7 @@ describe("useCreateOrganisation", () => {
     );
   });
 
-  it("fails the mutation (and skips invalidation) when the refresh is rejected", async () => {
+  it("still succeeds (no double-create) but flags sessionRefreshed=false when refresh fails", async () => {
     const services = makeTestServices();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(null, { status: 401 }),
@@ -53,9 +54,12 @@ describe("useCreateOrganisation", () => {
     const { result } = renderHook(() => useCreateOrganisation(), { wrapper });
     result.current.mutate({ name: "New Lab" });
 
-    // A non-2xx refresh must surface as a mutation error, not a silent success
-    // that then refetches with stale token claims.
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    // A failed refresh must NOT become a mutation error (that would re-enable the
+    // form and risk a duplicate create). It's a success with sessionRefreshed=false.
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.isError).toBe(false);
+    expect(result.current.data?.sessionRefreshed).toBe(false);
+    expect(result.current.data?.created).toBeDefined();
     expect(invalidateSpy).not.toHaveBeenCalled();
   });
 });

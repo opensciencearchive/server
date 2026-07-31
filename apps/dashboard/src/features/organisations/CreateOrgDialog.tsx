@@ -33,9 +33,16 @@ export function CreateOrgDialog({
     create.mutate(
       { name: trimmed },
       {
-        onSuccess: (organisation) => {
+        onSuccess: ({ created, sessionRefreshed }) => {
           close();
-          router.push(`/organisations/${organisation.id}`);
+          // The org is committed either way. If the session refreshed, its new
+          // claims let us open the org; if not, the session is dead — re-auth,
+          // and the org surfaces on the way back in.
+          if (sessionRefreshed) {
+            router.push(`/organisations/${created.id}`);
+          } else {
+            router.replace("/sign-in");
+          }
         },
       },
     );
