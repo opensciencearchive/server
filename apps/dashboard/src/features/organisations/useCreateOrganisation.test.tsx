@@ -62,4 +62,18 @@ describe("useCreateOrganisation", () => {
     expect(result.current.data?.created).toBeDefined();
     expect(invalidateSpy).not.toHaveBeenCalled();
   });
+
+  it("stays a success (no duplicate-create retry) when the refresh fetch rejects", async () => {
+    const services = makeTestServices();
+    // A transport error (fetch rejects) must not fail the committed create.
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("network down"));
+
+    const { wrapper } = renderHookWrapper({ services });
+    const { result } = renderHook(() => useCreateOrganisation(), { wrapper });
+    result.current.mutate({ name: "New Lab" });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.isError).toBe(false);
+    expect(result.current.data?.sessionRefreshed).toBe(false);
+  });
 });

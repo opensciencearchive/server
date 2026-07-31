@@ -48,9 +48,15 @@ export function coalesceRefresh(refreshToken: string): Promise<AmacrinTokens> {
 
   const pending = refreshTokens(refreshToken)
     .then((tokens) => {
-      recent.set(refreshToken, { tokens, at: Date.now() });
-      // Evict after the grace window; unref so it never keeps the process alive.
-      setTimeout(() => recent.delete(refreshToken), RESULT_TTL_MS).unref?.();
+      const entry = { tokens, at: Date.now() };
+      recent.set(refreshToken, entry);
+      // Evict after the grace window — but only if this is still OUR entry. A
+      // later refresh of the same key replaces it; without the identity check a
+      // stale timer would delete that fresh result. unref so it never keeps the
+      // process alive.
+      setTimeout(() => {
+        if (recent.get(refreshToken) === entry) recent.delete(refreshToken);
+      }, RESULT_TTL_MS).unref?.();
       return tokens;
     })
     .finally(() => {

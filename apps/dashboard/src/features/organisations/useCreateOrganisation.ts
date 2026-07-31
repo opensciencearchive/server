@@ -32,9 +32,17 @@ export function useCreateOrganisation() {
     mutationFn: async ({ name }: { name: string }): Promise<CreateOrganisationResult> => {
       const created = await amacrin.createOrganisation(name);
       // The BFF holds the token; ask it to rotate+re-seal so the new org claim
-      // is present. `fetch` resolves on non-2xx, so check `ok` explicitly.
-      const refreshed = await fetch("/api/auth/refresh", { method: "POST" });
-      return { created, sessionRefreshed: refreshed.ok };
+      // is present. The refresh must NEVER fail the mutation (the create already
+      // committed): a non-2xx OR a transport rejection both resolve to
+      // `sessionRefreshed: false`, and the caller re-auths instead of retrying.
+      let sessionRefreshed = false;
+      try {
+        const refreshed = await fetch("/api/auth/refresh", { method: "POST" });
+        sessionRefreshed = refreshed.ok;
+      } catch {
+        sessionRefreshed = false;
+      }
+      return { created, sessionRefreshed };
     },
     // Only refetch with the new claims when the refresh actually landed —
     // otherwise the queries would repopulate from the stale token. Order
