@@ -13,7 +13,7 @@ import styles from "./pages.module.css";
 export function HooksPanel({ archiveId }: { archiveId: string }) {
   // Self-host reads real hooks from the archive; platform has no tenant path,
   // so its list is sample data (chip + note).
-  const isSample = useServices().isPlatform;
+  const isSample = useServices().tenantDataIsSample;
   const hooks = useTenantHooks(archiveId);
   const list = hooks.data ?? [];
   const base = `/archives/${archiveId}`;

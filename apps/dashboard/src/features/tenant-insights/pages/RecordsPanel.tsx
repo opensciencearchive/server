@@ -42,7 +42,7 @@ function fieldsPreview(fields: Record<string, unknown>): string {
 
 export function RecordsPanel({ archiveId }: { archiveId: string }) {
   // Self-host reads real records; platform's are sample data (chip + note).
-  const isSample = useServices().isPlatform;
+  const isSample = useServices().tenantDataIsSample;
   const stats = useRecordStats(archiveId);
   const schemas = useTenantSchemas(archiveId);
 

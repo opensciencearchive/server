@@ -1,9 +1,16 @@
 /**
- * RealOSAService — reads the local archive through the same-origin BFF proxy
- * (`/api/osa/*`), which attaches the server-held SUPERADMIN token (issue #173).
- * Every method hits a real archive endpoint; there is no sample data here.
- * Runs client-side, so a relative `baseUrl` resolves to the dashboard origin and
- * rides the httpOnly session cookie.
+ * RealOSAService — reads a real archive's OSA API through a same-origin BFF
+ * proxy. The base is resolved per archive so one service serves both shapes:
+ *
+ * - **self-host** (#173): the single local archive via `/api/osa/*` (the
+ *   `archiveId` is ignored — there is only one archive).
+ * - **platform** (#185): a tenant archive via the control-plane read-proxy at
+ *   `/api/amacrin/api/v1/archives/{id}/osa/*`, which mints a scoped, per-node
+ *   token server-side (the browser never holds a tenant credential).
+ *
+ * Every method hits a real endpoint; there is no sample data here. Runs
+ * client-side, so a relative base resolves to the dashboard origin and rides the
+ * httpOnly session cookie.
  */
 import type {
   FeatureTable,
@@ -31,16 +38,33 @@ import {
   decodeRecordsPage,
 } from "./wire/decode";
 
-export class RealOSAService implements OSAService {
-  private readonly baseUrl: string;
+/** Resolves the read-proxy base for a given archive. */
+export type ResolveBase = (archiveId: string) => string;
 
-  constructor(baseUrl: string) {
-    this.baseUrl = baseUrl.replace(/\/$/, "");
+export interface RealOSAServiceOptions {
+  /**
+   * Auth-config source. The tenant read-proxy has no `auth` surface, so the
+   * platform build supplies this (sample data) rather than a live read; self-host
+   * omits it and reads the local archive via the bespoke `/api/auth-config` route.
+   */
+  getAuthConfig?: (archiveId: string) => Promise<TenantAuthView>;
+}
+
+export class RealOSAService implements OSAService {
+  private readonly resolveBase: ResolveBase;
+  private readonly authConfigOverride:
+    | ((archiveId: string) => Promise<TenantAuthView>)
+    | undefined;
+
+  constructor(resolveBase: ResolveBase, options?: RealOSAServiceOptions) {
+    this.resolveBase = resolveBase;
+    this.authConfigOverride = options?.getAuthConfig;
   }
 
-  /** Fetch JSON through the BFF read proxy (`/api/osa/<root>/...`). */
-  private async getJson(path: string): Promise<unknown> {
-    return this.fetchJson(`${this.baseUrl}${path}`);
+  /** Fetch JSON from the archive's read-proxy base (`<base>/<path>`). */
+  private async getJson(archiveId: string, path: string): Promise<unknown> {
+    const base = this.resolveBase(archiveId).replace(/\/$/, "");
+    return this.fetchJson(`${base}${path}`);
   }
 
   private async fetchJson(url: string): Promise<unknown> {
@@ -52,17 +76,15 @@ export class RealOSAService implements OSAService {
   }
 
   async getRecordStats(archiveId: string): Promise<RecordStats> {
-    void archiveId;
-    return decodeRecordStats(await this.getJson("/stats"));
+    return decodeRecordStats(await this.getJson(archiveId, "/stats"));
   }
 
   /** Catalog → per-schema manifest row counts (one row per published schema). */
   async getRecordTypeBreakdown(archiveId: string): Promise<RecordTypeCount[]> {
-    void archiveId;
-    const ids = decodeCatalogSchemaIds(await this.getJson("/data"));
+    const ids = decodeCatalogSchemaIds(await this.getJson(archiveId, "/data"));
     const counts = await Promise.all(
       ids.map((id) =>
-        this.getJson(`/data/${encodeURIComponent(id)}`)
+        this.getJson(archiveId, `/data/${encodeURIComponent(id)}`)
           .then(decodeRecordTypeCount)
           .catch(() => null),
       ),
@@ -71,23 +93,23 @@ export class RealOSAService implements OSAService {
   }
 
   async listSchemas(archiveId: string): Promise<string[]> {
-    void archiveId;
-    return decodeCatalogSchemaIds(await this.getJson("/data"));
+    return decodeCatalogSchemaIds(await this.getJson(archiveId, "/data"));
   }
 
   async listRecords(archiveId: string, schema: string): Promise<TenantRecord[]> {
-    void archiveId;
-    const json = await this.getJson(`/data/${encodeURIComponent(schema)}/records`);
+    const json = await this.getJson(
+      archiveId,
+      `/data/${encodeURIComponent(schema)}/records`,
+    );
     return decodeRecordsPage(json, schema);
   }
 
   /** Catalog → per-schema manifests → the feature tables across all schemas. */
   async listFeatureTables(archiveId: string): Promise<FeatureTable[]> {
-    void archiveId;
-    const ids = decodeCatalogSchemaIds(await this.getJson("/data"));
+    const ids = decodeCatalogSchemaIds(await this.getJson(archiveId, "/data"));
     const perSchema = await Promise.all(
       ids.map((id) =>
-        this.getJson(`/data/${encodeURIComponent(id)}`)
+        this.getJson(archiveId, `/data/${encodeURIComponent(id)}`)
           .then((m) => decodeFeatureTables(m, id))
           .catch(() => [] as FeatureTable[]),
       ),
@@ -96,28 +118,26 @@ export class RealOSAService implements OSAService {
   }
 
   async listHooks(archiveId: string): Promise<TenantHook[]> {
-    void archiveId;
-    return decodeHookCatalog(await this.getJson("/hooks"));
+    return decodeHookCatalog(await this.getJson(archiveId, "/hooks"));
   }
 
   async listIngesters(archiveId: string): Promise<TenantIngester[]> {
-    void archiveId;
-    return decodeIngesterCatalog(await this.getJson("/ingesters"));
+    return decodeIngesterCatalog(await this.getJson(archiveId, "/ingesters"));
   }
 
   async listIngestionRuns(archiveId: string): Promise<IngestionRun[]> {
-    void archiveId;
-    return decodeIngestionRuns(await this.getJson("/ingestions"));
+    return decodeIngestionRuns(await this.getJson(archiveId, "/ingestions"));
   }
 
   async getObservability(archiveId: string): Promise<ObservabilitySnapshot> {
-    void archiveId;
-    return decodeObservability(await this.getJson("/ready"));
+    return decodeObservability(await this.getJson(archiveId, "/ready"));
   }
 
   async getAuthConfig(archiveId: string): Promise<TenantAuthView> {
-    void archiveId;
-    // Bespoke BFF route, not the generic proxy (keeps /auth/* off the proxy).
+    if (this.authConfigOverride !== undefined) {
+      return this.authConfigOverride(archiveId);
+    }
+    // Self-host bespoke BFF route, not the generic proxy (keeps /auth/* off it).
     return decodeAuthConfig(await this.fetchJson("/api/auth-config"));
   }
 }

@@ -41,10 +41,22 @@ export type { ApiMode };
 /** Same-origin base for control-plane calls through the platform BFF proxy. */
 const AMACRIN_PROXY_BASE = "/api/amacrin";
 
+/** The control-plane read-proxy base for a tenant archive's OSA API (#185). */
+function tenantOsaBase(archiveId: string): string {
+  return `${AMACRIN_PROXY_BASE}/api/v1/archives/${encodeURIComponent(archiveId)}/osa`;
+}
+
 export interface Services {
   osa: OSAService;
   /** Which runtime identity built these services. */
   isPlatform: boolean;
+  /**
+   * Whether `osa` serves in-memory sample data (platform `mock` mode / demos)
+   * rather than a real archive — drives the "sample data" chip. Note: the
+   * platform auth-config view has no tenant read surface, so it is always sample
+   * on platform regardless of this flag.
+   */
+  tenantDataIsSample: boolean;
   /** Cloud control-plane service — present only in a platform build. */
   amacrin?: AmacrinService;
 }
@@ -61,25 +73,39 @@ export function buildServices(opts: {
 }): Services {
   if (!opts.isPlatform) {
     // Self-hosted: no cloud control plane. Project-level data comes from the
-    // local archive via the same-origin BFF proxy.
-    return { osa: new RealOSAService(apiProxyBaseUrl()), isPlatform: false };
+    // single local archive via the same-origin BFF proxy.
+    return {
+      osa: new RealOSAService(() => apiProxyBaseUrl()),
+      isPlatform: false,
+      tenantDataIsSample: false,
+    };
   }
-
-  const osa = new MockOSAService();
 
   if (opts.mode === "mock") {
-    return { amacrin: new MockAmacrinService(), osa, isPlatform: true };
+    // Demos/previews: fully in-memory, including tenant data.
+    return {
+      amacrin: new MockAmacrinService(),
+      osa: new MockOSAService(),
+      isPlatform: true,
+      tenantDataIsSample: true,
+    };
   }
 
-  // real + msw: the browser holds no token. Control-plane calls go same-origin
-  // through the BFF proxy (`/api/amacrin`), which attaches the sealed bearer and
-  // refreshes it server-side; a 401 means the session is gone → sign out.
+  // real + msw: the browser holds no token. Control-plane and tenant reads go
+  // same-origin through the BFF proxy (`/api/amacrin`), which attaches the sealed
+  // bearer and refreshes it server-side; a 401 means the session is gone → sign
+  // out. Tenant reads hit the per-archive read-proxy; the auth-config view has no
+  // tenant read surface, so it stays sample.
   const client = new HttpClient({
     baseUrl: AMACRIN_PROXY_BASE,
     onUnauthorized: opts.onSessionLost,
   });
   const amacrin = new RealAmacrinService({ baseUrl: AMACRIN_PROXY_BASE, client });
-  return { amacrin, osa, isPlatform: true };
+  const sampleAuth = new MockOSAService();
+  const osa = new RealOSAService(tenantOsaBase, {
+    getAuthConfig: (archiveId) => sampleAuth.getAuthConfig(archiveId),
+  });
+  return { amacrin, osa, isPlatform: true, tenantDataIsSample: false };
 }
 
 const ServicesContext = createContext<Services | null>(null);

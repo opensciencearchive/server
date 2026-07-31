@@ -24,6 +24,9 @@ export function makeTestServices(
     // Default to a platform-shaped session (amacrin present); self-host tests
     // pass `isPlatform: false`.
     isPlatform: overrides?.isPlatform ?? true,
+    // Test services use the in-memory MockOSAService, so tenant data is sample
+    // unless a test overrides it.
+    tenantDataIsSample: overrides?.tenantDataIsSample ?? true,
   };
 }
 

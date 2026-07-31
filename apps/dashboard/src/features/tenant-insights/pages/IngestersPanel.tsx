@@ -14,7 +14,7 @@ function shortDigest(digest: string): string {
 
 export function IngestersPanel({ archiveId }: { archiveId: string }) {
   // Self-host reads real ingesters; platform's are sample data (chip + note).
-  const isSample = useServices().isPlatform;
+  const isSample = useServices().tenantDataIsSample;
   const ingesters = useTenantIngesters(archiveId);
   const list = ingesters.data ?? [];
 

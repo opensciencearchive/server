@@ -34,7 +34,7 @@ function formatStarted(date: Date): string {
 
 export function IngestionsPanel({ archiveId }: { archiveId: string }) {
   // Self-host reads real runs; platform's are sample data (chip + note).
-  const isSample = useServices().isPlatform;
+  const isSample = useServices().tenantDataIsSample;
   const runs = useIngestionRuns(archiveId);
   const list = runs.data ?? [];
 
