@@ -61,7 +61,10 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 }
 
 export const config = {
-  // Guard everything except API routes, Next internals, and the public
-  // sign-in page.
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|sign-in).*)"],
+  // Guard everything except API routes, Next internals, the public sign-in
+  // page, and static files (any path with a file extension — `public/`
+  // assets like /osa-logo.svg must load on the signed-out sign-in page;
+  // without the `.*\..*` exclusion the guard 307s them to /sign-in and
+  // images render broken).
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|sign-in|.*\\..*).*)"],
 };
