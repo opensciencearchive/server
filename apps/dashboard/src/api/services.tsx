@@ -94,17 +94,14 @@ export function buildServices(opts: {
   // real + msw: the browser holds no token. Control-plane and tenant reads go
   // same-origin through the BFF proxy (`/api/amacrin`), which attaches the sealed
   // bearer and refreshes it server-side; a 401 means the session is gone → sign
-  // out. Tenant reads hit the per-archive read-proxy; the auth-config view has no
-  // tenant read surface, so it stays sample.
+  // out. Tenant reads — including the non-secret sign-in config — hit the
+  // per-archive read-proxy.
   const client = new HttpClient({
     baseUrl: AMACRIN_PROXY_BASE,
     onUnauthorized: opts.onSessionLost,
   });
   const amacrin = new RealAmacrinService({ baseUrl: AMACRIN_PROXY_BASE, client });
-  const sampleAuth = new MockOSAService();
-  const osa = new RealOSAService(tenantOsaBase, {
-    getAuthConfig: (archiveId) => sampleAuth.getAuthConfig(archiveId),
-  });
+  const osa = new RealOSAService(tenantOsaBase);
   return { amacrin, osa, isPlatform: true, tenantDataIsSample: false };
 }
 

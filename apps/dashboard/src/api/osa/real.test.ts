@@ -1,8 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { TenantAuthView } from "@/domain/tenant";
-
 import { RealOSAService } from "./real";
 
 const STATS = {
@@ -10,6 +8,12 @@ const STATS = {
   records_this_month: 2,
   features_per_record: 3,
   storage_bytes: 100,
+};
+
+const AUTH_CONFIG = {
+  provider: "orcid",
+  client_id: "APP-1",
+  admin_orcids: ["0000-0002-1825-0097"],
 };
 
 function spyFetch(payload: unknown): string[] {
@@ -41,14 +45,18 @@ describe("RealOSAService base resolution", () => {
     expect(seen[0]).toBe("/api/amacrin/api/v1/archives/arch_1/osa/stats");
   });
 
-  it("uses the injected auth-config source instead of the bespoke route", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const override = vi.fn((): Promise<TenantAuthView> => Promise.resolve({} as TenantAuthView));
-    const svc = new RealOSAService(() => "/base", { getAuthConfig: override });
+  it("self-host reads auth config through the same-origin proxy (auth/config)", async () => {
+    const seen = spyFetch(AUTH_CONFIG);
+    await new RealOSAService(() => "/api/osa").getAuthConfig("arch_ignored");
+    expect(seen[0]).toBe("/api/osa/auth/config");
+  });
 
+  it("platform reads auth config through the per-archive read-proxy surface", async () => {
+    const seen = spyFetch(AUTH_CONFIG);
+    const svc = new RealOSAService(
+      (id) => `/api/amacrin/api/v1/archives/${id}/osa`,
+    );
     await svc.getAuthConfig("arch_1");
-
-    expect(override).toHaveBeenCalledWith("arch_1");
-    expect(fetchSpy).not.toHaveBeenCalled(); // never hits /api/auth-config
+    expect(seen[0]).toBe("/api/amacrin/api/v1/archives/arch_1/osa/auth/config");
   });
 });

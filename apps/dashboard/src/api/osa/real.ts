@@ -1,6 +1,7 @@
 /**
  * RealOSAService — reads a real archive's OSA API through a same-origin BFF
- * proxy. The base is resolved per archive so one service serves both shapes:
+ * proxy. Self-host and platform are the SAME service, differing only in the
+ * per-archive base URL:
  *
  * - **self-host** (#173): the single local archive via `/api/osa/*` (the
  *   `archiveId` is ignored — there is only one archive).
@@ -8,9 +9,10 @@
  *   `/api/amacrin/api/v1/archives/{id}/osa/*`, which mints a scoped, per-node
  *   token server-side (the browser never holds a tenant credential).
  *
- * Every method hits a real endpoint; there is no sample data here. Runs
- * client-side, so a relative base resolves to the dashboard origin and rides the
- * httpOnly session cookie.
+ * Every read — including the non-secret sign-in config at `/auth/config` — goes
+ * through the same proxy path; the only difference between the two builds is the
+ * base prefix. There is no sample data here. Runs client-side, so a relative
+ * base resolves to the dashboard origin and rides the httpOnly session cookie.
  */
 import type {
   FeatureTable,
@@ -41,24 +43,11 @@ import {
 /** Resolves the read-proxy base for a given archive. */
 export type ResolveBase = (archiveId: string) => string;
 
-export interface RealOSAServiceOptions {
-  /**
-   * Auth-config source. The tenant read-proxy has no `auth` surface, so the
-   * platform build supplies this (sample data) rather than a live read; self-host
-   * omits it and reads the local archive via the bespoke `/api/auth-config` route.
-   */
-  getAuthConfig?: (archiveId: string) => Promise<TenantAuthView>;
-}
-
 export class RealOSAService implements OSAService {
   private readonly resolveBase: ResolveBase;
-  private readonly authConfigOverride:
-    | ((archiveId: string) => Promise<TenantAuthView>)
-    | undefined;
 
-  constructor(resolveBase: ResolveBase, options?: RealOSAServiceOptions) {
+  constructor(resolveBase: ResolveBase) {
     this.resolveBase = resolveBase;
-    this.authConfigOverride = options?.getAuthConfig;
   }
 
   /** Fetch JSON from the archive's read-proxy base (`<base>/<path>`). */
@@ -134,10 +123,9 @@ export class RealOSAService implements OSAService {
   }
 
   async getAuthConfig(archiveId: string): Promise<TenantAuthView> {
-    if (this.authConfigOverride !== undefined) {
-      return this.authConfigOverride(archiveId);
-    }
-    // Self-host bespoke BFF route, not the generic proxy (keeps /auth/* off it).
-    return decodeAuthConfig(await this.fetchJson("/api/auth-config"));
+    // Non-secret sign-in config through the same read proxy as every other
+    // surface — self-host and platform both allowlist exactly `auth/config`
+    // (#184/#185).
+    return decodeAuthConfig(await this.getJson(archiveId, "/auth/config"));
   }
 }

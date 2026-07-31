@@ -23,13 +23,13 @@ describe("RecordsPanel", () => {
 });
 
 describe("AuthenticationPanel", () => {
-  it("shows the configured admins and marks the client id as sample on platform", async () => {
+  it("shows the configured admins and flags sample data in demo/mock mode", async () => {
+    // Default test services use MockOSAService (tenantDataIsSample), so the
+    // panel renders the sample admins with the sample-data chip.
     renderWithProviders(<AuthenticationPanel archiveId={ARCHIVE_ID} />);
 
-    // Admins come from the auth-config endpoint (mock on the platform build).
     expect(await screen.findByText("0000-0002-1825-0097")).toBeInTheDocument();
     expect(screen.getByText("0000-0001-5109-3700")).toBeInTheDocument();
-    // Client ID carries the sample-data chip on the platform build.
     expect(screen.getByText("Sample data")).toBeInTheDocument();
   });
 });
@@ -60,13 +60,14 @@ describe("sample-data chip gating", () => {
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
-  it("still marks the auth-config view as sample on platform (no tenant read surface)", async () => {
-    // Even with real tenant reads, auth-config has no read-proxy surface.
+  it("shows the auth config with NO chip for a real archive (auth is a read surface now)", async () => {
+    // Auth config is read through the same proxy as every other surface
+    // (#184/#185), so a real archive shows it for real — no sample affordance.
     renderWithProviders(<AuthenticationPanel archiveId={ARCHIVE_ID} />, {
       services: { ...makeTestServices(), tenantDataIsSample: false },
     });
 
     expect(await screen.findByText("0000-0002-1825-0097")).toBeInTheDocument();
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 });
