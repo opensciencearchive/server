@@ -212,8 +212,9 @@ jobs:
           OSA_AUTH__JWT__SECRET: test-secret-for-integration-tests-minimum-32-chars
           TEST: "1"
 
-  # Build & push Docker image (main + PRs onto main, gated on all server checks)
-  image:
+  # Build & push the server image (main + PRs onto main, gated on all server
+  # checks). Only when server code changed.
+  server-image:
     name: Server - Image
     needs: [changes, server-lint, server-typecheck, server-test, server-contract, server-integration]
     if: >-
@@ -221,7 +222,22 @@ jobs:
         github.ref == 'refs/heads/main' ||
         (github.event_name == 'pull_request' && github.base_ref == 'main')
       )
-    uses: ./.github/workflows/image.yml
+    uses: ./.github/workflows/server-image.yml
+    permissions:
+      contents: read
+      packages: write
+
+  # Build & push the dashboard image variants (main + PRs onto main, gated on the
+  # dashboard check). Only when dashboard code changed — independent of the server.
+  dashboard-image:
+    name: Dashboard - Image
+    needs: [changes, dashboard-check]
+    if: >-
+      needs.changes.outputs.dashboard == 'true' && (
+        github.ref == 'refs/heads/main' ||
+        (github.event_name == 'pull_request' && github.base_ref == 'main')
+      )
+    uses: ./.github/workflows/dashboard-image.yml
     permissions:
       contents: read
       packages: write

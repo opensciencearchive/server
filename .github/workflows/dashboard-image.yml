@@ -1,0 +1,68 @@
+name: Dashboard Image
+
+on:
+  workflow_call:
+  release:
+    types: [published]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_DASHBOARD: ghcr.io/${{ github.repository_owner }}/osa-dashboard
+
+jobs:
+  # Self-hostable management dashboard (#173). Published in two variants from the
+  # one Dockerfile (#185): the default self-host image (IS_PLATFORM=false, pulled
+  # by the CLI via OSA_IMAGE_VERSION) and a `platform-`-prefixed image
+  # (IS_PLATFORM=true) that the hosted control plane deploys. NEXT_PUBLIC_* are
+  # inlined at build, so the mode is fixed per image — hence one build per variant.
+  dashboard:
+    name: Build & Push (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: self-host
+            is_platform: "false"
+            tag_prefix: ""
+          - variant: platform
+            is_platform: "true"
+            tag_prefix: "platform-"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: tags
+        run: |
+          PREFIX="${{ matrix.tag_prefix }}"
+          SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+          TAGS="${{ env.IMAGE_DASHBOARD }}:${PREFIX}sha-${SHA_SHORT}"
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            TAGS="${TAGS},${{ env.IMAGE_DASHBOARD }}:${PREFIX}${{ github.event.release.tag_name }}"
+          fi
+          if [[ -n "${{ github.event.pull_request.number }}" ]]; then
+            TAGS="${TAGS},${{ env.IMAGE_DASHBOARD }}:${PREFIX}pr-${{ github.event.pull_request.number }}"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: apps/dashboard
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=dashboard-${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=dashboard-${{ matrix.variant }}
+          build-args: |
+            NEXT_PUBLIC_IS_PLATFORM=${{ matrix.is_platform }}
+            NEXT_PUBLIC_API_MODE=real
