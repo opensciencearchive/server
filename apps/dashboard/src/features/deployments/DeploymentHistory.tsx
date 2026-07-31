@@ -106,6 +106,12 @@ export function DeploymentHistory({ archiveId }: { archiveId: string }) {
           rowKey={(d) => d.id}
           rowTone={(d) => (d.status.kind === "failed" ? "danger" : undefined)}
         />
+      ) : deployments.isError ? (
+        <EmptyState
+          icon={icons.archives}
+          title="History unavailable"
+          description="The control plane did not return this archive's deployments. Refresh to try again."
+        />
       ) : (
         <EmptyState
           icon={icons.archives}
