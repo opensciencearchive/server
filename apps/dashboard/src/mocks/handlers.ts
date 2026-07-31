@@ -36,17 +36,8 @@ function jsonError(status: number, error: string, message: string) {
 
 export const handlers = [
   // ── auth ────────────────────────────────────────────────────────────
-  http.post("*/api/v1/auth/refresh", () =>
-    HttpResponse.json({
-      access_token: "msw-access-token",
-      expires_in: 900,
-      token_type: "Bearer",
-    }),
-  ),
-  http.post(
-    "*/api/v1/auth/logout",
-    () => new HttpResponse(null, { status: 204 }),
-  ),
+  // Refresh/logout are the BFF's job now (#185) — the browser never calls the
+  // control plane's cookie flow, so only the identity read is mocked here.
   http.get("*/api/v1/auth/me", () => HttpResponse.json(me)),
 
   // ── organisations ───────────────────────────────────────────────────
