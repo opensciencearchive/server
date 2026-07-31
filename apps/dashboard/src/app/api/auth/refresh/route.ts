@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { refreshTokens } from "@/server/amacrin";
 import { sessionSecret } from "@/server/env";
+import { coalesceRefresh } from "@/server/refresh-coalesce";
 import { isSameOrigin, isSecureRequest } from "@/server/request";
 import {
   SESSION_COOKIE,
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const tokens = await refreshTokens(session.refreshToken);
+    const tokens = await coalesceRefresh(session.refreshToken);
     const value = await createPlatformSessionValue(
       { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
       sessionSecret(),

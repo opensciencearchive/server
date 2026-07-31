@@ -38,4 +38,24 @@ describe("useCreateOrganisation", () => {
       calls.indexOf("invalidate"),
     );
   });
+
+  it("fails the mutation (and skips invalidation) when the refresh is rejected", async () => {
+    const services = makeTestServices();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, { status: 401 }),
+    );
+
+    const { wrapper, queryClient } = renderHookWrapper({ services });
+    const invalidateSpy = vi
+      .spyOn(queryClient, "invalidateQueries")
+      .mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useCreateOrganisation(), { wrapper });
+    result.current.mutate({ name: "New Lab" });
+
+    // A non-2xx refresh must surface as a mutation error, not a silent success
+    // that then refetches with stale token claims.
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(invalidateSpy).not.toHaveBeenCalled();
+  });
 });

@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { refreshTokens } from "@/server/amacrin";
 import { amacrinApiUrl, sessionSecret } from "@/server/env";
+import { coalesceRefresh } from "@/server/refresh-coalesce";
 import { isSecureRequest } from "@/server/request";
 import {
   SESSION_COOKIE,
@@ -99,10 +99,12 @@ async function proxy(req: NextRequest, path: string[]): Promise<NextResponse> {
   if (first.status !== 401) return relay(first);
 
   // Access token expired — rotate once (the cloud rotates the refresh token),
-  // re-seal, and retry. A dead refresh surfaces the original 401.
+  // re-seal, and retry. Coalesced so a burst of concurrent 401s shares one
+  // rotation instead of racing (which would 401 the losers). A dead refresh
+  // surfaces the original 401.
   let rotated: PlatformSessionData;
   try {
-    const tokens = await refreshTokens(session.refreshToken);
+    const tokens = await coalesceRefresh(session.refreshToken);
     rotated = { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken };
   } catch {
     return relay(first);
