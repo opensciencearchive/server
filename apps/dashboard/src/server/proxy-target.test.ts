@@ -11,8 +11,8 @@ describe("resolveAllowedTarget", () => {
   });
 
   it("allows nested paths under an allowed root", () => {
-    const target = resolveAllowedTarget(["data", "cortex", "records"], BASE);
-    expect(target?.pathname).toBe("/api/v1/data/cortex/records");
+    const target = resolveAllowedTarget(["data", "stations", "records"], BASE);
+    expect(target?.pathname).toBe("/api/v1/data/stations/records");
   });
 
   it("rejects a non-allowlisted root", () => {

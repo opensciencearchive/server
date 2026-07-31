@@ -69,6 +69,13 @@ class PostgresIngestRunRepository(IngestRunRepository):
             return None
         return _row_to_ingest_run(dict(row))
 
+    async def list(self, *, limit: int = 50) -> list[IngestRun]:
+        stmt = (
+            select(ingest_runs_table).order_by(ingest_runs_table.c.started_at.desc()).limit(limit)
+        )
+        result = await self._session.execute(stmt)
+        return [_row_to_ingest_run(dict(row)) for row in result.mappings().all()]
+
     async def get_running_for_convention(self, convention_id: str) -> IngestRun | None:
         stmt = (
             select(ingest_runs_table)

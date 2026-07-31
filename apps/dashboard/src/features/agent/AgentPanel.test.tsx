@@ -8,18 +8,18 @@ import { renderWithProviders } from "@/test/render";
 import { AgentPanel } from "./AgentPanel";
 
 const SURFACE = {
-  skill: "# Cortex atlas\n\nAgent grounding doc.",
+  skill: "# Alpine climate network\n\nAgent grounding doc.",
   discovery: {
     node: {
-      name: "Cortex",
-      domain: "cortex.example.org",
+      name: "Alpine",
+      domain: "alpine.example.org",
       description: "d",
       osa_version: "0.0.7",
     },
-    skill_url: "https://cortex.example.org/SKILL.md",
-    reference_base: "https://cortex.example.org/api/v1/data",
-    data_url: "https://cortex.example.org/api/v1/data",
-    openapi_url: "https://cortex.example.org/api/v1/openapi.json",
+    skill_url: "https://alpine.example.org/SKILL.md",
+    reference_base: "https://alpine.example.org/api/v1/data",
+    data_url: "https://alpine.example.org/api/v1/data",
+    openapi_url: "https://alpine.example.org/api/v1/openapi.json",
   },
 };
 
@@ -28,12 +28,12 @@ describe("AgentPanel", () => {
     server.use(http.get("/api/agent", () => HttpResponse.json(SURFACE)));
     renderWithProviders(<AgentPanel />);
 
-    // SKILL.md markdown rendered (the `# Cortex atlas` heading).
-    expect(await screen.findByText("Cortex atlas")).toBeInTheDocument();
-    // MCP connector: derived /mcp url + a known tool.
-    expect(
-      screen.getByText("https://cortex.example.org/mcp"),
-    ).toBeInTheDocument();
+    // SKILL.md markdown rendered (the `# Alpine climate network` heading).
+    expect(await screen.findByText("Alpine climate network")).toBeInTheDocument();
+    // Summary cards show the bare skill + MCP URLs (scheme stripped).
+    expect(screen.getByText("alpine.example.org/SKILL.md")).toBeInTheDocument();
+    expect(screen.getByText("alpine.example.org/mcp")).toBeInTheDocument();
+    // Connect column: a known tool from the fixed MCP catalogue.
     expect(screen.getByText("list_datasets")).toBeInTheDocument();
   });
 

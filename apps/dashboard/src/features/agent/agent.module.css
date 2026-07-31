@@ -4,35 +4,162 @@
   gap: var(--space-8);
 }
 
-.section {
+/* ── Summary cards (skill file / mcp server) ─────────────────────────────── */
+.summaryGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+}
+
+@media (max-width: 860px) {
+  .summaryGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.summaryCard {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  padding: var(--space-6);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
 }
 
-.sectionHead {
+.summaryTop {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.summaryLabel {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-widest);
+  color: var(--color-text-subtle);
+}
+
+.summaryStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--color-success);
+}
+
+.statusDot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: var(--radius-full);
+  background: var(--color-success);
+  flex: none;
+}
+
+.summaryUrlRow {
+  display: flex;
+  align-items: center;
   gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
-.sectionHead h3 {
+.summaryUrl {
+  font-family: var(--font-mono);
   font-size: var(--text-lg);
+  font-weight: 500;
+  word-break: break-all;
 }
 
-.sectionSub {
+.summaryDesc {
+  margin: 0;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
-  margin: 0;
+  line-height: 1.55;
+}
+
+/* ── Main two-column area ────────────────────────────────────────────────── */
+.mainGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 23rem;
+  gap: var(--space-6);
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .mainGrid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ── Skill sheet (rendered SKILL.md) ─────────────────────────────────────── */
 .sheet {
-  padding: var(--space-6) var(--space-7);
   background: var(--color-bg);
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+/* Section header row — shared by both columns so their boxes top-align. */
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 2rem;
+  margin-bottom: var(--space-3);
+}
+
+.sectionHead h3 {
+  font-family: var(--font-display, inherit);
+  font-size: var(--text-lg);
+  margin: 0;
+}
+
+.sheetBody {
+  padding: var(--space-6) var(--space-8);
   overflow-x: auto;
+}
+
+.frontmatter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-5);
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border-subtle);
+}
+
+.fmLabel {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-widest);
+  color: var(--color-text-subtle);
+}
+
+.fmRow {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: baseline;
+}
+
+.fmKey {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.fmVal {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--color-text);
 }
 
 .prose {
@@ -91,7 +218,8 @@
 }
 
 .prose pre {
-  background: var(--color-bg-hover);
+  background: var(--color-code-bg, #17181b);
+  color: var(--color-code-fg, #e6e6e6);
   padding: var(--space-4);
   border-radius: var(--radius-md);
   overflow-x: auto;
@@ -100,6 +228,7 @@
 .prose pre code {
   background: none;
   padding: 0;
+  color: inherit;
 }
 
 .prose table {
@@ -128,63 +257,141 @@
   color: var(--color-text-muted);
 }
 
-/* ── MCP connector ───────────────────────────────────────────────────────── */
-.connectorRow {
+/* ── Connect column (MCP config + tools) ─────────────────────────────────── */
+.connectCol {
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: var(--space-8);
 }
 
-.url {
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  padding: var(--space-2) var(--space-3);
-  background: var(--color-bg-hover);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-}
-
-.hint {
-  color: var(--color-text-subtle);
-  font-size: var(--text-xs);
+.toolsHead h3 {
+  font-family: var(--font-display, inherit);
+  font-size: var(--text-lg);
   margin: 0;
 }
 
-.catalogGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-6);
+.configCard {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--color-bg);
 }
 
-@media (max-width: 720px) {
-  .catalogGrid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.catalogLabel {
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-text-subtle);
-  margin-bottom: var(--space-2);
-}
-
-.entry {
+.configTop {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--space-2) 0;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.configCode {
+  margin: 0;
+  padding: var(--space-4);
+  background: var(--color-code-bg, #17181b);
+  color: var(--color-code-fg, #e6e6e6);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  overflow-x: auto;
+}
+
+/* Defeat the global `code` pill (bg + border) so light text stays readable. */
+.configCode code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.configNote,
+.generatedNote {
+  display: flex;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  color: var(--color-text-muted);
+}
+
+.configNote {
   border-top: 1px solid var(--color-border-subtle);
 }
 
-.entryName {
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
+.generatedNote {
+  padding: 0;
+  margin-top: var(--space-4);
 }
 
-.entryDesc {
+.noteLabel {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--color-text-subtle);
+  flex: none;
+}
+
+.configNote code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--color-bg-hover);
+  padding: 0.05em 0.3em;
+  border-radius: var(--radius-sm);
+}
+
+.toolsHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.toolsCount {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
+}
+
+/* Boxed table of tools — one bordered card, hover-highlighted rows. */
+.toolsList {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.tool {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--color-border-subtle);
+  transition: background 0.12s ease;
+}
+
+.tool:first-child {
+  border-top: none;
+}
+
+.tool:hover {
+  background: var(--color-bg-hover);
+}
+
+.toolName {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.toolDesc {
   color: var(--color-text-muted);
   font-size: var(--text-xs);
+  line-height: 1.5;
 }

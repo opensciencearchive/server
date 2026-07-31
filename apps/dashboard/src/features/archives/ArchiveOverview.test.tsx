@@ -12,10 +12,10 @@ function selfHostServices() {
 
 describe("ArchiveOverview", () => {
   it("renders the hero with domain, Running, and a Redeploy control for a running archive", async () => {
-    renderWithProviders(<ArchiveOverview archiveId="arch_c0r73xa71a" />);
+    renderWithProviders(<ArchiveOverview archiveId="arch_a1p1n3c11m" />);
 
-    expect(await screen.findByText("Cortex cell atlas")).toBeInTheDocument();
-    expect(screen.getByText("cortex-atlas.amacr.in")).toBeInTheDocument();
+    expect(await screen.findByText("Alpine climate network")).toBeInTheDocument();
+    expect(screen.getByText("alpine-climate.amacr.in")).toBeInTheDocument();
     expect(await screen.findByText("Running")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /redeploy/i }),
@@ -23,17 +23,17 @@ describe("ArchiveOverview", () => {
   });
 
   it("renders the meta strip with organisation, region and sign-in", async () => {
-    renderWithProviders(<ArchiveOverview archiveId="arch_c0r73xa71a" />);
+    renderWithProviders(<ArchiveOverview archiveId="arch_a1p1n3c11m" />);
 
-    expect(await screen.findByText("Marsh Lab")).toBeInTheDocument();
+    expect(await screen.findByText("Summit Lab")).toBeInTheDocument();
     expect(screen.getByText("eu-west-1")).toBeInTheDocument();
     expect(screen.getByText(/ORCID · 2 administrators/)).toBeInTheDocument();
   });
 
   it("renders the provisioning timeline and close-tab note for a deploying archive", async () => {
-    renderWithProviders(<ArchiveOverview archiveId="arch_tce11cr1sp" />);
+    renderWithProviders(<ArchiveOverview archiveId="arch_d0pp13rswp" />);
 
-    expect(await screen.findByText("T-cell CRISPR screens")).toBeInTheDocument();
+    expect(await screen.findByText("Doppler radar sweeps")).toBeInTheDocument();
     expect(await screen.findByText("Accepted")).toBeInTheDocument();
     expect(
       screen.getByText("Provisioning infrastructure"),
@@ -42,7 +42,7 @@ describe("ArchiveOverview", () => {
   });
 
   it("renders the verbatim error message and a Redeploy button for an error archive", async () => {
-    renderWithProviders(<ArchiveOverview archiveId="arch_pr073om1cs" />);
+    renderWithProviders(<ArchiveOverview archiveId="arch_so1lmo1s7r" />);
 
     expect(
       await screen.findByText(
@@ -55,16 +55,11 @@ describe("ArchiveOverview", () => {
   });
 
   it("renders the sample-data sections including the 12,481 record stat", async () => {
-    renderWithProviders(<ArchiveOverview archiveId="arch_c0r73xa71a" />);
+    renderWithProviders(<ArchiveOverview archiveId="arch_a1p1n3c11m" />);
 
     expect((await screen.findAllByText("12,481")).length).toBeGreaterThan(0);
-    expect(screen.getByText("Who's using it")).toBeInTheDocument();
     expect(screen.getByText("Next steps")).toBeInTheDocument();
-    expect(screen.getByText("99.9%")).toBeInTheDocument();
-    expect(
-      screen.getByText(/of records pass every check/i),
-    ).toBeInTheDocument();
-    // Mocked sections carry a sample-data affordance.
+    // The platform build's tenant sections carry a sample-data affordance.
     expect(screen.getAllByText("Sample data").length).toBeGreaterThan(0);
   });
 
@@ -89,8 +84,8 @@ describe("ArchiveOverview", () => {
         services: selfHostServices(),
       });
 
-      expect(await screen.findByText("Who's using it")).toBeInTheDocument();
-      expect(screen.getByText("Next steps")).toBeInTheDocument();
+      expect(await screen.findByText("Next steps")).toBeInTheDocument();
+      expect(screen.getByText("What's in here")).toBeInTheDocument();
     });
   });
 });

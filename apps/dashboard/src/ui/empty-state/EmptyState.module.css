@@ -6,6 +6,18 @@
   background: var(--color-bg);
 }
 
+.icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--space-4);
+  color: var(--color-text-subtle);
+}
+
+.icon svg {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
 .title {
   margin-bottom: var(--space-2);
 }

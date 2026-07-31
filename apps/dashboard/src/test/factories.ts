@@ -7,7 +7,7 @@ import type { Session } from "@/domain/user";
 export function buildOrganisation(over?: Partial<Organisation>): Organisation {
   return {
     id: "org_test000001",
-    name: "Marsh Lab",
+    name: "Summit Lab",
     role: "admin",
     createdAt: new Date("2026-05-02T09:20:00Z"),
     ...over,
@@ -18,9 +18,9 @@ export function buildArchive(over?: Partial<Archive>): Archive {
   return {
     id: "arch_test00001",
     organisationId: "org_test000001",
-    name: "Cortex cell atlas",
-    slug: "cortex-atlas",
-    domain: "cortex-atlas.amacr.in",
+    name: "Alpine climate network",
+    slug: "alpine-climate",
+    domain: "alpine-climate.amacr.in",
     status: { kind: "running" },
     orcidAdmins: ["0000-0002-1825-0097"],
     deploymentConfig: { provider: "aws_eks", region: "eu-west-1", volumeSizeGb: 5 },
@@ -37,7 +37,7 @@ export function buildDeployment(over?: Partial<Deployment>): Deployment {
     provider: "aws_eks",
     status: {
       kind: "succeeded",
-      url: "https://cortex-atlas.amacr.in",
+      url: "https://alpine-climate.amacr.in",
       completedAt: new Date("2026-07-25T14:06:00Z"),
     },
     startedAt: new Date("2026-07-25T14:02:18Z"),

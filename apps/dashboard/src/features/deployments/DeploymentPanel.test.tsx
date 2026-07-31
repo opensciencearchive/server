@@ -7,7 +7,7 @@ import { DeploymentPanel } from "./DeploymentPanel";
 
 describe("DeploymentPanel", () => {
   it("shows Running with a redeploy button for a running archive", async () => {
-    renderWithProviders(<DeploymentPanel archiveId="arch_c0r73xa71a" />);
+    renderWithProviders(<DeploymentPanel archiveId="arch_a1p1n3c11m" />);
 
     expect(await screen.findByText("Running")).toBeInTheDocument();
     expect(
@@ -18,7 +18,7 @@ describe("DeploymentPanel", () => {
   });
 
   it("renders the provisioning timeline and the close-tab note while deploying", async () => {
-    renderWithProviders(<DeploymentPanel archiveId="arch_tce11cr1sp" />);
+    renderWithProviders(<DeploymentPanel archiveId="arch_d0pp13rswp" />);
 
     expect(await screen.findByText("Accepted")).toBeInTheDocument();
     expect(
@@ -28,7 +28,7 @@ describe("DeploymentPanel", () => {
   });
 
   it("renders the verbatim error message and a redeploy button when failed", async () => {
-    renderWithProviders(<DeploymentPanel archiveId="arch_pr073om1cs" />);
+    renderWithProviders(<DeploymentPanel archiveId="arch_so1lmo1s7r" />);
 
     expect(
       await screen.findByText(

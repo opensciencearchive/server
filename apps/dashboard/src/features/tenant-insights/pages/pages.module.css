@@ -29,6 +29,37 @@
   font-size: var(--text-sm);
 }
 
+/* Failure reason under a failed ingest run's id. */
+.failReason {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-danger);
+  max-width: 40rem;
+}
+
+/* Schema picker row above the records table. */
+.schemaPicker {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.schemaPicker label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-widest);
+  color: var(--color-text-subtle);
+}
+
+/* Compact metadata preview inside a records-table cell. */
+.fieldsPreview {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
 .buildLink {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
@@ -64,10 +95,11 @@
 }
 
 .gridCard {
-  padding: var(--space-5);
+  padding: var(--space-6);
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
+  min-width: 0;
 }
 
 .cardName {
@@ -86,6 +118,11 @@
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--color-text-subtle);
+  /* Long image@digest strings must wrap, not overflow the card. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.5;
+  margin-top: var(--space-1);
 }
 
 /* Observability header — big overall status + uptime. */

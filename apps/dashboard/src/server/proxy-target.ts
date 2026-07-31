@@ -5,7 +5,15 @@
  */
 
 /** Read roots the proxy may forward GET requests to. */
-export const ALLOWED_ROOTS = new Set(["stats", "data", "schemas", "hooks"]);
+export const ALLOWED_ROOTS = new Set([
+  "stats",
+  "data",
+  "schemas",
+  "hooks",
+  "ingesters",
+  "ingestions",
+  "ready",
+]);
 
 /**
  * Resolve `path` to an upstream URL under `base`, or return null if it isn't an

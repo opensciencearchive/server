@@ -1,13 +1,13 @@
 {
   "id": "build_b1u2i3l4d5",
-  "archive_id": "arch_c0r73xa71a",
+  "archive_id": "arch_a1p1n3c11m",
   "convention_slug": "geo-rnaseq-v2",
   "status": "building",
   "convention_ref": "9e8d7c6",
   "components": [
     {
       "kind": "ingester",
-      "name": "geo-ingester",
+      "name": "ghcn-ingester",
       "status": "building",
       "source_ref": "ingesters/geo_ingester.py"
     },

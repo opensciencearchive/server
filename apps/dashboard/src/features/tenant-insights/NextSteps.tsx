@@ -2,42 +2,62 @@
 
 import Link from "next/link";
 
+import { icons } from "../shell/icons";
 import { DOCS_URL } from "../shell/links";
 import styles from "./tenant-insights.module.css";
 
 interface Step {
   title: string;
   description: React.ReactNode;
+  icon: React.ReactNode;
+  href: string;
+  external?: boolean;
 }
 
-const STEPS: Step[] = [
-  {
-    title: "Update the convention",
-    description: (
-      <>
-        New checks or features go live with <code>osa deploy</code>
-      </>
-    ),
-  },
-  {
-    title: "Invite depositors",
-    description: "Share the deposit link; they sign in with ORCID",
-  },
-  {
-    title: "Export a training set",
-    description: "Validated records plus features, pinned to a digest",
-  },
-  {
-    title: "Cite this archive",
-    description: "Stable SRNs for the paper's data availability statement",
-  },
-];
+function steps(base: string): Step[] {
+  return [
+    {
+      title: "Update the convention",
+      description: (
+        <>
+          New checks or features go live with <code>osa deploy</code>
+        </>
+      ),
+      icon: icons.hooks,
+      href: DOCS_URL,
+      external: true,
+    },
+    {
+      title: "Invite depositors",
+      description: "Share the deposit link; they sign in with ORCID",
+      icon: icons.authentication,
+      href: `${base}/authentication`,
+    },
+    {
+      title: "Export a training set",
+      description: "Validated records plus features, pinned to a digest",
+      icon: icons.ingesters,
+      href: `${base}/records`,
+    },
+    {
+      title: "Publish to agents",
+      description: "A skill file and MCP server language models can query",
+      icon: icons.agents,
+      href: `${base}/agents`,
+    },
+  ];
+}
 
-export function NextSteps() {
+export function NextSteps({ archiveId }: { archiveId: string }) {
+  const base = `/archives/${archiveId}`;
+
   return (
     <section className={styles.section}>
       <div className={styles.sectionHead}>
-        <h3>Next steps</h3>
+        <span className={styles.sectionTitle}>
+          <span className={styles.sectionIcon}>{icons.overview}</span>
+          <h3>Next steps</h3>
+        </span>
         <a
           className={styles.headLink}
           href={DOCS_URL}
@@ -49,8 +69,16 @@ export function NextSteps() {
       </div>
 
       <div className={styles.stepGrid}>
-        {STEPS.map((step) => (
-          <Link key={step.title} href="./records" className={styles.stepCard}>
+        {steps(base).map((step) => (
+          <Link
+            key={step.title}
+            href={step.href}
+            className={styles.stepCard}
+            {...(step.external
+              ? { target: "_blank", rel: "noreferrer" }
+              : {})}
+          >
+            <span className={styles.stepIcon}>{step.icon}</span>
             <span className={styles.stepTitle}>{step.title}</span>
             <span className={styles.stepDesc}>{step.description}</span>
           </Link>

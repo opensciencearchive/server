@@ -32,7 +32,7 @@ describe("decodeSession (GET /auth/me)", () => {
     expect(session.organisations).toHaveLength(3);
     expect(session.organisations[0]).toMatchObject({
       id: "org_7f3k2mq9x1",
-      name: "Marsh Lab",
+      name: "Summit Lab",
       role: "admin",
     });
     expect(session.organisations[1]?.role).toBe("owner");
@@ -50,7 +50,7 @@ describe("decodeOrganisationList (GET /organisations)", () => {
   it("unwraps the organisations envelope", () => {
     const orgs = decodeOrganisationList(organisations);
     expect(orgs).toHaveLength(3);
-    expect(orgs[0]?.name).toBe("Marsh Lab");
+    expect(orgs[0]?.name).toBe("Summit Lab");
     expect(orgs[0]?.createdAt).toBeInstanceOf(Date);
   });
 
@@ -71,10 +71,10 @@ describe("decodeOrganisationList (GET /organisations)", () => {
 describe("decodeArchive", () => {
   it("decodes a running archive with admins and deployment config", () => {
     const archive = decodeArchive(archiveRunning);
-    expect(archive.id).toBe("arch_c0r73xa71a");
+    expect(archive.id).toBe("arch_a1p1n3c11m");
     expect(archive.organisationId).toBe("org_7f3k2mq9x1");
-    expect(archive.slug).toBe("cortex-atlas");
-    expect(archive.domain).toBe("cortex-atlas.amacr.in");
+    expect(archive.slug).toBe("alpine-climate");
+    expect(archive.domain).toBe("alpine-climate.amacr.in");
     expect(archive.status).toEqual({ kind: "running" });
     expect(archive.orcidAdmins).toEqual([
       "0000-0002-1825-0097",
@@ -114,7 +114,7 @@ describe("decodeDeployment", () => {
     expect(d.id).toBe("deploy_9a1b2c3d4e");
     expect(d.status).toEqual({
       kind: "succeeded",
-      url: "https://cortex-atlas.amacr.in",
+      url: "https://alpine-climate.amacr.in",
       completedAt: new Date("2026-07-25T14:06:00+00:00"),
     });
     expect(d.startedAt).toBeInstanceOf(Date);
@@ -161,7 +161,7 @@ describe("decodeBuild", () => {
     expect(ingester.kind).toBe("ingester");
     expect(ingester.status.kind).toBe("succeeded");
     if (ingester.status.kind === "succeeded") {
-      expect(ingester.status.imageRef).toContain("geo-ingester:build_");
+      expect(ingester.status.imageRef).toContain("ghcn-ingester:build_");
       expect(ingester.status.digest).toMatch(/^sha256:/);
     }
   });
@@ -182,7 +182,7 @@ describe("decodeBuild", () => {
       expect(b.status.errorMessage).toMatch(/SchemaRegistry/);
     }
     const failed = b.components.find((c) => c.status.kind === "failed")!;
-    expect(failed.name).toBe("normalise-counts");
+    expect(failed.name).toBe("normalise-units");
     if (failed.status.kind === "failed") {
       expect(failed.status.errorMessage).toMatch(/ImportError/);
     }

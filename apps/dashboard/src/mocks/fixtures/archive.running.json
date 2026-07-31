@@ -1,9 +1,9 @@
 {
-  "id": "arch_c0r73xa71a",
+  "id": "arch_a1p1n3c11m",
   "organisation_id": "org_7f3k2mq9x1",
-  "name": "Cortex cell atlas",
-  "slug": "cortex-atlas",
-  "domain": "cortex-atlas.amacr.in",
+  "name": "Alpine climate network",
+  "slug": "alpine-climate",
+  "domain": "alpine-climate.amacr.in",
   "config": {
     "auth": {
       "admins": {

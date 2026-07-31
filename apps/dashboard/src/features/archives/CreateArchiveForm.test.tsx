@@ -9,7 +9,7 @@ import { CreateArchiveForm } from "./CreateArchiveForm";
 
 /** Fill in every field except the subdomain, which each test drives itself. */
 async function fillBaseFields(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText(/display name/i), "Cortex cell atlas");
+  await user.type(screen.getByLabelText(/display name/i), "Alpine climate network");
   await user.type(screen.getByLabelText(/orcid client id/i), "APP-K91F2LQ8XZ40");
   await user.type(screen.getByLabelText(/orcid client secret/i), "s3cr3t-value");
 }
@@ -19,23 +19,23 @@ describe("CreateArchiveForm", () => {
     renderWithProviders(<CreateArchiveForm />);
 
     // Wait for the async session to populate the select options.
-    await screen.findByRole("option", { name: "Marsh Lab" });
+    await screen.findByRole("option", { name: "Summit Lab" });
 
     const select = screen.getByLabelText(/organisation/i) as HTMLSelectElement;
     const labels = within(select)
       .getAllByRole("option")
       .map((o) => o.textContent);
 
-    expect(labels).toContain("Marsh Lab"); // admin
+    expect(labels).toContain("Summit Lab"); // admin
     expect(labels).toContain("Personal"); // owner
-    expect(labels).not.toContain("Cryo-EM Consortium"); // member — excluded
+    expect(labels).not.toContain("Radar Array Consortium"); // member — excluded
   });
 
   it("blocks submit and shows a field error for an invalid subdomain format", async () => {
     const user = userEvent.setup();
     const services = makeTestServices();
     renderWithProviders(<CreateArchiveForm />, { services });
-    await screen.findByRole("option", { name: "Marsh Lab" });
+    await screen.findByRole("option", { name: "Summit Lab" });
     const createSpy = vi.spyOn(services.amacrin, "createArchive");
 
     await fillBaseFields(user);
@@ -55,7 +55,7 @@ describe("CreateArchiveForm", () => {
   it("shows the availability hint once the subdomain format is valid", async () => {
     const user = userEvent.setup();
     renderWithProviders(<CreateArchiveForm />);
-    await screen.findByRole("option", { name: "Marsh Lab" });
+    await screen.findByRole("option", { name: "Summit Lab" });
 
     await user.type(screen.getByLabelText(/subdomain/i), "new-atlas");
 
@@ -68,7 +68,7 @@ describe("CreateArchiveForm", () => {
     const user = userEvent.setup();
     const services = makeTestServices();
     renderWithProviders(<CreateArchiveForm />, { services });
-    await screen.findByRole("option", { name: "Marsh Lab" });
+    await screen.findByRole("option", { name: "Summit Lab" });
 
     const createSpy = vi.spyOn(services.amacrin, "createArchive");
 
@@ -80,7 +80,7 @@ describe("CreateArchiveForm", () => {
     expect(createSpy).toHaveBeenCalledWith(
       "org_7f3k2mq9x1",
       expect.objectContaining({
-        name: "Cortex cell atlas",
+        name: "Alpine climate network",
         slug: "new-atlas",
         orcid: { clientId: "APP-K91F2LQ8XZ40", clientSecret: "s3cr3t-value" },
         adminOrcidIds: [],
@@ -97,10 +97,10 @@ describe("CreateArchiveForm", () => {
   it("surfaces a taken subdomain as a slug field error with suggestion chips", async () => {
     const user = userEvent.setup();
     renderWithProviders(<CreateArchiveForm />);
-    await screen.findByRole("option", { name: "Marsh Lab" });
+    await screen.findByRole("option", { name: "Summit Lab" });
 
     await fillBaseFields(user);
-    await user.type(screen.getByLabelText(/subdomain/i), "cortex-atlas");
+    await user.type(screen.getByLabelText(/subdomain/i), "alpine-climate");
     await user.click(screen.getByRole("button", { name: /create and deploy/i }));
 
     // Server 409 message rendered on the slug field.
@@ -110,14 +110,14 @@ describe("CreateArchiveForm", () => {
 
     // Convenience suggestions offered as clickable chips.
     const suggestion = await screen.findByRole("button", {
-      name: "cortex-atlas-lab",
+      name: "alpine-climate-lab",
     });
     expect(suggestion).toBeInTheDocument();
     expect(mockRouter.push).not.toHaveBeenCalled();
 
     // Clicking a suggestion fills the field.
     await user.click(suggestion);
-    expect(screen.getByLabelText(/subdomain/i)).toHaveValue("cortex-atlas-lab");
+    expect(screen.getByLabelText(/subdomain/i)).toHaveValue("alpine-climate-lab");
   });
 
   it("preselects the organisation from defaultOrgId", async () => {

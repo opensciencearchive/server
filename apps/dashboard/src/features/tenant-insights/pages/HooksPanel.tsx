@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 
-import { DataTable, PageHeader, SampleDataChip, Skeleton } from "@/ui";
+import { DataTable, EmptyState, PageHeader, SampleDataChip, Skeleton } from "@/ui";
 import { useServices } from "@/api/services";
 import type { TenantHook } from "@/domain/tenant";
+import { icons } from "@/features/shell/icons";
 
 import { useTenantHooks } from "../hooks";
 import styles from "./pages.module.css";
@@ -14,11 +15,13 @@ export function HooksPanel({ archiveId }: { archiveId: string }) {
   // so its list is sample data (chip + note).
   const isSample = useServices().isPlatform;
   const hooks = useTenantHooks(archiveId);
+  const list = hooks.data ?? [];
   const base = `/archives/${archiveId}`;
 
   return (
     <div className={styles.page}>
       <PageHeader
+        icon={icons.hooks}
         title="Hooks"
         description="Hooks run against every deposition to validate, enrich and transform records."
         actions={isSample ? <SampleDataChip /> : undefined}
@@ -26,7 +29,7 @@ export function HooksPanel({ archiveId }: { archiveId: string }) {
 
       {hooks.isPending ? (
         <Skeleton height="8rem" width="100%" />
-      ) : hooks.data ? (
+      ) : list.length > 0 ? (
         <DataTable<TenantHook>
           columns={[
             {
@@ -69,10 +72,16 @@ export function HooksPanel({ archiveId }: { archiveId: string }) {
                   : "—",
             },
           ]}
-          rows={hooks.data}
+          rows={list}
           rowKey={(h) => h.name}
         />
-      ) : null}
+      ) : (
+        <EmptyState
+          icon={icons.hooks}
+          title="No hooks registered"
+          description="Hooks appear here once a convention registers one to validate or enrich records."
+        />
+      )}
 
       {isSample && (
         <div className={styles.note}>

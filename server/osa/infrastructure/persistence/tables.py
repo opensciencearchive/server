@@ -1,6 +1,7 @@
 """SQLAlchemy table definitions - dialect-agnostic (works with SQLite and PostgreSQL)."""
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Column,
     DateTime,
@@ -329,6 +330,23 @@ metadata_tables_table = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False),
     UniqueConstraint("schema_id", "schema_major", name="uq_metadata_tables_id_major"),
     UniqueConstraint("pg_table", name="uq_metadata_tables_pg_table"),
+)
+
+
+# ============================================================================
+# INSTANCE STATISTICS (materialized snapshot of O(rows) aggregates)
+# ============================================================================
+# Single-row snapshot refreshed periodically by the WorkerPool. Holds the
+# instance-wide aggregates that are expensive to compute live (storage size and
+# total feature-table rows); cheap counts (records, this-month) stay live on the
+# read path. ``id`` is a fixed singleton (always 1).
+instance_statistics_table = Table(
+    "instance_statistics",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("storage_bytes", BigInteger, nullable=False),
+    Column("feature_rows", BigInteger, nullable=False),
+    Column("computed_at", DateTime(timezone=True), nullable=False),
 )
 
 

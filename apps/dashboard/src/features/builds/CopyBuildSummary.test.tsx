@@ -8,17 +8,17 @@ import { CopyBuildSummary } from "./CopyBuildSummary";
 
 const publishedBuild: Build = {
   id: "build_8f3a91c2e5",
-  archiveId: "arch_c0r73xa71a",
+  archiveId: "arch_a1p1n3c11m",
   conventionSlug: "geo-rnaseq-v2",
   conventionRef: "4c1e77b",
   status: { kind: "published", publishedAt: new Date("2026-07-25T14:05:12Z") },
   components: [
     {
       kind: "ingester",
-      name: "geo-ingester",
+      name: "ghcn-ingester",
       status: {
         kind: "succeeded",
-        imageRef: "ecr/geo-ingester:build_8f3a91c2e5",
+        imageRef: "ecr/ghcn-ingester:build_8f3a91c2e5",
         digest: "sha256:aaaa1111bbbb2222cccc3333",
       },
       sourceRef: "ingesters/geo_ingester.py",
@@ -38,7 +38,7 @@ const failedBuild: Build = {
   components: [
     {
       kind: "hook",
-      name: "normalise-counts",
+      name: "normalise-units",
       status: {
         kind: "failed",
         errorMessage: "ImportError: cannot import name 'SchemaRegistry'",
@@ -57,12 +57,12 @@ describe("CopyBuildSummary", () => {
 
     const text = await window.navigator.clipboard.readText();
     expect(text).toContain("build_8f3a91c2e5");
-    expect(text).toContain("arch_c0r73xa71a");
+    expect(text).toContain("arch_a1p1n3c11m");
     expect(text).toContain("geo-rnaseq-v2");
     expect(text).toContain("4c1e77b");
     expect(text).toContain("published");
     expect(text).toContain("sha256:aaaa1111bbbb2222cccc3333");
-    expect(text).toContain("geo-ingester");
+    expect(text).toContain("ghcn-ingester");
   });
 
   it("includes the verbatim parent error and per-component error for a failed build", async () => {
@@ -74,6 +74,6 @@ describe("CopyBuildSummary", () => {
     const text = await window.navigator.clipboard.readText();
     expect(text).toContain("build_failed");
     expect(text).toContain("ImportError: cannot import name 'SchemaRegistry'");
-    expect(text).toContain("normalise-counts");
+    expect(text).toContain("normalise-units");
   });
 });

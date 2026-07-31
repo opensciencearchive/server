@@ -68,16 +68,16 @@ describe("RealAmacrinService", () => {
     );
 
     const result = await makeService().createArchive("org_7f3k2mq9x1", {
-      name: "Cortex cell atlas",
-      slug: "cortex-atlas",
+      name: "Alpine climate network",
+      slug: "alpine-climate",
       orcid: { clientId: "APP-K91F2LQ8XZ40MNRT", clientSecret: "s3cret" },
       adminOrcidIds: ["0000-0002-1825-0097"],
     });
 
     expect(body).toEqual({
       config: {
-        name: "Cortex cell atlas",
-        slug: "cortex-atlas",
+        name: "Alpine climate network",
+        slug: "alpine-climate",
         auth: {
           providers: {
             orcid: {
@@ -89,7 +89,7 @@ describe("RealAmacrinService", () => {
         },
       },
     });
-    expect(result.archive.slug).toBe("cortex-atlas");
+    expect(result.archive.slug).toBe("alpine-climate");
     expect(result.deployment.status.kind).toBe("succeeded");
   });
 

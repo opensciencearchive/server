@@ -8,6 +8,7 @@ from osa.domain.deposition.service.convention import ConventionService
 from osa.domain.ingest.command.start_ingest import StartIngestHandler
 from osa.domain.ingest.port.instrumentation import IngestInstrumentation
 from osa.domain.ingest.query.get_ingestion import GetIngestionHandler
+from osa.domain.ingest.query.list_ingestions import ListIngestionsHandler
 from osa.infrastructure.s3.client import S3Client
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.ingest.port.storage import IngestStoragePort
@@ -71,3 +72,4 @@ class IngestProvider(Provider):
 
     start_ingest_handler = provide(StartIngestHandler, scope=Scope.UOW)
     get_ingestion_handler = provide(GetIngestionHandler, scope=Scope.UOW)
+    list_ingestions_handler = provide(ListIngestionsHandler, scope=Scope.UOW)
