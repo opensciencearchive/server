@@ -31,6 +31,11 @@ class TokenService(Service):
     """
 
     _config: JwtConfig
+    # This node's own public origin (``https://{domain}``), accepted as a valid
+    # audience for extra-issuer tokens alongside the fixed publication audience
+    # (#184). None → only the publication audience is accepted, byte-identical to
+    # before. Irrelevant when no extra issuer is configured.
+    _node_audience: str | None = None
     # Optional second issuer for M2M tokens (#145, US5). None → single-issuer
     # behaviour, byte-identical to before.
     _extra_issuer: ExtraIssuerConfig | None = None
@@ -103,11 +108,18 @@ class TokenService(Service):
             # trusted, so a token can't downgrade to `none`/HS256.
             unverified = jwt.decode(token, options={"verify_signature": False})
             if unverified.get("iss") == self._extra_issuer.issuer:
+                # Accept the fixed publication audience OR this node's own origin
+                # (#184). PyJWT treats a list as a set of acceptable audiences —
+                # the token verifies if its `aud` matches any one. Binding to the
+                # node origin makes cross-node replay of a read token impossible.
+                audiences = [self._extra_issuer.audience]
+                if self._node_audience is not None:
+                    audiences.append(self._node_audience)
                 return jwt.decode(
                     token,
                     self._extra_issuer.public_key,
                     algorithms=["EdDSA"],
-                    audience=self._extra_issuer.audience,
+                    audience=audiences,
                     issuer=self._extra_issuer.issuer,
                 )
 

@@ -3,10 +3,9 @@
 from datetime import datetime
 
 from osa.domain.auth.model.principal import Principal
-from osa.domain.auth.model.role import Role
 from osa.domain.ingest.model.ingest_run import IngestRunId, IngestStatus
 from osa.domain.ingest.service.ingest import IngestService
-from osa.domain.shared.authorization.gate import at_least
+from osa.domain.shared.authorization.gate import requires_scope
 from osa.domain.shared.failure import FailureKind
 from osa.domain.shared.query import Query, QueryHandler, Result
 
@@ -42,7 +41,8 @@ class IngestRunDetail(Result):
 class GetIngestionHandler(QueryHandler[GetIngestion, IngestRunDetail]):
     """Thin query handler — delegates to IngestService."""
 
-    __auth__ = at_least(Role.ADMIN)
+    # Scoped M2M read (#184): `ingestions:read` OR ADMIN.
+    __auth__ = requires_scope("ingestions:read")
 
     principal: Principal
     service: IngestService
