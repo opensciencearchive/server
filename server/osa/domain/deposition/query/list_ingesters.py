@@ -10,8 +10,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from osa.domain.auth.model.principal import Principal
 from osa.domain.deposition.service.convention import ConventionService
-from osa.domain.shared.authorization.gate import public
+from osa.domain.shared.authorization.gate import requires_scope
 from osa.domain.shared.model.srn import ConventionSlug
 from osa.domain.shared.query import Query, QueryHandler, Result
 
@@ -36,7 +37,12 @@ class IngesterCatalog(Result):
 
 
 class ListIngestersHandler(QueryHandler[ListIngesters, IngesterCatalog]):
-    __auth__ = public()
+    # Scoped M2M read (#184): the ingester catalog exposes image/digest/source
+    # provenance, so it sits behind `ingesters:read` (OR ADMIN) rather than being
+    # public. The self-host BFF proxies it with a SUPERADMIN token (ADMIN → allowed).
+    __auth__ = requires_scope("ingesters:read")
+
+    principal: Principal
     convention_service: ConventionService
 
     async def run(self, cmd: ListIngesters) -> IngesterCatalog:

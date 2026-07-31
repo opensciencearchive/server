@@ -22,6 +22,8 @@ from osa.domain.auth.service.token import TokenService
 
 ISSUER = "https://deploy.example.org"
 AUDIENCE = "osa-deploy"
+NODE_ORIGIN = "https://node-a.example.org"
+OTHER_NODE_ORIGIN = "https://node-b.example.org"
 
 
 def _ed25519_keypair() -> tuple[bytes, str]:
@@ -61,11 +63,12 @@ def _m2m_token(
     algorithm: str = "EdDSA",
     scope: str = "hooks:write",
     iss: str = ISSUER,
+    aud: str = AUDIENCE,
 ) -> str:
     return jwt.encode(
         {
             "iss": iss,
-            "aud": AUDIENCE,
+            "aud": aud,
             "sub": "deploy-bot",
             "scope": scope,
             "exp": int(time.time()) + 3600,
@@ -140,3 +143,55 @@ class TestExtraIssuerPath:
         service = TokenService(_config=_jwt_config(), _extra_issuer=_extra(ed_public))
         with pytest.raises(jwt.InvalidTokenError):
             service.validate_access_token(_m2m_token(rsa_private, algorithm="RS256"))
+
+
+class TestPerNodeAudience:
+    """A node also accepts extra-issuer tokens minted for its own origin (#184).
+
+    The node accepts BOTH the fixed publication audience and its own origin
+    ``https://{domain}``, so read tokens (``aud == node origin``) verify locally
+    while a token minted for a *different* node's origin is rejected — cross-node
+    replay is structurally impossible.
+    """
+
+    def _service(self, public_pem: str) -> TokenService:
+        return TokenService(
+            _config=_jwt_config(),
+            _node_audience=NODE_ORIGIN,
+            _extra_issuer=_extra(public_pem),
+        )
+
+    def test_node_origin_audience_accepted(self, keypair) -> None:
+        private_pem, public_pem = keypair
+        service = self._service(public_pem)
+        payload = service.validate_access_token(
+            _m2m_token(private_pem, scope="stats:read", aud=NODE_ORIGIN)
+        )
+        assert payload["scope"] == "stats:read"
+        assert payload["aud"] == NODE_ORIGIN
+
+    def test_publication_audience_still_accepted(self, keypair) -> None:
+        # Regression: the fixed publication audience keeps verifying even once
+        # the node origin is also accepted (the publication flow is unchanged).
+        private_pem, public_pem = keypair
+        service = self._service(public_pem)
+        payload = service.validate_access_token(
+            _m2m_token(private_pem, scope="conventions:write", aud=AUDIENCE)
+        )
+        assert payload["scope"] == "conventions:write"
+
+    def test_cross_node_replay_rejected(self, keypair) -> None:
+        # A token minted for a sibling node's origin does not verify here.
+        private_pem, public_pem = keypair
+        service = self._service(public_pem)
+        with pytest.raises(jwt.InvalidTokenError):
+            service.validate_access_token(_m2m_token(private_pem, aud=OTHER_NODE_ORIGIN))
+
+    def test_node_origin_rejected_without_it_configured(self, keypair) -> None:
+        # Without a node audience configured, only the publication audience is
+        # accepted — a node-origin token is rejected (behaviour byte-identical
+        # to before #184).
+        private_pem, public_pem = keypair
+        service = TokenService(_config=_jwt_config(), _extra_issuer=_extra(public_pem))
+        with pytest.raises(jwt.InvalidTokenError):
+            service.validate_access_token(_m2m_token(private_pem, aud=NODE_ORIGIN))

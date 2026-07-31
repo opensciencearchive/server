@@ -74,6 +74,10 @@ class AuthProvider(Provider):
         """Provide TokenService (stateless, only needs config)."""
         return TokenService(
             _config=config.auth.jwt,
+            # This node's own origin, accepted as a valid audience for
+            # extra-issuer read tokens (#184) — matches what the issuer mints
+            # (`aud: "https://{domain}"`).
+            _node_audience=f"https://{config.domain}",
             _extra_issuer=config.auth.extra_issuer,
         )
 
