@@ -27,7 +27,6 @@ import type {
   AmacrinService,
   ArchiveAuthInput,
   CreateArchiveInput,
-  RefreshedSession,
 } from "./service";
 
 const T0 = new Date("2026-07-25T14:00:00Z");
@@ -59,17 +58,6 @@ export class MockAmacrinService implements AmacrinService {
   }
 
   // ── auth ────────────────────────────────────────────────────────────
-
-  refreshSession(): Promise<RefreshedSession> {
-    return Promise.resolve({
-      accessToken: "mock-access-token",
-      expiresInSeconds: 900,
-    });
-  }
-
-  logout(): Promise<void> {
-    return Promise.resolve();
-  }
 
   getMe(): Promise<Session> {
     return Promise.resolve({

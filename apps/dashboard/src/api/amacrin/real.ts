@@ -1,5 +1,5 @@
-import { type HttpClient, apiErrorFromResponse } from "@/api/http/client";
-import { ApiError, SlugTakenError, TransportError } from "@/api/http/errors";
+import type { HttpClient } from "@/api/http/client";
+import { ApiError, SlugTakenError } from "@/api/http/errors";
 import type { Archive } from "@/domain/archive";
 import type { Build } from "@/domain/build";
 import type { Deployment } from "@/domain/deployment";
@@ -22,7 +22,6 @@ import {
   decodeOrganisationList,
   decodeSession,
 } from "./wire/decode";
-import { wireTokenResponse } from "./wire/schemas";
 import {
   sampleBuildList,
   sampleDeploymentHistory,
@@ -32,7 +31,6 @@ import type {
   AmacrinService,
   ArchiveAuthInput,
   CreateArchiveInput,
-  RefreshedSession,
 } from "./service";
 
 /** The wire shape of `config.auth` on create/deploy requests. */
@@ -58,38 +56,8 @@ export class RealAmacrinService implements AmacrinService {
   }
 
   // ── auth ────────────────────────────────────────────────────────────
-  // refresh/logout are cookie-authenticated: they bypass HttpClient (no
-  // bearer) and send credentials so the cross-origin cookie rides.
-
-  async refreshSession(): Promise<RefreshedSession> {
-    const response = await this.authFetch("/api/v1/auth/refresh");
-    if (!response.ok) throw await apiErrorFromResponse(response);
-    const wire = wireTokenResponse.safeParse(await response.json());
-    if (!wire.success) {
-      throw new TransportError("malformed token response", {
-        cause: wire.error,
-      });
-    }
-    return {
-      accessToken: wire.data.access_token,
-      expiresInSeconds: wire.data.expires_in,
-    };
-  }
-
-  async logout(): Promise<void> {
-    const response = await this.authFetch("/api/v1/auth/logout");
-    // Logout is idempotent; only transport-level failures matter.
-    if (!response.ok && response.status !== 401) {
-      throw await apiErrorFromResponse(response);
-    }
-  }
-
-  private authFetch(path: string): Promise<Response> {
-    return fetch(`${this.baseUrl}${path}`, {
-      method: "POST",
-      credentials: "include",
-    });
-  }
+  // Sign-in / refresh / logout live in the BFF (#185); this reads identity
+  // through the same-origin proxy.
 
   async getMe(): Promise<Session> {
     return decodeSession(await this.client.get("/api/v1/auth/me"));

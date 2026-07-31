@@ -1,5 +1,3 @@
-import type { SessionRefresher } from "@/api/auth/refresher";
-
 import { ApiError, TransportError } from "./errors";
 
 interface RequestOptions {
@@ -37,21 +35,23 @@ export async function apiErrorFromResponse(
 }
 
 /**
- * Authenticated JSON client for the Amacrin Cloud API.
+ * Same-origin JSON client for the platform BFF (issue #185).
  *
- * Every request carries the in-memory bearer token (proactively refreshed
- * near expiry). On a 401 the client refreshes once and retries once; a
- * second 401 (or a dead refresh) surfaces as the original ApiError — the
- * refresher has already fired `onSessionLost`. Error bodies are decoded to
- * `ApiError`, carrying the `x-request-id` for supportability.
+ * The browser holds no bearer token — it calls the dashboard's own
+ * `/api/amacrin/*` proxy, which attaches the sealed access token server-side
+ * and transparently refreshes it. So this client just sends same-origin
+ * cookie-authenticated requests. A `401` means the whole session is gone (the
+ * server-side refresh already failed): it fires `onUnauthorized` (sign-out +
+ * redirect) and surfaces the ApiError. Error bodies are decoded to `ApiError`,
+ * carrying the `x-request-id` for supportability.
  */
 export class HttpClient {
   private readonly baseUrl: string;
-  private readonly refresher: SessionRefresher;
+  private readonly onUnauthorized: (() => void) | undefined;
 
-  constructor(args: { baseUrl: string; refresher: SessionRefresher }) {
+  constructor(args: { baseUrl: string; onUnauthorized?: () => void }) {
     this.baseUrl = args.baseUrl.replace(/\/$/, "");
-    this.refresher = args.refresher;
+    this.onUnauthorized = args.onUnauthorized;
   }
 
   get(path: string): Promise<unknown> {
@@ -63,25 +63,16 @@ export class HttpClient {
   }
 
   private async request(path: string, options: RequestOptions): Promise<unknown> {
-    const token = await this.refresher.ensureFreshToken();
-    const response = await this.send(path, options, token);
-
-    if (response.status !== 401) return this.settle(response);
-
-    // One refresh, one retry — never a loop. A null token means the
-    // session is gone; surface the original 401.
-    const fresh = await this.refresher.forceRefresh();
-    if (fresh === null) throw await apiErrorFromResponse(response);
-    return this.settle(await this.send(path, options, fresh));
+    const response = await this.send(path, options);
+    if (response.status === 401) {
+      this.onUnauthorized?.();
+      throw await apiErrorFromResponse(response);
+    }
+    return this.settle(response);
   }
 
-  private async send(
-    path: string,
-    options: RequestOptions,
-    token: string | null,
-  ): Promise<Response> {
+  private async send(path: string, options: RequestOptions): Promise<Response> {
     const headers = new Headers();
-    if (token !== null) headers.set("authorization", `Bearer ${token}`);
     if (options.body !== undefined) {
       headers.set("content-type", "application/json");
     }

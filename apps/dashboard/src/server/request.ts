@@ -26,3 +26,19 @@ export function isSecureRequest(req: NextRequest): boolean {
   if (forwarded !== null) return forwarded.split(",")[0]?.trim() === "https";
   return req.nextUrl.protocol === "https:";
 }
+
+/**
+ * The dashboard's public origin as the browser sees it — `scheme://host[:port]`.
+ * Behind an ingress the direct bind (`0.0.0.0:3000`) is not the address the
+ * browser used, so honour `X-Forwarded-Proto`/`X-Forwarded-Host` first. Used to
+ * build the OAuth `redirect_uri` the control plane bounces back to (#185), which
+ * must match the registered dashboard origin exactly.
+ */
+export function requestOrigin(req: NextRequest): string {
+  const proto =
+    req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() ??
+    req.nextUrl.protocol.replace(/:$/, "");
+  const host =
+    req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? req.nextUrl.host;
+  return `${proto}://${host}`;
+}

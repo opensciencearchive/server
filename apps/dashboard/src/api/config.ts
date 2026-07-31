@@ -8,10 +8,6 @@ export function apiModeFromEnv(): ApiMode {
   return "real";
 }
 
-export function apiBaseUrlFromEnv(): string {
-  return process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
-}
-
 /**
  * Runtime identity of this build (issue #173).
  *

@@ -1,8 +1,8 @@
 /**
  * MSW handlers for the real Amacrin Cloud API surface, serving the
  * wire-shaped fixtures. Host is wildcarded so the same handlers work in
- * Vitest (any test base URL) and in the browser (`msw` mode against
- * NEXT_PUBLIC_API_URL). Tests layer scenario overrides with `server.use`.
+ * Vitest (any test base URL) and in the browser (`msw` mode against the
+ * same-origin BFF proxy). Tests layer scenario overrides with `server.use`.
  */
 import { HttpResponse, http } from "msw";
 

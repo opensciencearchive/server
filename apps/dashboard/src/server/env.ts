@@ -20,6 +20,29 @@ export function osaApiUrl(): string {
   return required("OSA_API_URL").replace(/\/$/, "");
 }
 
+/**
+ * In-cluster base URL of the Amacrin control-plane API (platform build, #185).
+ * Server-to-server only — token exchange, refresh, logout, and the `/api/amacrin`
+ * data proxy. Never reaches the browser, so it can be an internal service DNS
+ * (e.g. http://amacrin-api.amacrin.svc.cluster.local). Replaces the old baked
+ * `NEXT_PUBLIC_API_URL`, so one platform image works across environments.
+ */
+export function amacrinApiUrl(): string {
+  return required("AMACRIN_API_URL").replace(/\/$/, "");
+}
+
+/**
+ * Browser-facing origin of the control plane (platform build, #185). The OAuth
+ * sign-in leg redirects the *browser* here, so unlike {@link amacrinApiUrl} it
+ * must be publicly reachable (e.g. https://api.amacrin.com). Falls back to
+ * `amacrinApiUrl()` for single-origin dev where the two coincide.
+ */
+export function amacrinPublicUrl(): string {
+  const value = process.env["AMACRIN_PUBLIC_URL"];
+  if (value === undefined || value === "") return amacrinApiUrl();
+  return value.replace(/\/$/, "");
+}
+
 /** Shared HS256 secret — must equal the server's OSA_AUTH__JWT__SECRET. */
 export function jwtSecret(): string {
   return required("JWT_SECRET");

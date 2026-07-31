@@ -2,19 +2,23 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { SELF_HOST_ARCHIVE_ID } from "@/api/config";
 import { sessionSecret } from "@/server/env";
+import { readPlatformSession } from "@/server/platform-session";
 import { SESSION_COOKIE, readSession } from "@/server/session";
 
 /**
- * Self-host request gate (issue #173).
+ * Dashboard request gate.
  *
- * For a self-hosted build (`IS_PLATFORM=false`):
- *  1. Require a valid dashboard session cookie; unauthenticated requests go to
- *     `/sign-in` (which is excluded from the matcher, so it stays reachable).
- *  2. Collapse the (nonexistent) fleet routes — `/`, `/organisations/*`,
- *     `/archives/new` — onto the single archive root.
+ * Both builds now hold a same-origin httpOnly session cookie, so both are
+ * guarded here (edge-safe `jose` verification):
+ *  - **platform** (`IS_PLATFORM=true`, #185): require a valid sealed token-pair
+ *    session; unauthenticated requests go to `/sign-in`. No fleet collapse —
+ *    the fleet routes are real.
+ *  - **self-host** (`IS_PLATFORM=false`, #173): require a valid session, then
+ *    collapse the (nonexistent) fleet routes — `/`, `/organisations/*`,
+ *    `/archives/new` — onto the single archive root.
  *
- * Verification uses `jose` (edge-safe). A platform build keeps client-side
- * auth (`AuthGuard`) and does nothing here.
+ * `/sign-in` and API routes are excluded from the matcher, so they stay
+ * reachable while signed out.
  */
 const IS_PLATFORM = process.env.NEXT_PUBLIC_IS_PLATFORM === "true";
 const SELF_HOST_HOME = `/archives/${SELF_HOST_ARCHIVE_ID}`;
@@ -27,17 +31,24 @@ function isFleetPath(pathname: string): boolean {
   );
 }
 
-export async function middleware(req: NextRequest): Promise<NextResponse> {
-  if (IS_PLATFORM) return NextResponse.next();
+function redirectToSignIn(req: NextRequest): NextResponse {
+  const url = req.nextUrl.clone();
+  url.pathname = "/sign-in";
+  return NextResponse.redirect(url);
+}
 
-  const session = await readSession(
-    req.cookies.get(SESSION_COOKIE)?.value,
-    sessionSecret(),
-  );
+export async function middleware(req: NextRequest): Promise<NextResponse> {
+  const secret = sessionSecret();
+  const cookie = req.cookies.get(SESSION_COOKIE)?.value;
+
+  if (IS_PLATFORM) {
+    const session = await readPlatformSession(cookie, secret);
+    return session === null ? redirectToSignIn(req) : NextResponse.next();
+  }
+
+  const session = await readSession(cookie, secret);
   if (session === null) {
-    const url = req.nextUrl.clone();
-    url.pathname = "/sign-in";
-    return NextResponse.redirect(url);
+    return redirectToSignIn(req);
   }
 
   if (isFleetPath(req.nextUrl.pathname)) {

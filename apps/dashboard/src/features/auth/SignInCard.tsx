@@ -2,7 +2,6 @@
 
 import Image from "next/image";
 
-import { signInUrl } from "./sign-in-url";
 import styles from "./SignInCard.module.css";
 
 const ERROR_COPY: Record<string, string> = {
@@ -10,20 +9,14 @@ const ERROR_COPY: Record<string, string> = {
     "Google didn't return a valid response. Nothing was created — try again.",
   expired: "The sign-in attempt expired. Start again from the beginning.",
   invalid: "The sign-in attempt was not valid. Start again from the beginning.",
+  waitlisted: "You're on the waitlist — we'll email you when your account is ready.",
 };
 
-export function SignInCard({
-  apiBaseUrl,
-  error,
-}: {
-  apiBaseUrl: string;
-  error: string | null;
-}) {
-  // The redirect target is this deployment's own origin — computed in the
-  // browser so the same build works on any host (localhost, preview, prod).
-  const origin =
-    typeof window === "undefined" ? "" : window.location.origin;
-  const href = signInUrl(apiBaseUrl, origin);
+export function SignInCard({ error }: { error: string | null }) {
+  // The sign-in flow runs entirely through the BFF (#185): this route sets a
+  // CSRF nonce and redirects to the control plane's OAuth entry point. The
+  // browser never sees a control-plane URL or token.
+  const href = "/api/auth/sign-in";
 
   return (
     <div className={styles.card}>

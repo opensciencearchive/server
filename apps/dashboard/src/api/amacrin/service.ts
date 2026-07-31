@@ -30,18 +30,11 @@ export interface CreateArchiveInput extends ArchiveAuthInput {
   slug: string;
 }
 
-export interface RefreshedSession {
-  accessToken: string;
-  expiresInSeconds: number;
-}
-
 export interface AmacrinService {
   // ── auth ────────────────────────────────────────── real endpoints ──
-  /** POST /auth/refresh — the browser attaches the httpOnly cookie. */
-  refreshSession(): Promise<RefreshedSession>;
-  /** POST /auth/logout — revokes the session; idempotent. */
-  logout(): Promise<void>;
-  /** GET /auth/me */
+  // Sign-in, refresh and logout are handled by the BFF (#185): the browser
+  // never holds a control-plane token, so the service only reads identity.
+  /** GET /auth/me (through the BFF proxy). */
   getMe(): Promise<Session>;
 
   // ── organisations ───────────────────────────────── real endpoints ──
