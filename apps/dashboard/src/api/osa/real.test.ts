@@ -60,3 +60,63 @@ describe("RealOSAService base resolution", () => {
     expect(seen[0]).toBe("/api/amacrin/api/v1/archives/arch_1/osa/auth/config");
   });
 });
+
+describe("RealOSAService agent surface", () => {
+  const DISCOVERY = {
+    node: {
+      name: "Alpine",
+      domain: "alpine.example.org",
+      description: "d",
+      osa_version: "0.0.7",
+    },
+    skill_url: "https://alpine.example.org/SKILL.md",
+    reference_base: "https://alpine.example.org/api/v1/data",
+    data_url: "https://alpine.example.org/api/v1/data",
+    openapi_url: "https://alpine.example.org/api/v1/openapi.json",
+  };
+
+  /** Serve markdown for the skill alias and JSON for discovery. */
+  function spyAgentFetch(): string[] {
+    const seen: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((url: RequestInfo | URL) => {
+      const href = String(url);
+      seen.push(href);
+      return Promise.resolve(
+        href.endsWith("/agent/skill")
+          ? new Response("# Alpine\n\nGrounding doc.", {
+              headers: { "content-type": "text/markdown" },
+            })
+          : Response.json(DISCOVERY),
+      );
+    });
+    return seen;
+  }
+
+  it("reads both grounding docs through the proxy, never the archive directly", async () => {
+    const seen = spyAgentFetch();
+    const svc = new RealOSAService(
+      (id) => `/api/amacrin/api/v1/archives/${id}/osa`,
+    );
+
+    const surface = await svc.getAgentSurface("arch_1");
+
+    expect(seen.sort()).toEqual([
+      "/api/amacrin/api/v1/archives/arch_1/osa/agent/discovery",
+      "/api/amacrin/api/v1/archives/arch_1/osa/agent/skill",
+    ]);
+    // Nothing addressed the archive's own origin.
+    expect(seen.some((u) => u.includes("alpine.example.org"))).toBe(false);
+    expect(surface.skillMarkdown).toContain("# Alpine");
+    expect(surface.node.osaVersion).toBe("0.0.7");
+    expect(surface.mcpUrl).toBe("https://alpine.example.org/mcp");
+  });
+
+  it("self-host uses the same aliases against its single-archive proxy", async () => {
+    const seen = spyAgentFetch();
+    await new RealOSAService(() => "/api/osa").getAgentSurface("arch_ignored");
+    expect(seen.sort()).toEqual([
+      "/api/osa/agent/discovery",
+      "/api/osa/agent/skill",
+    ]);
+  });
+});

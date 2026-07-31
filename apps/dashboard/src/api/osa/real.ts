@@ -14,6 +14,7 @@
  * base prefix. There is no sample data here. Runs client-side, so a relative
  * base resolves to the dashboard origin and rides the httpOnly session cookie.
  */
+import type { AgentSurface } from "@/domain/agent";
 import type {
   FeatureTable,
   IngestionRun,
@@ -28,6 +29,7 @@ import type {
 
 import type { OSAService } from "./service";
 import {
+  decodeAgentSurface,
   decodeAuthConfig,
   decodeCatalogSchemaIds,
   decodeFeatureTables,
@@ -62,6 +64,15 @@ export class RealOSAService implements OSAService {
       throw new Error(`OSA request failed (${res.status}) for ${url}`);
     }
     return res.json();
+  }
+
+  /** Same contract as `fetchJson`, for the markdown grounding doc. */
+  private async fetchText(url: string): Promise<string> {
+    const res = await fetch(url, { headers: { accept: "text/markdown" } });
+    if (!res.ok) {
+      throw new Error(`OSA request failed (${res.status}) for ${url}`);
+    }
+    return res.text();
   }
 
   async getRecordStats(archiveId: string): Promise<RecordStats> {
@@ -127,5 +138,17 @@ export class RealOSAService implements OSAService {
     // surface — self-host and platform both allowlist exactly `auth/config`
     // (#184/#185).
     return decodeAuthConfig(await this.getJson(archiveId, "/auth/config"));
+  }
+
+  async getAgentSurface(archiveId: string): Promise<AgentSurface> {
+    // `SKILL.md` and root discovery are public and unversioned, so they sit
+    // outside `/api/v1` — both proxies expose them as the `agent/*` aliases.
+    // The two reads are independent; fetch them together.
+    const base = this.resolveBase(archiveId).replace(/\/$/, "");
+    const [skill, discovery] = await Promise.all([
+      this.fetchText(`${base}/agent/skill`),
+      this.fetchJson(`${base}/agent/discovery`),
+    ]);
+    return decodeAgentSurface({ skill, discovery });
   }
 }

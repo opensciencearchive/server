@@ -13,8 +13,8 @@ function bareUrl(url: string): string {
   return url.replace(/^https?:\/\//, "");
 }
 
-export function AgentPanel() {
-  const surface = useAgentSurface();
+export function AgentPanel({ archiveId }: { archiveId: string }) {
+  const surface = useAgentSurface(archiveId);
 
   return (
     <div className={styles.page}>

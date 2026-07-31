@@ -14,7 +14,20 @@ export const ALLOWED_ROOTS = new Set([
   "ingestions",
   "ready",
   "auth",
+  "agent",
 ]);
+
+/**
+ * The agent-grounding docs are public, unversioned and live at the archive
+ * ROOT (`GET /SKILL.md`, `GET /`), so they can't hang off `/api/v1` like every
+ * other surface. They are reached through two exact aliases — the same ones
+ * the cloud read-proxy accepts (`read_proxy.rs`), so the dashboard issues one
+ * request shape whichever proxy is in front of it.
+ */
+const ROOT_ALIASES: Record<string, string> = {
+  "agent/skill": "/SKILL.md",
+  "agent/discovery": "/",
+};
 
 /**
  * `auth` is a single non-secret endpoint, not a subtree: only `/auth/config`
@@ -36,6 +49,11 @@ const EXACT_ONLY: Record<string, string> = {
 export function resolveAllowedTarget(path: string[], base: string): URL | null {
   const root = path[0];
   if (root === undefined || !ALLOWED_ROOTS.has(root)) return null;
+
+  if (root === "agent") {
+    const alias = ROOT_ALIASES[path.join("/")];
+    return alias === undefined ? null : new URL(alias, base);
+  }
 
   const target = new URL(`/api/v1/${path.join("/")}`, base);
 
