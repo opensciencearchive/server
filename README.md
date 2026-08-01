@@ -20,26 +20,26 @@
 
 OSA is both an **open protocol** and its **reference implementation** for scientific data deposition, validation, publication, discovery, and export — standing up [PDB](https://www.rcsb.org/)-level data infrastructure for any scientific domain.
 
-A lab describes its data once, as a **convention**: a typed metadata schema, an ingester that pulls from wherever the data lives today, and hooks that derive computed features. OSA turns that into a running archive with a validated write path, a queryable read surface, and documentation that both humans and LLM agents can navigate.
+You describe your data once, as a **convention**: what a record looks like, where the data comes from today, and what you want computed from it. OSA turns that into a running archive — validated on the way in, queryable on the way out, and documented well enough that a colleague or an AI assistant can find their way around it.
 
 <table>
 <tr>
 <td width="50%">
 
-**Conventions as code**
-A schema, an ingester, and hooks — declared in Python, deployed with one command. No YAML archaeology, no bespoke ETL.
+**Describe your data in Python**
+A schema, an ingester, and your analysis code — deployed with one command. No YAML archaeology, no bespoke ETL.
 
-**Hooks as OCI containers**
-Domain experts define quality checks and derived features; OSA runs them sandboxed, with no network by default. Every produced row is traceable to the exact image digest and config that made it.
+**Your analysis code, reproducibly**
+You write the quality checks and the derived measurements; OSA runs them in a sandbox and records exactly which version of your code produced every row.
 
 </td>
 <td width="50%">
 
-**Agent-native read surface**
-Every node serves a machine-readable catalog (`/data`), a generated agent skill sheet (`/SKILL.md`), and a Model Context Protocol endpoint (`/mcp`) — so any LLM host can query it without bespoke integration.
+**Built for AI assistants**
+Every archive publishes a catalog, a plain-English brief on what it holds, and an endpoint an assistant can connect to — so asking questions of your data needs no integration work.
 
-**Federation-ready**
-Nodes are identified by DNS domain and resources by versioned, node-scoped names, so records can flow between nodes while preserving provenance.
+**Made to be shared**
+Records carry stable, versioned identifiers, so data can move between archives without losing track of where it came from.
 
 </td>
 </tr>
@@ -47,29 +47,17 @@ Nodes are identified by DNS domain and resources by versioned, node-scoped names
 
 ## Quickstart
 
-You don't need to clone this repo to run an OSA archive. The [Python SDK (`osa-py`)](https://github.com/opensciencearchive/osa-py) ships the whole stack — Postgres, server, management dashboard, and a docker-socket-proxy for hook execution, brought up with one command.
+You don't need to clone this repo to run an OSA archive. The [Python SDK (`osa-py`)](https://github.com/opensciencearchive/osa-py) ships the whole stack — database, server, and dashboard — brought up with one command.
 
 ```bash
 pip install osa-py
 osa init my-archive
 cd my-archive
-osa start
+osa start        # your archive is now running on http://localhost:8000
+osa dashboard    # open the web dashboard, already signed in
 ```
 
-`osa start` brings the stack up via Docker Compose and mints a SUPERADMIN dev token, so the CLI is authenticated immediately — there is no login step.
-
-| | |
-|---|---|
-| API | `http://localhost:8000` |
-| Dashboard | `http://localhost:8081` |
-
-```bash
-osa dashboard    # opens the dashboard in your browser, already signed in
-```
-
-`osa dashboard` mints a short-lived handoff proof from the project's `SESSION_SECRET` and hands it to the dashboard, which exchanges it for a session cookie. You never type a password, and no archive token reaches the browser — the dashboard proxies reads server-side over an allowlisted, GET-only path.
-
-Run `osa start --no-ui` to start the API alone, without the dashboard.
+There's no login step and nothing to configure. Add `--no-ui` to `osa start` if you want the API on its own.
 
 ## Define a convention
 
@@ -87,7 +75,7 @@ class PDBStructure(Schema):
 
 @hook
 def find_pockets(record: Record[PDBStructure]) -> list[Pocket]:
-    """Derive one feature row per detected binding pocket. Runs in its own container."""
+    """Derive one row per detected binding pocket."""
     ...
 
 convention(
@@ -109,31 +97,31 @@ convention(
 pockets = "mypkg.convention"
 ```
 
-Documentation is **mandatory**, not optional: a convention must supply a `purpose`, at least one worked `Example`, and three or more distinct trigger questions. Under-documented deploys are rejected with a 422 naming each gap, and there is no bypass flag. This is what makes the generated `/SKILL.md` and per-schema reference docs useful to an agent rather than a schema dump.
+Documenting your data is **required**, not optional. A convention has to say what it covers and give worked examples of the questions it answers; a deploy that skips this is rejected, and tells you what's missing. That documentation is what makes your archive legible to a colleague or an AI assistant, rather than a pile of columns.
 
 Then deploy and ingest:
 
 ```bash
-osa deploy                               # build hook + ingester images, register the convention
-osa ingestion start --convention pockets # pull from upstream and emit records
-osa logs server -f                       # watch ingestion, validation, and hooks run
+osa deploy                               # register the convention and build its hooks
+osa ingestion start --convention pockets # pull from upstream and publish records
+osa logs server -f                       # watch it run
 ```
 
-`osa test` runs a convention end-to-end — the ingester, then every hook — without touching the archive. The full SDK reference lives in the [`osa-py` README](https://github.com/opensciencearchive/osa-py).
+`osa test` runs a convention end-to-end without touching your archive. The full SDK reference lives in the [`osa-py` README](https://github.com/opensciencearchive/osa-py).
 
 ## The read surface
 
-Once records are published, the node serves them from the unified `/data/` surface — a catalog, per-schema manifests with live row counts, single-record fetch, filtered queries, and streaming CSV / gzipped-CSV dumps of both records and feature tables.
+Published records are served from a single `/data/` surface: browse what the archive holds, fetch one record, query with filters, or pull a whole table down as CSV.
 
 ```bash
-curl http://localhost:8000/                                             # node identity + published schemas
-curl http://localhost:8000/api/v1/data                                  # catalog: schemas + table resources
-curl http://localhost:8000/api/v1/data/pdb-structure                    # manifest: fields, tables, row counts
+curl http://localhost:8000/                                             # what this archive publishes
+curl http://localhost:8000/api/v1/data                                  # the datasets and their tables
+curl http://localhost:8000/api/v1/data/pdb-structure                    # one dataset: fields and row counts
 curl 'http://localhost:8000/api/v1/data/pdb-structure/records?limit=3'  # records as JSON
-curl http://localhost:8000/api/v1/data/pdb-structure/pocket.csv         # a feature table as CSV
+curl http://localhost:8000/api/v1/data/pdb-structure/pocket.csv         # a derived table as CSV
 ```
 
-Filtered queries POST a structured filter expression, which pushes down to SQL:
+Filters are expressed as JSON and run as a query against the database, so they stay fast on large tables:
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/data/pdb-structure/pocket \
@@ -146,29 +134,35 @@ curl -X POST http://localhost:8000/api/v1/data/pdb-structure/pocket \
 
 ### Agents
 
-Every node also serves `/SKILL.md` — a skill sheet generated from the live catalog, listing each dataset, its row counts, and its access patterns — and a [Model Context Protocol](https://modelcontextprotocol.io) endpoint at `/mcp` with the MCP Apps extension. Add that URL as a connector in any MCP-Apps host (Claude, ChatGPT, Goose, VS Code) and the assistant is grounded in the node's real datasets from the moment it connects, rendering sortable tables, charts, and filter panels inline. The node never calls a model itself; the connecting assistant does the orchestrating. See [`docs/mcp-apps.md`](docs/mcp-apps.md).
+Your archive writes its own documentation. `/SKILL.md` is a plain-English brief on what the archive holds, kept in sync with the data as it grows. And `/mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) endpoint you can add as a connector in Claude, ChatGPT, Goose, or VS Code:
+
+```
+http://localhost:8000/mcp
+```
+
+From there an assistant can answer questions about your data and draw tables and charts from it directly, without anyone writing an integration first. Your archive doesn't need an API key or a model of its own — the assistant connecting to it does that work. See [`docs/mcp-apps.md`](docs/mcp-apps.md).
 
 ## The dashboard
 
-`osa dashboard` opens the operator view of a single node. Every panel reads live data from the archive API:
+`osa dashboard` opens the web dashboard for your archive:
 
 | Page | What it shows |
 |---|---|
-| **Overview** | Record and feature-row counts, with a per-schema breakdown |
-| **Records / Features** | Browse published records and the derived feature tables |
-| **Agents** | The node's rendered `SKILL.md` and its MCP connector details |
-| **Hooks** | Registered hooks and their live release versions |
-| **Ingesters / Ingestions** | Configured ingesters, and ingestion runs with live progress |
-| **Observability** | Component health |
-| **Authentication** | Configured auth provider and admin list |
+| **Overview** | How many records and derived rows you have, broken down by dataset |
+| **Records / Features** | Browse published records and the tables derived from them |
+| **Agents** | Your archive's `SKILL.md` and how to connect an AI assistant to it |
+| **Hooks** | Which hooks are registered, and which version is live |
+| **Ingesters / Ingestions** | Your ingesters, and each run's progress |
+| **Observability** | Whether everything is healthy |
+| **Authentication** | How people sign in, and who the admins are |
 
-## Canonical write path
+## How data moves through OSA
 
 ```
 Deposition  ─→  Validation  ─→  Curation  ─→  Record  ─→  /data
-   draft          OCI hooks      approve/     immutable    catalog, manifests,
-   metadata       structured     reject       versioned    filtered queries,
-   + files        checks                      published    CSV dumps, /mcp
+   draft          your hooks     approve/     immutable    queries, CSV dumps,
+   metadata       run and         reject      versioned    AI assistants
+   + files        check it                    published
 ```
 
 ## Hack on OSA
@@ -207,9 +201,9 @@ Dashboard: `just dashboard dev`, `just dashboard test`.
 
 ## Status
 
-The local-dev story is in good shape: `osa start` brings up a fully-authenticated stack with no config, and `osa dashboard` gets you a live operator view in one command. The write path (ingestion through record publication with containerised hooks and per-row provenance) and the read path (the unified `/data/` surface, generated agent docs, and the MCP endpoint) are both functional and running in the wild.
+Running an archive locally works well today: `osa start` gets you a working stack with no configuration, and `osa dashboard` gives you a view of it. Getting data in — ingestion, validation, and publishing — works end to end, as does getting it back out through `/data` and the AI assistant endpoint. Both are in real use.
 
-Human curation is auto-approve for v1. Federation, usage analytics, and the public archive site are still in progress.
+Curation currently auto-approves everything. Sharing between archives, usage analytics, and the public-facing archive site are still in progress.
 
 ## Demos
 
