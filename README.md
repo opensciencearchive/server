@@ -27,21 +27,33 @@ Deposition  ─→  Validation  ─→  Curation  ─→  Record  ─→  /data
 
 <table>
 <tr>
-<td width="50%">
+<td width="50%" valign="top">
 
-**Describe your data in Python**
+#### Describe your data in Python
+
 A schema, an ingester, and your analysis code, deployed with one command.
 
-**Your analysis code, reproducibly**
+</td>
+<td width="50%" valign="top">
+
+#### Built for AI assistants
+
+Every archive publishes a catalog and an endpoint an assistant can connect to. No integration work.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+#### Reproducible by default
+
 OSA runs your checks and measurements in a sandbox, and records which version of your code produced every row.
 
 </td>
-<td width="50%">
+<td width="50%" valign="top">
 
-**Built for AI assistants**
-Every archive publishes a catalog and an endpoint an assistant can connect to. No integration work.
+#### Made to be shared
 
-**Made to be shared**
 Stable, versioned identifiers, so data moves between archives without losing its provenance.
 
 </td>
@@ -152,8 +164,6 @@ From there an assistant can answer questions about your data and draw tables and
 <p align="center">
   <img src=".github/images/dashboard.png" alt="The OSA dashboard, showing an archive's overview page" width="100%" />
 </p>
-
-<sub>Shown here for a deployed archive. Running locally, you get the same pages without the deployment and build panels.</sub>
 
 ## Hack on OSA
 
