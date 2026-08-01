@@ -152,16 +152,6 @@ From there an assistant can answer questions about your data and draw tables and
 
 <sub>Shown here for a deployed archive. Running locally, you get the same pages without the deployment and build panels.</sub>
 
-| Page | What it shows |
-|---|---|
-| **Overview** | How many records and derived rows you have, broken down by dataset |
-| **Records / Features** | Browse published records and the tables derived from them |
-| **Agents** | Your archive's `SKILL.md` and how to connect an AI assistant to it |
-| **Hooks** | Which hooks are registered, and which version is live |
-| **Ingesters / Ingestions** | Your ingesters, and each run's progress |
-| **Observability** | Whether everything is healthy |
-| **Authentication** | How people sign in, and who the admins are |
-
 ## How data moves through OSA
 
 ```
