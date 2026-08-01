@@ -12,22 +12,22 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square" alt="License" /></a>
 </p>
 
-> **⚠️ Under active development** — OSA is pre-release software. APIs, data formats, and configuration will change without notice. Not yet suitable for production use or external contributions.
+> **⚠️ Under active development.** OSA is pre-release software. APIs, data formats, and configuration will change without notice. Not yet suitable for production use or external contributions.
 
 ---
 
 ## What is OSA?
 
-OSA is both an **open protocol** and its **reference implementation** for scientific data deposition, validation, publication, discovery, and export — standing up [PDB](https://www.rcsb.org/)-level data infrastructure for any scientific domain.
+OSA is both an **open protocol** and its **reference implementation** for scientific data deposition, validation, publication, discovery, and export. It stands up [PDB](https://www.rcsb.org/)-level data infrastructure for any scientific domain.
 
-You describe your data once, as a **convention**: what a record looks like, where the data comes from today, and what you want computed from it. OSA turns that into a running archive — validated on the way in, queryable on the way out, and documented well enough that a colleague or an AI assistant can find their way around it.
+You describe your data once, as a **convention**: what a record looks like, where the data comes from today, and what you want computed from it. OSA turns that into a running archive, validated on the way in, queryable on the way out, and documented well enough that a colleague or an AI assistant can find their way around it.
 
 <table>
 <tr>
 <td width="50%">
 
 **Describe your data in Python**
-A schema, an ingester, and your analysis code — deployed with one command. No YAML archaeology, no bespoke ETL.
+A schema, an ingester, and your analysis code, deployed with one command. No YAML archaeology, no bespoke ETL.
 
 **Your analysis code, reproducibly**
 You write the quality checks and the derived measurements; OSA runs them in a sandbox and records exactly which version of your code produced every row.
@@ -36,7 +36,7 @@ You write the quality checks and the derived measurements; OSA runs them in a sa
 <td width="50%">
 
 **Built for AI assistants**
-Every archive publishes a catalog, a plain-English brief on what it holds, and an endpoint an assistant can connect to — so asking questions of your data needs no integration work.
+Every archive publishes a catalog, a plain-English brief on what it holds, and an endpoint an assistant can connect to, so asking questions of your data needs no integration work.
 
 **Made to be shared**
 Records carry stable, versioned identifiers, so data can move between archives without losing track of where it came from.
@@ -47,7 +47,7 @@ Records carry stable, versioned identifiers, so data can move between archives w
 
 ## Quickstart
 
-You don't need to clone this repo to run an OSA archive. The [Python SDK (`osa-py`)](https://github.com/opensciencearchive/osa-py) ships the whole stack — database, server, and dashboard — brought up with one command.
+You don't need to clone this repo to run an OSA archive. The [Python SDK (`osa-py`)](https://github.com/opensciencearchive/osa-py) ships the whole stack (database, server, and dashboard), brought up with one command.
 
 ```bash
 pip install osa-py
@@ -140,7 +140,7 @@ Your archive writes its own documentation. `/SKILL.md` is a plain-English brief 
 http://localhost:8000/mcp
 ```
 
-From there an assistant can answer questions about your data and draw tables and charts from it directly, without anyone writing an integration first. Your archive doesn't need an API key or a model of its own — the assistant connecting to it does that work. See [`docs/mcp-apps.md`](docs/mcp-apps.md).
+From there an assistant can answer questions about your data and draw tables and charts from it directly, without anyone writing an integration first. Your archive doesn't need an API key or a model of its own; the assistant connecting to it does that work. See [`docs/mcp-apps.md`](docs/mcp-apps.md).
 
 ## The dashboard
 
@@ -197,11 +197,11 @@ Dashboard: `just dashboard dev`, `just dashboard test`.
 └── docs/                    # Architecture and design notes
 ```
 
-> The `web/` public site is currently out of date. It builds under `just dev` here, but is **not** started by `osa start` — it sits behind a `web` Compose profile there, so the default self-host stack is server + dashboard.
+> The `web/` public site is currently out of date. It builds under `just dev` here, but is **not** started by `osa start`. It sits behind a `web` Compose profile there, so the default self-host stack is server + dashboard.
 
 ## Status
 
-Running an archive locally works well today: `osa start` gets you a working stack with no configuration, and `osa dashboard` gives you a view of it. Getting data in — ingestion, validation, and publishing — works end to end, as does getting it back out through `/data` and the AI assistant endpoint. Both are in real use.
+Running an archive locally works well today: `osa start` gets you a working stack with no configuration, and `osa dashboard` gives you a view of it. Getting data in (ingestion, validation, and publishing) works end to end, as does getting it back out through `/data` and the AI assistant endpoint. Both are in real use.
 
 Curation currently auto-approves everything. Sharing between archives, usage analytics, and the public-facing archive site are still in progress.
 
