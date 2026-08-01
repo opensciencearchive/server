@@ -5,7 +5,7 @@
 <h1 align="center">Open Science Archive</h1>
 
 <p align="center">
-  <strong>A domain-agnostic archive for AI-ready scientific data</strong>
+  <strong>An open source platform for AI-ready scientific data</strong>
   <br /><br />
   <a href="https://github.com/opensciencearchive/osa-py"><img src="https://img.shields.io/badge/Python%20SDK-osa--py-blue?style=flat-square" alt="Python SDK" /></a>
   <a href="https://github.com/opensciencearchive/server/issues"><img src="https://img.shields.io/github/issues/opensciencearchive/server?style=flat-square" alt="Issues" /></a>
@@ -18,7 +18,7 @@
 
 ## What is OSA?
 
-OSA is both an **open protocol** and its **reference implementation** for scientific data deposition, validation, publication, discovery, and export. It stands up [PDB](https://www.rcsb.org/)-level data infrastructure for any scientific domain.
+OSA is an open source platform for publishing scientific data: depositing it, validating it, and making it findable and usable once it's published. It gives any field the kind of data infrastructure [PDB](https://www.rcsb.org/) gives structural biology, without having to build it first.
 
 You describe your data once, as a **convention**: what a record looks like, where the data comes from today, and what you want computed from it. OSA turns that into a running archive, validated on the way in, queryable on the way out, and documented well enough that a colleague or an AI assistant can find their way around it.
 
