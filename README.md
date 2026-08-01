@@ -54,7 +54,7 @@ OSA runs your checks and measurements in a sandbox, and records which version of
 
 #### Made to be shared
 
-Stable, versioned identifiers, so data moves between archives without losing its provenance.
+Stable, versioned identifiers, so data can be referenced globally and traced back to its source.
 
 </td>
 </tr>
