@@ -140,11 +140,17 @@ Your archive writes its own documentation. `/SKILL.md` is a plain-English brief 
 http://localhost:8000/mcp
 ```
 
-From there an assistant can answer questions about your data and draw tables and charts from it directly, without anyone writing an integration first. Your archive doesn't need an API key or a model of its own; the assistant connecting to it does that work. See [`docs/mcp-apps.md`](docs/mcp-apps.md).
+From there an assistant can answer questions about your data and draw tables and charts from it directly, without anyone writing an integration first. Your archive doesn't need an API key or a model of its own; the assistant connecting to it does that work.
 
 ## The dashboard
 
 `osa dashboard` opens the web dashboard for your archive:
+
+<p align="center">
+  <img src=".github/images/dashboard.png" alt="The OSA dashboard, showing an archive's overview page" width="100%" />
+</p>
+
+<sub>Shown here for a deployed archive. Running locally, you get the same pages without the deployment and build panels.</sub>
 
 | Page | What it shows |
 |---|---|
@@ -193,8 +199,7 @@ Dashboard: `just dashboard dev`, `just dashboard test`.
 ├── packages/
 │   └── osa-widgets/         # MCP Apps interactive UI bundles
 ├── web/                     # Next.js public archive site (deposit/search/record)
-├── deploy/                  # Docker Compose orchestration
-└── docs/                    # Architecture and design notes
+└── deploy/                  # Docker Compose orchestration
 ```
 
 > The `web/` public site is currently out of date. It builds under `just dev` here, but is **not** started by `osa start`. It sits behind a `web` Compose profile there, so the default self-host stack is server + dashboard.
