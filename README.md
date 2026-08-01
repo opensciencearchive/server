@@ -12,34 +12,37 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square" alt="License" /></a>
 </p>
 
-> **⚠️ Under active development.** OSA is pre-release software. APIs, data formats, and configuration will change without notice. Not yet suitable for production use or external contributions.
-
 ---
 
 ## What is OSA?
 
-OSA is an open source platform for publishing scientific data: depositing it, validating it, and making it findable and usable once it's published. It gives any field the kind of data infrastructure [PDB](https://www.rcsb.org/) gives structural biology, without having to build it first.
+OSA is an open source platform for publishing scientific data. You describe your data once and get a running archive that gives any field the kind of infrastructure [PDB](https://www.rcsb.org/) gives structural biology.
 
-You describe your data once, as a **convention**: what a record looks like, where the data comes from today, and what you want computed from it. OSA turns that into a running archive, validated on the way in, queryable on the way out, and documented well enough that a colleague or an AI assistant can find their way around it.
+```
+Deposition  ─→  Validation  ─→  Curation  ─→  Record  ─→  /data
+   draft          your hooks     approve/     immutable    queries, CSV dumps,
+   metadata       run and         reject      versioned    AI assistants
+   + files        check it                    published
+```
 
 <table>
 <tr>
 <td width="50%">
 
 **Describe your data in Python**
-A schema, an ingester, and your analysis code, deployed with one command. No YAML archaeology, no bespoke ETL.
+A schema, an ingester, and your analysis code, deployed with one command.
 
 **Your analysis code, reproducibly**
-You write the quality checks and the derived measurements; OSA runs them in a sandbox and records exactly which version of your code produced every row.
+OSA runs your checks and measurements in a sandbox, and records which version of your code produced every row.
 
 </td>
 <td width="50%">
 
 **Built for AI assistants**
-Every archive publishes a catalog, a plain-English brief on what it holds, and an endpoint an assistant can connect to, so asking questions of your data needs no integration work.
+Every archive publishes a catalog and an endpoint an assistant can connect to. No integration work.
 
 **Made to be shared**
-Records carry stable, versioned identifiers, so data can move between archives without losing track of where it came from.
+Stable, versioned identifiers, so data moves between archives without losing its provenance.
 
 </td>
 </tr>
@@ -59,9 +62,9 @@ osa dashboard    # open the web dashboard, already signed in
 
 There's no login step and nothing to configure. Add `--no-ui` to `osa start` if you want the API on its own.
 
-## Define a convention
+## Describe your data
 
-A convention is a Python package that declares a schema, its hooks, and an ingester, then registers itself through an `osa.conventions` entry point. In outline:
+You describe your data in a Python package: what a record looks like, where it comes from today, and what you want computed from it. In outline:
 
 ```python
 from osa import Example, Field, Record, Schema, convention, hook
@@ -97,17 +100,17 @@ convention(
 pockets = "mypkg.convention"
 ```
 
-Documenting your data is **required**, not optional. A convention has to say what it covers and give worked examples of the questions it answers; a deploy that skips this is rejected, and tells you what's missing. That documentation is what makes your archive legible to a colleague or an AI assistant, rather than a pile of columns.
+Documenting your data is **required**, not optional. You have to say what it covers and give worked examples of the questions it answers; a deploy that skips this is rejected, and tells you what's missing. That documentation is what makes your archive legible to a colleague or an AI assistant, rather than a pile of columns.
 
 Then deploy and ingest:
 
 ```bash
-osa deploy                               # register the convention and build its hooks
+osa deploy                               # register it and build its hooks
 osa ingestion start --convention pockets # pull from upstream and publish records
 osa logs server -f                       # watch it run
 ```
 
-`osa test` runs a convention end-to-end without touching your archive. The full SDK reference lives in the [`osa-py` README](https://github.com/opensciencearchive/osa-py).
+`osa test` runs the whole thing end-to-end without touching your archive. The full SDK reference lives in the [`osa-py` README](https://github.com/opensciencearchive/osa-py).
 
 ## The read surface
 
@@ -151,15 +154,6 @@ From there an assistant can answer questions about your data and draw tables and
 </p>
 
 <sub>Shown here for a deployed archive. Running locally, you get the same pages without the deployment and build panels.</sub>
-
-## How data moves through OSA
-
-```
-Deposition  ─→  Validation  ─→  Curation  ─→  Record  ─→  /data
-   draft          your hooks     approve/     immutable    queries, CSV dumps,
-   metadata       run and         reject      versioned    AI assistants
-   + files        check it                    published
-```
 
 ## Hack on OSA
 
