@@ -473,6 +473,60 @@ Index(
 )
 
 
+# Ingester identity: which schema it produces records for, and which release is
+# live (#180). The exact mirror of `hooks`/`hook_releases` — an ingester asserts
+# records the way a hook asserts feature rows, and both need to name the code
+# that did it.
+ingesters_table = Table(
+    "ingesters",
+    metadata,
+    Column("name", String(40), primary_key=True),  # IngesterName, globally unique
+    # Bare schema id, not `<id>@<semver>`: an ingester keeps producing records as
+    # its schema gains versions.
+    Column("schema_id", String, nullable=False),
+    Column(
+        "live_release_id",
+        PGUUID(as_uuid=True),
+        ForeignKey(
+            "ingester_releases.id",
+            name="fk_ingesters_live_release_id",
+            use_alter=True,
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        nullable=True,
+    ),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+Index("idx_ingesters_schema_id", ingesters_table.c.schema_id)
+
+
+# Immutable, integer-versioned ingester artifact: what image runs, built from where.
+ingester_releases_table = Table(
+    "ingester_releases",
+    metadata,
+    Column("id", PGUUID(as_uuid=True), primary_key=True),  # IngesterReleaseId
+    Column("ingester_name", String(40), ForeignKey("ingesters.name"), nullable=False),
+    Column("version", Integer, nullable=False),  # monotonic per ingester, gap-free
+    Column("image", Text, nullable=False),
+    Column("digest", Text, nullable=False),
+    Column("config", JSONB, nullable=False, server_default=text("'{}'")),
+    Column("limits", JSONB, nullable=False),
+    Column("source_ref", Text, nullable=False),  # git SHA / build id (reproducibility)
+    Column("built_by", Text, nullable=True),
+    Column("built_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("ingester_name", "version", name="uq_ingester_releases_ingester_version"),
+    UniqueConstraint("ingester_name", "digest", name="uq_ingester_releases_ingester_digest"),
+)
+
+Index(
+    "idx_ingester_releases_ingester_version",
+    ingester_releases_table.c.ingester_name,
+    ingester_releases_table.c.version.desc(),
+)
+
+
 # Append-only PURE execution record + per-row provenance anchor (design-revisions
 # §6). No execution-context columns: a feature row reaches its data origin via the
 # other arm of the join (record_srn → records.source); this is only "what code ran,
