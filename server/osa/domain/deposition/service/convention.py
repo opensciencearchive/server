@@ -15,7 +15,6 @@ from osa.domain.shared.event import EventId
 from osa.domain.shared.model.source import IngesterDefinition
 from osa.domain.shared.model.srn import (
     ConventionSlug,
-    Domain,
     LocalId,
     SchemaId,
     SchemaIdentifier,
@@ -32,7 +31,6 @@ class ConventionService(Service):
     metadata_service: MetadataService  # TODO: replace with a port?
     hook_registry: HookRegistryService
     outbox: Outbox
-    node_domain: Domain
 
     async def deploy(
         self,

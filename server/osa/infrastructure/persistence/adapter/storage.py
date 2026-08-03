@@ -13,7 +13,7 @@ from osa.domain.deposition.model.value import DepositionFile
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.error import InfrastructureError
 from osa.domain.shared.model.provenance import RunRef
-from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
+from osa.domain.shared.model.srn import DepositionSRN
 from osa.domain.validation.model.batch_outcome import (
     BatchRecordOutcome,
     HookRecordId,
@@ -210,19 +210,6 @@ class FilesystemStorageAdapter(FileStoragePort):
         dep_dir = self._dep_dir(deposition_id)
         if dep_dir.exists():
             shutil.rmtree(dep_dir)
-
-    def _conv_id(self, convention_id: ConventionSlug) -> str:
-        return convention_id.root
-
-    def get_source_staging_dir(self, convention_id: ConventionSlug, run_id: str) -> Path:
-        staging = self.base_path / "sources" / self._conv_id(convention_id) / "staging" / run_id
-        staging.mkdir(parents=True, exist_ok=True)
-        return staging
-
-    def get_source_output_dir(self, convention_id: ConventionSlug, run_id: str) -> Path:
-        output = self.base_path / "sources" / self._conv_id(convention_id) / "runs" / run_id
-        output.mkdir(parents=True, exist_ok=True)
-        return output
 
     async def move_source_files_to_deposition(
         self,
