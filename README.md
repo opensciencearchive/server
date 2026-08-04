@@ -198,12 +198,6 @@ Dashboard: `just dashboard dev`, `just dashboard test`.
 
 > The `web/` public site is currently out of date. It builds under `just dev` here, but is **not** started by `osa start`. It sits behind a `web` Compose profile there, so the default self-host stack is server + dashboard.
 
-## Status
-
-Running an archive locally works well today: `osa start` gets you a working stack with no configuration, and `osa dashboard` gives you a view of it. Getting data in (ingestion, validation, and publishing) works end to end, as does getting it back out through `/data` and the AI assistant endpoint. Both are in real use.
-
-Curation currently auto-approves everything. Sharing between archives, usage analytics, and the public-facing archive site are still in progress.
-
 ## Demos
 
 - [Protein Pocket Database](https://www.pockets.bio/)
