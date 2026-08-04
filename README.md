@@ -200,7 +200,6 @@ Dashboard: `just dashboard dev`, `just dashboard test`.
 
 ## Demos
 
-- [Protein Pocket Database](https://www.pockets.bio/)
 - [Semantic GEO Database](https://www.lingual.bio/)
 
 ## License
