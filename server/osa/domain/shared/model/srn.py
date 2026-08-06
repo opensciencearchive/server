@@ -130,7 +130,6 @@ class ResourceType(str, Enum):
     dep = "dep"
     schema = "schema"
     onto = "onto"
-    conv = "conv"
     snap = "snap"
     evt = "evt"
     val = "val"
