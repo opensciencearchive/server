@@ -1,10 +1,21 @@
 """Shared source domain models used across deposition and ingest domains."""
 
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, ClassVar, Literal, Union
 
 from pydantic import Discriminator, Field, Tag, field_validator
 
+from osa.domain.shared.model.names import PgName
 from osa.domain.shared.model.value import ValueObject
+
+
+class IngesterName(PgName):
+    """An ingester's stable name (#180).
+
+    Lives in the shared kernel because the deploy path (deposition domain)
+    registers ingesters that the ingest domain later runs.
+    """
+
+    kind: ClassVar[str] = "ingester name"
 
 
 class IngesterLimits(ValueObject):
