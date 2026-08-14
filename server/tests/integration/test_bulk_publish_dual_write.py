@@ -79,7 +79,6 @@ async def _register_convention(
         metadata_service=metadata_service,
         hook_registry=HookRegistryService(registry=PostgresHookRegistry(pg_session)),
         outbox=AsyncMock(),
-        node_domain=Domain("localhost"),
     )
     # Bundled deploy: schema + typed metadata table + convention, one txn.
     # Use the slug for both the convention and its schema so the typed table is

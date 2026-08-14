@@ -57,7 +57,6 @@ class DepositionProvider(Provider):
         metadata_service: MetadataService,
         hook_registry: HookRegistryService,
         outbox: Outbox,
-        config: Config,
     ) -> ConventionService:
         return ConventionService(
             convention_repo=convention_repo,
@@ -65,7 +64,6 @@ class DepositionProvider(Provider):
             metadata_service=metadata_service,
             hook_registry=hook_registry,
             outbox=outbox,
-            node_domain=Domain(config.domain),
         )
 
     @provide(scope=Scope.APP)

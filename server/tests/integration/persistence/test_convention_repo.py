@@ -163,18 +163,6 @@ class TestConventionRepoRoundTrip:
         page = await repo.list(limit=2, offset=1)
         assert len(page) == 2
 
-    async def test_exists_true(self, pg_session: AsyncSession):
-        repo = PostgresConventionRepository(pg_session)
-        conv = _make_convention()
-        await repo.save(conv)
-        await pg_session.commit()
-
-        assert await repo.exists(conv.id) is True
-
-    async def test_exists_false(self, pg_session: AsyncSession):
-        repo = PostgresConventionRepository(pg_session)
-        assert await repo.exists(ConventionSlug.parse("nope-nope")) is False
-
     async def test_convention_without_ingester(self, pg_session: AsyncSession):
         """Ingester is optional — should be None on retrieval when not set."""
         repo = PostgresConventionRepository(pg_session)

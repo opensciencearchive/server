@@ -16,7 +16,7 @@ from osa.domain.deposition.model.value import DepositionFile
 from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.shared.error import InfrastructureError, NotFoundError
 from osa.domain.shared.model.provenance import RunRef
-from osa.domain.shared.model.srn import ConventionSlug, DepositionSRN
+from osa.domain.shared.model.srn import DepositionSRN
 from osa.domain.validation.model.batch_outcome import (
     BatchRecordOutcome,
     HookRecordId,
@@ -47,9 +47,6 @@ class S3StorageAdapter(FileStoragePort):
 
     def _safe_id(self, srn: DepositionSRN) -> str:
         return f"{srn.domain.root}_{srn.id.root}"
-
-    def _conv_id(self, convention_id: ConventionSlug) -> str:
-        return convention_id.root
 
     def _dep_prefix(self, deposition_id: DepositionSRN) -> str:
         return f"depositions/{self._safe_id(deposition_id)}"
@@ -122,22 +119,6 @@ class S3StorageAdapter(FileStoragePort):
         await self._s3.delete_objects(prefix)
 
     # ── Ingester storage ──────────────────────────────────────────────
-
-    def get_source_staging_dir(self, convention_id: ConventionSlug, run_id: str) -> Path:
-        """Return path for PVC subpath computation (no I/O)."""
-        return (
-            Path(self._data_mount_path)
-            / "sources"
-            / self._conv_id(convention_id)
-            / "staging"
-            / run_id
-        )
-
-    def get_source_output_dir(self, convention_id: ConventionSlug, run_id: str) -> Path:
-        """Return path for PVC subpath computation (no I/O)."""
-        return (
-            Path(self._data_mount_path) / "sources" / self._conv_id(convention_id) / "runs" / run_id
-        )
 
     async def move_source_files_to_deposition(
         self,

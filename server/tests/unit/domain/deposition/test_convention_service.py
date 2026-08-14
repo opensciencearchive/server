@@ -21,7 +21,6 @@ from osa.domain.shared.model.hook import (
 )
 from osa.domain.shared.model.srn import (
     ConventionSlug,
-    Domain,
     SchemaId,
     SchemaIdentifier,
 )
@@ -90,7 +89,6 @@ def _make_service(
         metadata_service=AsyncMock(),
         hook_registry=hook_registry or AsyncMock(),
         outbox=outbox or AsyncMock(),
-        node_domain=Domain("localhost"),
     )
 
 

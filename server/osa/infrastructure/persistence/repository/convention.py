@@ -90,11 +90,6 @@ class PostgresConventionRepository(ConventionRepository):
         result = await self.session.execute(stmt)
         return [_row_to_convention(dict(r)) for r in result.mappings().all()]
 
-    async def exists(self, id: ConventionSlug) -> bool:
-        stmt = select(conventions_table.c.id).where(conventions_table.c.id == id.root)
-        result = await self.session.execute(stmt)
-        return result.first() is not None
-
     async def list_with_source(self) -> List[Convention]:
         stmt = (
             select(conventions_table)

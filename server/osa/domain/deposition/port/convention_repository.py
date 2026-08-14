@@ -21,9 +21,6 @@ class ConventionRepository(Port, Protocol):
     ) -> "List[Convention]": ...
 
     @abstractmethod
-    async def exists(self, id: ConventionSlug) -> bool: ...
-
-    @abstractmethod
     async def list_with_source(self) -> "List[Convention]":
         """Return conventions that have a source defined (SQL-level filter)."""
         ...
