@@ -5,6 +5,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import NewType
 
+from osa.domain.ingest.model.ingester_release import IngesterReleaseId
 from osa.domain.shared.error import InvalidStateError
 from osa.domain.shared.failure import FailureKind
 from osa.domain.shared.model.aggregate import Aggregate
@@ -36,6 +37,10 @@ class IngestRun(Aggregate):
 
     id: IngestRunId
     convention_id: str
+    # The ingester release this run resolved at start (#180 §1) — snapshotted,
+    # exactly as validation snapshots hook releases. Required: every run is
+    # traceable to the exact code that fetched its records.
+    release_id: IngesterReleaseId
     status: IngestStatus = IngestStatus.PENDING
     ingestion_finished: bool = False
     batches_ingested: int = 0

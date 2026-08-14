@@ -16,7 +16,7 @@ identifier inside the limit without surprise truncation.
 from __future__ import annotations
 
 import re
-from typing import ClassVar
+from typing import ClassVar, Self
 
 from pydantic import ConfigDict, RootModel, field_validator
 
@@ -50,3 +50,20 @@ class PgName(RootModel[str]):
 
     def __str__(self) -> str:
         return self.root
+
+    @classmethod
+    def from_raw(cls, raw: str) -> Self:
+        """Parse a free-form name into a canonical PgName at the boundary.
+
+        Wire names arrive as Python class names (``PDBIngester``) or declared
+        slugs (``usgs-feed``). Normalisation is deterministic — lowercase,
+        non-``[a-z0-9]`` runs collapse to a single ``_``, truncated to the cap —
+        so the same wire name always maps to the same registry identity.
+        Raises ``ValueError`` when nothing valid remains (e.g. all digits).
+        """
+        # Break CamelCase before lowering so PDBFeed → pdb_feed, not pdbfeed:
+        # lower/digit→Upper boundaries, then acronym→word (USGSFeed → USGS_Feed).
+        decamel = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", raw)
+        decamel = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", "_", decamel)
+        normalised = re.sub(r"[^a-z0-9]+", "_", decamel.lower()).strip("_")
+        return cls(normalised[:MAX_NAME_LENGTH].rstrip("_"))

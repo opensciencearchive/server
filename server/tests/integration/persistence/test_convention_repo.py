@@ -18,6 +18,7 @@ from osa.domain.shared.model.hook import HookName
 from osa.domain.shared.model.source import (
     IngesterDefinition,
     IngesterLimits,
+    IngesterName,
     IngesterScheduleConfig,
     InitialRunConfig,
 )
@@ -61,6 +62,7 @@ def _make_hook() -> HookName:
 
 def _make_ingester() -> IngesterDefinition:
     return IngesterDefinition(
+        name=IngesterName("from_pdb"),
         image="ghcr.io/example/ingester:latest",
         digest="sha256:def456",
         runner="oci",
@@ -68,6 +70,7 @@ def _make_ingester() -> IngesterDefinition:
         limits=IngesterLimits(timeout_seconds=7200, memory="8g", cpu="4.0"),
         schedule=IngesterScheduleConfig(cron="0 2 * * *", limit=500),
         initial_run=InitialRunConfig(limit=100),
+        source_ref="git+https://example.com/r@deadbeef",
     )
 
 

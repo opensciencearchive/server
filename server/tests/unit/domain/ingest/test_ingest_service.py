@@ -2,13 +2,15 @@
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
 from osa.domain.ingest.model.ingest_run import Applied, IngestStatus, RunClosed
+from osa.domain.ingest.model.ingester_release import IngesterReleaseId
 from osa.domain.ingest.service.ingest import IngestService
 from osa.domain.shared.error import ConflictError, NotFoundError
-from osa.domain.shared.model.source import IngesterDefinition
+from osa.domain.shared.model.source import IngesterDefinition, IngesterName
 from osa.domain.shared.model.srn import Domain
 
 
@@ -35,8 +37,10 @@ def _make_convention(*, has_ingester: bool = True):
     conv.srn = "test-conv"
     conv.ingester = (
         IngesterDefinition(
+            name=IngesterName("from_pdb"),
             image="ghcr.io/example/ingester:v1",
             digest="sha256:abc123",
+            source_ref="git+https://example.com/repo@deadbeef",
         )
         if has_ingester
         else None
@@ -44,11 +48,18 @@ def _make_convention(*, has_ingester: bool = True):
     return conv
 
 
+def _make_release() -> MagicMock:
+    release = MagicMock()
+    release.id = IngesterReleaseId(uuid4())
+    return release
+
+
 def _make_service(
     *,
     convention=None,
     running_ingest=None,
     convention_not_found: bool = False,
+    ingester_registry: AsyncMock | None = None,
 ) -> IngestService:
     ingest_repo = AsyncMock()
     ingest_repo.get_running_for_convention.return_value = running_ingest
@@ -62,9 +73,14 @@ def _make_service(
 
     outbox = AsyncMock()
 
+    if ingester_registry is None:
+        ingester_registry = AsyncMock()
+        ingester_registry.require_live_release.return_value = _make_release()
+
     return IngestService(
         ingest_repo=ingest_repo,
         convention_service=convention_service,
+        ingester_registry=ingester_registry,
         outbox=outbox,
         node_domain=Domain("localhost"),
         instrumentation=RecordingIngestInstrumentation(),
@@ -151,6 +167,7 @@ class TestEnsureRunning:
         run = IngestRun(
             id=IngestRunId("run-1"),
             convention_id="test-conv",
+            release_id=IngesterReleaseId(uuid4()),
             status=IngestStatus.PENDING,
             started_at=datetime.now(UTC),
         )
@@ -170,6 +187,7 @@ class TestEnsureRunning:
         run = IngestRun(
             id=IngestRunId("run-1"),
             convention_id="test-conv",
+            release_id=IngesterReleaseId(uuid4()),
             status=IngestStatus.RUNNING,
             started_at=datetime.now(UTC),
         )
@@ -258,6 +276,7 @@ class TestAbortRun:
             run=IngestRun(
                 id=IngestRunId("run-1"),
                 convention_id="test-conv",
+                release_id=IngesterReleaseId(uuid4()),
                 status=IngestStatus.FAILED,
                 failure_reason="Image pull failed: 401",
                 failure_kind=FailureKind.IMAGE_PULL,
@@ -454,6 +473,7 @@ class TestIngestMetricsEmission:
         run = IngestRun(
             id=IngestRunId("run-1"),
             convention_id="test-conv",
+            release_id=IngesterReleaseId(uuid4()),
             status=IngestStatus.RUNNING,
             ingestion_finished=True,
             batches_ingested=1,
@@ -512,6 +532,7 @@ class TestIngestMetricsEmission:
             run=IngestRun(
                 id=IngestRunId("run-1"),
                 convention_id="test-conv",
+                release_id=IngesterReleaseId(uuid4()),
                 status=IngestStatus.FAILED,
                 started_at=_dt.now(UTC),
             )
@@ -532,3 +553,36 @@ class TestIngestMetricsEmission:
         await service.abort_run(IngestRunId("run-1"), reason="x", kind=FailureKind.RBAC)
 
         assert service.instrumentation.runs_finished == []
+
+
+class TestStartIngestSnapshotsRelease:
+    """start_ingest resolves the ingester's live release and snapshots it on the
+    run (#180 §1) — mirroring how validation snapshots hook releases. Greenfield:
+    resolution is unconditional; a convention whose ingester has no live release
+    cannot start a run."""
+
+    @pytest.mark.asyncio
+    async def test_stamps_release_id_on_the_run(self):
+        release = _make_release()
+        registry = AsyncMock()
+        registry.require_live_release.return_value = release
+        service = _make_service(ingester_registry=registry)
+
+        run = await service.start_ingest("test-conv")
+
+        registry.require_live_release.assert_awaited_once_with(IngesterName("from_pdb"))
+        assert run.release_id == release.id
+        saved = service.ingest_repo.save.await_args[0][0]
+        assert saved.release_id == release.id
+
+    @pytest.mark.asyncio
+    async def test_no_live_release_refuses_the_run(self):
+        registry = AsyncMock()
+        registry.require_live_release.side_effect = NotFoundError(
+            "No live release for ingester 'from_pdb'"
+        )
+        service = _make_service(ingester_registry=registry)
+
+        with pytest.raises(NotFoundError):
+            await service.start_ingest("test-conv")
+        service.ingest_repo.save.assert_not_awaited()

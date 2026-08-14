@@ -88,6 +88,7 @@ def _make_service(
         schema_service=mock_schema_service,
         metadata_service=AsyncMock(),
         hook_registry=hook_registry or AsyncMock(),
+        ingester_registry=AsyncMock(),
         outbox=outbox or AsyncMock(),
     )
 

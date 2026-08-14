@@ -7,11 +7,13 @@ from osa.domain.deposition.model.deploy import HookDeploy
 from osa.domain.deposition.model.docs import ConventionDocs
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.port.convention_repository import ConventionRepository
+from osa.domain.ingest.service.ingester_registry import IngesterRegistryService
 from osa.domain.metadata.service.metadata import MetadataService
 from osa.domain.semantics.model.value import FieldDefinition
 from osa.domain.semantics.service.schema import SchemaService
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventId
+from osa.domain.shared.model.hook import OciConfig, OciLimits
 from osa.domain.shared.model.source import IngesterDefinition
 from osa.domain.shared.model.srn import (
     ConventionSlug,
@@ -30,6 +32,7 @@ class ConventionService(Service):
     schema_service: SchemaService  # TODO: replace with a port?
     metadata_service: MetadataService  # TODO: replace with a port?
     hook_registry: HookRegistryService
+    ingester_registry: IngesterRegistryService
     outbox: Outbox
 
     async def deploy(
@@ -89,6 +92,26 @@ class ConventionService(Service):
             await self.hook_registry.upsert_identity(spec.identity.name, spec.identity.feature)
             await self.hook_registry.create_release(
                 spec.identity.name, spec.runtime, spec.source_ref, built_by
+            )
+
+        # 2b) Ingester: same treatment as hooks (#180 §1) — upsert identity +
+        #     mint release (idempotent on digest, advancing the live pointer).
+        #     Unconditional: name and source_ref are required on the model, so
+        #     every declared ingester carries a provenance chain.
+        if ingester is not None:
+            await self.ingester_registry.upsert_identity(
+                ingester.name, LocalId(created_schema.id.id.root)
+            )
+            await self.ingester_registry.create_release(
+                ingester.name,
+                OciConfig(
+                    image=ingester.image,
+                    digest=ingester.digest,
+                    config=ingester.config if ingester.config is not None else {},
+                    limits=OciLimits(**ingester.limits.model_dump()),
+                ),
+                ingester.source_ref,
+                built_by,
             )
 
         # 3) Convention referencing hooks by name (upsert by slug).

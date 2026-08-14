@@ -28,6 +28,7 @@ from osa.domain.shared.model.hook import (
 from osa.domain.shared.model.source import (
     IngesterDefinition,
     IngesterLimits,
+    IngesterName,
     IngesterScheduleConfig,
     InitialRunConfig,
 )
@@ -94,7 +95,10 @@ class DeployConventionIngester(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str  # build-fan-out key (cloud); not persisted server-side
+    # Build fan-out key (cloud) AND, normalised at this boundary, the ingester's
+    # registry identity (#180 §1). Wire names are free-form (class names,
+    # declared slugs); the domain only ever sees a canonical IngesterName.
+    name: str
     config: dict[str, Any] | None = None
     limits: IngesterLimits = Field(default_factory=IngesterLimits)
     schedule: IngesterScheduleConfig | None = None
@@ -103,6 +107,7 @@ class DeployConventionIngester(BaseModel):
 
     def to_definition(self) -> IngesterDefinition:
         return IngesterDefinition(
+            name=IngesterName.from_raw(self.name),
             image=self.release.image,
             digest=self.release.digest,
             config=self.config,

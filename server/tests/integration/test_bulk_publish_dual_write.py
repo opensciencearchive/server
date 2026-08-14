@@ -35,10 +35,14 @@ from osa.domain.semantics.model.value import Cardinality, FieldDefinition, Field
 from osa.domain.semantics.service.schema import SchemaService
 from osa.domain.shared.model.source import DepositionSource
 from osa.domain.shared.model.srn import ConventionSlug, Domain, SchemaIdentifier
+from osa.domain.ingest.service.ingester_registry import IngesterRegistryService
 from osa.domain.validation.service.hook_registry import HookRegistryService
 from osa.infrastructure.persistence.metadata_store import PostgresMetadataStore
 from osa.infrastructure.persistence.repository.convention import PostgresConventionRepository
 from osa.infrastructure.persistence.repository.hook_registry import PostgresHookRegistry
+from osa.infrastructure.persistence.repository.ingester_registry import (
+    PostgresIngesterRegistry,
+)
 from osa.infrastructure.persistence.repository.ontology import PostgresOntologyRepository
 from osa.infrastructure.persistence.repository.record import PostgresRecordRepository
 from osa.infrastructure.persistence.repository.schema import PostgresSemanticsSchemaRepository
@@ -78,6 +82,7 @@ async def _register_convention(
         schema_service=schema_service,
         metadata_service=metadata_service,
         hook_registry=HookRegistryService(registry=PostgresHookRegistry(pg_session)),
+        ingester_registry=IngesterRegistryService(registry=PostgresIngesterRegistry(pg_session)),
         outbox=AsyncMock(),
     )
     # Bundled deploy: schema + typed metadata table + convention, one txn.

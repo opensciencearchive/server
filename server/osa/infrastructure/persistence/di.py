@@ -30,6 +30,7 @@ from osa.domain.shared.port.event_repository import EventRepository
 from osa.domain.shared.port.unit_of_work import UnitOfWork
 from osa.domain.feature.port.feature_store import FeatureStore
 from osa.domain.validation.port.repository import ValidationRunRepository
+from osa.domain.ingest.port.ingester_registry import IngesterRegistry
 from osa.domain.validation.port.hook_registry import HookRegistry
 from osa.domain.data.port.data_read_store import (
     DataCatalogReadStore,
@@ -52,6 +53,9 @@ from osa.infrastructure.persistence.repository.convention import (
 )
 from osa.infrastructure.persistence.repository.hook_registry import (
     PostgresHookRegistry,
+)
+from osa.infrastructure.persistence.repository.ingester_registry import (
+    PostgresIngesterRegistry,
 )
 from osa.infrastructure.persistence.repository.deposition import (
     PostgresDepositionRepository,
@@ -139,6 +143,12 @@ class PersistenceProvider(Provider):
     # Hook registry (validation domain — feature #145). Owns hooks, releases,
     # the live pointer, and hook_runs (record + provenance reads).
     hook_registry_repo = provide(PostgresHookRegistry, scope=Scope.UOW, provides=HookRegistry)
+
+    # Ingester registry (ingest domain — #180 §1): mirrors the hook registry
+    # for the code that fetches raw data.
+    ingester_registry_repo = provide(
+        PostgresIngesterRegistry, scope=Scope.UOW, provides=IngesterRegistry
+    )
 
     # Cross-domain readers
     schema_reader = provide(SchemaReaderAdapter, scope=Scope.UOW, provides=SchemaReader)

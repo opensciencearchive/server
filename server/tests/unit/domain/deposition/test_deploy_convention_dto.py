@@ -137,10 +137,38 @@ def test_ingester_to_definition_regathers() -> None:
     assert idef.source_ref == "git:1"  # provenance carried onto the ingester
 
 
-def test_ingester_name_accepted_but_not_persisted() -> None:
-    # `name` is the cloud build-fan-out key; the internal ingester has none.
+def test_ingester_name_normalised_into_registry_identity() -> None:
+    # `name` is the cloud build-fan-out key AND, normalised at this boundary,
+    # the ingester's registry identity (#180 §1). Wire names are free-form
+    # (class names, declared slugs); the domain only sees a canonical PgName.
     idef = DeployConventionIngester.model_validate(_ingester(name="anything")).to_definition()
-    assert "name" not in idef.model_dump()
+    assert idef.name.root == "anything"
+
+
+def test_ingester_name_normalisation_is_deterministic() -> None:
+    for wire, expected in [
+        ("USGSFeed", "usgs_feed"),
+        ("usgs-feed", "usgs_feed"),
+        ("PDBIngester", "pdb_ingester"),
+    ]:
+        idef = DeployConventionIngester.model_validate(_ingester(name=wire)).to_definition()
+        assert idef.name.root == expected, wire
+
+
+def test_ingester_name_is_required() -> None:
+    # A declared ingester IS an identity — a nameless one is unrepresentable.
+    body = _ingester()
+    del body["name"]
+    with pytest.raises(ValidationError):
+        DeployConventionIngester.model_validate(body)
+
+
+def test_ingester_source_ref_is_required() -> None:
+    # A release without provenance is the thing the registry exists to prevent.
+    body = _ingester()
+    del body["release"]["source_ref"]
+    with pytest.raises(ValidationError):
+        DeployConventionIngester.model_validate(body)
 
 
 def test_ingester_rejects_flat_image() -> None:

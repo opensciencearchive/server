@@ -8,7 +8,7 @@ import pytest
 
 from osa.config import K8sConfig
 from osa.domain.shared.failure import FailureKind, RuntimeFailure
-from osa.domain.shared.model.source import IngesterDefinition, IngesterLimits
+from osa.domain.shared.model.source import IngesterDefinition, IngesterLimits, IngesterName
 from osa.domain.shared.model.srn import ConventionSlug
 from osa.domain.shared.port.ingester_runner import IngesterInputs
 from osa.infrastructure.k8s.ingester_runner import K8sIngesterRunner
@@ -25,10 +25,12 @@ def _make_ingester(
     config: dict[str, Any] | None = None,
 ) -> IngesterDefinition:
     return IngesterDefinition(
+        name=IngesterName("from_pdb"),
         image=image,
         digest=digest,
         config=config,
         limits=IngesterLimits(timeout_seconds=timeout, memory=memory, cpu=cpu),
+        source_ref="git+https://example.com/r@deadbeef",
     )
 
 

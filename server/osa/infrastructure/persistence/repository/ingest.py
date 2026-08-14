@@ -14,6 +14,7 @@ from osa.domain.ingest.model.ingest_run import (
     RunClosed,
     RunUpdate,
 )
+from osa.domain.ingest.model.ingester_release import IngesterReleaseId
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.failure import FailureKind
@@ -37,6 +38,7 @@ class PostgresIngestRunRepository(IngestRunRepository):
         values = {
             "id": ingest_run.id,
             "convention_id": ingest_run.convention_id,
+            "release_id": ingest_run.release_id,
             "status": ingest_run.status.value,
             "ingestion_finished": ingest_run.ingestion_finished,
             "batches_ingested": ingest_run.batches_ingested,
@@ -254,6 +256,7 @@ def _row_to_ingest_run(row: dict) -> IngestRun:
     return IngestRun(
         id=row["id"],
         convention_id=row["convention_id"],
+        release_id=IngesterReleaseId(row["release_id"]),
         status=IngestStatus(row["status"]),
         ingestion_finished=row["ingestion_finished"],
         batches_ingested=row["batches_ingested"],

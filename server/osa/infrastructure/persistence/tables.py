@@ -375,6 +375,14 @@ ingest_runs_table = Table(
     metadata,
     Column("id", String, primary_key=True),
     Column("convention_id", String, nullable=False),
+    # The ingester release resolved at run start (#180 §1) — NOT NULL: every
+    # run is traceable to the exact code that fetched its records.
+    Column(
+        "release_id",
+        PGUUID(as_uuid=True),
+        ForeignKey("ingester_releases.id", name="fk_ingest_runs_release_id"),
+        nullable=False,
+    ),
     Column("status", String(32), nullable=False, server_default=text("'pending'")),
     Column("ingestion_finished", Boolean, nullable=False, server_default=text("false")),
     Column("batches_ingested", Integer, nullable=False, server_default=text("0")),
