@@ -78,7 +78,16 @@ records_table = Table(
 )
 
 Index("idx_records_convention_id", records_table.c.convention_id)
-Index("idx_records_schema_id", records_table.c.schema_id)
+# Serves the default table read — schema equality prefix + (published_at, srn)
+# ordering — as one (backward) index range scan, including the row-value keyset
+# predicate (#219). Subsumes the old idx_records_schema_id (left prefix).
+Index(
+    "idx_records_schema_version_published",
+    records_table.c.schema_id,
+    records_table.c.schema_version,
+    records_table.c.published_at,
+    records_table.c.srn,
+)
 # Expression must be the raw ``->>`` text accessor (NOT .as_string(), which adds a
 # redundant CAST) so it matches the bulk-publish ON CONFLICT ((source->>'type'),
 # (source->>'id')) — Postgres matches ON CONFLICT to a unique index by exact

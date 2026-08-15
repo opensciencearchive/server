@@ -200,11 +200,25 @@ class PostgresTableReadStore:
             )
         page = KeysetPage(
             [
-                SortKey(sort_expr, descending=is_desc, nulls_last=True),
-                SortKey(tiebreak_expr, descending=is_desc),
+                SortKey(
+                    sort_expr,
+                    descending=is_desc,
+                    nulls_last=True,
+                    nullable=self._column_nullable(sort_expr),
+                ),
+                SortKey(tiebreak_expr, descending=is_desc, nullable=False),
             ]
         )
         return page.order_by(), self._cursor_after(plan, page, sort_expr, tiebreak_expr)
+
+    @staticmethod
+    def _column_nullable(expr: sa.ColumnElement[Any]) -> bool:
+        """A column's DDL nullability, conservatively True for non-Column
+        expressions. NOT NULL is what licenses plain ASC/DESC emission and the
+        row-value cursor predicate — both index-servable (#219 phase 3)."""
+        if isinstance(expr, sa.Column):
+            return bool(expr.nullable)
+        return True
 
     def _cursor_after(
         self,
@@ -342,8 +356,13 @@ class PostgresTableReadStore:
             )
         page = KeysetPage(
             [
-                SortKey(sort_expr, descending=is_desc, nulls_last=True),
-                SortKey(tiebreak_expr, descending=is_desc),
+                SortKey(
+                    sort_expr,
+                    descending=is_desc,
+                    nulls_last=True,
+                    nullable=self._column_nullable(sort_expr),
+                ),
+                SortKey(tiebreak_expr, descending=is_desc, nullable=False),
             ]
         )
         return page.order_by(), self._cursor_after(plan, page, sort_expr, tiebreak_expr)
