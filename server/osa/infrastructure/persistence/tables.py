@@ -525,7 +525,9 @@ ingester_releases_table = Table(
     Column("built_by", Text, nullable=True),
     Column("built_at", DateTime(timezone=True), nullable=False),
     UniqueConstraint("ingester_name", "version", name="uq_ingester_releases_ingester_version"),
-    UniqueConstraint("ingester_name", "digest", name="uq_ingester_releases_ingester_digest"),
+    # NB: deliberately NO (name, digest) unique constraint — a config-only
+    # redeploy mints a new release with the same digest (idempotency is by
+    # definition-equality against the live release, decided in the adapter).
 )
 
 Index(

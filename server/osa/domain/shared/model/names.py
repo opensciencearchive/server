@@ -57,13 +57,24 @@ class PgName(RootModel[str]):
 
         Wire names arrive as Python class names (``PDBIngester``) or declared
         slugs (``usgs-feed``). Normalisation is deterministic — lowercase,
-        non-``[a-z0-9]`` runs collapse to a single ``_``, truncated to the cap —
-        so the same wire name always maps to the same registry identity.
-        Raises ``ValueError`` when nothing valid remains (e.g. all digits).
+        non-``[a-z0-9]`` runs collapse to a single ``_`` — so the same wire
+        name always maps to the same registry identity. Spelling variants of
+        the same words (``PDBFeed``, ``pdb-feed``, ``pdb_feed``) unifying into
+        one identity is the intended semantics, not a collision.
+
+        Overlong names are REJECTED, never truncated: silent truncation would
+        alias distinct long names into one identity. Raises ``ValueError`` when
+        the normalised name exceeds the cap or nothing valid remains (e.g. all
+        digits).
         """
         # Break CamelCase before lowering so PDBFeed → pdb_feed, not pdbfeed:
         # lower/digit→Upper boundaries, then acronym→word (USGSFeed → USGS_Feed).
         decamel = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", raw)
         decamel = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", "_", decamel)
         normalised = re.sub(r"[^a-z0-9]+", "_", decamel.lower()).strip("_")
-        return cls(normalised[:MAX_NAME_LENGTH].rstrip("_"))
+        if len(normalised) > MAX_NAME_LENGTH:
+            raise ValueError(
+                f"{cls.kind} {raw!r} normalises to {len(normalised)} chars; "
+                f"the maximum is {MAX_NAME_LENGTH}. Use a shorter name."
+            )
+        return cls(normalised)

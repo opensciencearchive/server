@@ -60,7 +60,9 @@ def upgrade() -> None:
         sa.Column("built_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["ingester_name"], ["ingesters.name"]),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("ingester_name", "digest", name="uq_ingester_releases_ingester_digest"),
+        # No (name, digest) unique constraint: a config-only redeploy mints a
+        # new release with the same digest (idempotency is definition-equality
+        # against the live release, decided in the adapter).
         sa.UniqueConstraint(
             "ingester_name", "version", name="uq_ingester_releases_ingester_version"
         ),

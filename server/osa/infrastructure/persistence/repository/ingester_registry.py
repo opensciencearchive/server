@@ -116,25 +116,33 @@ class PostgresIngesterRegistry(IngesterRegistry):
         locked = await self.session.execute(
             select(ingesters_table).where(ingesters_table.c.name == name.root).with_for_update()
         )
-        if locked.mappings().first() is None:
+        ingester_row = locked.mappings().first()
+        if ingester_row is None:
             raise NotFoundError(f"Ingester not found: {name.root}")
 
-        # Idempotency on (ingester_name, digest): return the existing release, no
-        # new version, pointer unchanged. Decided under the row lock, so `created`
-        # is race-free under concurrent identical submissions.
-        duplicate = await self.session.execute(
-            select(ingester_releases_table).where(
-                and_(
-                    ingester_releases_table.c.ingester_name == name.root,
-                    ingester_releases_table.c.digest == runtime.digest,
+        # Idempotency by DEFINITION EQUALITY against the live release: only a
+        # redeploy of exactly what is already live is a no-op. Any difference —
+        # image, digest, config, limits, source_ref — mints a new version, so a
+        # run's release_id always describes exactly what was deployed (digest
+        # alone would silently retain stale config). ``built_by`` is excluded:
+        # who built it does not change what it is. Decided under the row lock,
+        # so ``created`` is race-free under concurrent identical submissions.
+        live_id = ingester_row["live_release_id"]
+        if live_id is not None:
+            live = await self.session.execute(
+                select(ingester_releases_table).where(ingester_releases_table.c.id == live_id)
+            )
+            live_row = live.mappings().first()
+            if live_row is not None and (
+                live_row["image"] == runtime.image
+                and live_row["digest"] == runtime.digest
+                and live_row["config"] == runtime.config
+                and live_row["limits"] == runtime.limits.model_dump()
+                and live_row["source_ref"] == source_ref
+            ):
+                return IngesterReleaseOutcome(
+                    release=self._to_release(dict(live_row)), created=False
                 )
-            )
-        )
-        duplicate_row = duplicate.mappings().first()
-        if duplicate_row is not None:
-            return IngesterReleaseOutcome(
-                release=self._to_release(dict(duplicate_row)), created=False
-            )
 
         highest_version = await self.session.scalar(
             select(func.coalesce(func.max(ingester_releases_table.c.version), 0)).where(

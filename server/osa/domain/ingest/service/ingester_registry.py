@@ -35,7 +35,11 @@ class IngesterRegistryService(Service):
         source_ref: str,
         built_by: str | None = None,
     ) -> IngesterReleaseOutcome:
-        """Mint vN+1 for an existing ingester (idempotent on digest); advance live."""
+        """Mint vN+1 for an existing ingester; advance live.
+
+        Idempotent on definition-equality with the live release: only a
+        redeploy of exactly what is live is a no-op (see the port docstring).
+        """
         return await self.registry.create_release(name, runtime, source_ref, built_by)
 
     async def set_live(self, name: IngesterName, version: int) -> Ingester:

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from osa.domain.auth.model.principal import Principal
 from osa.domain.deposition.model.deploy import HookDeploy
@@ -104,6 +104,12 @@ class DeployConventionIngester(BaseModel):
     schedule: IngesterScheduleConfig | None = None
     initial_run: InitialRunConfig | None = None
     release: DeployConventionRelease
+
+    @field_validator("name")
+    @classmethod
+    def _name_normalises(cls, v: str) -> str:
+        IngesterName.from_raw(v)  # overlong/unnormalisable → 422 here, not deep in deploy
+        return v
 
     def to_definition(self) -> IngesterDefinition:
         return IngesterDefinition(

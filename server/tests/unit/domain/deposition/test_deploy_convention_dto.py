@@ -155,6 +155,13 @@ def test_ingester_name_normalisation_is_deterministic() -> None:
         assert idef.name.root == expected, wire
 
 
+def test_ingester_name_too_long_is_rejected_not_truncated() -> None:
+    # Silent truncation would alias distinct long names into one registry
+    # identity (Greptile P1 on #208). Greenfield: reject, name the limit.
+    with pytest.raises(ValidationError):
+        DeployConventionIngester.model_validate(_ingester(name="x" * 41))
+
+
 def test_ingester_name_is_required() -> None:
     # A declared ingester IS an identity — a nameless one is unrepresentable.
     body = _ingester()

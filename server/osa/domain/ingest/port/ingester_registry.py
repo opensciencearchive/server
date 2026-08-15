@@ -45,12 +45,16 @@ class IngesterRegistry(Port, Protocol):
     ) -> IngesterReleaseOutcome:
         """Mint the next release for an existing ingester and advance live.
 
-        Idempotent on ``(name, digest)``: re-submitting an existing digest
-        returns the existing release without minting a version or moving the
-        pointer, with ``created == False``. Version assignment and pointer
-        advance happen under a row lock on the ``ingesters`` row so concurrent
-        submitters serialize, and ``created`` is decided under that same lock so
-        it is race-free.
+        Idempotent on **definition equality with the live release**: a redeploy
+        of exactly what is live (image, digest, config, limits, source_ref —
+        ``built_by`` excluded) returns the live release without minting a
+        version or moving the pointer, with ``created == False``. Any
+        difference mints vN+1, so a run's ``release_id`` always describes
+        exactly what was deployed — dedupe on digest alone would silently
+        retain stale config. Version assignment and pointer advance happen
+        under a row lock on the ``ingesters`` row so concurrent submitters
+        serialize, and ``created`` is decided under that same lock so it is
+        race-free.
         """
         ...
 
