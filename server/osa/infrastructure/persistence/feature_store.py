@@ -10,7 +10,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from osa.domain.feature.port.feature_store import FeatureStore
-from osa.domain.shared.error import ConflictError, ValidationError
+from osa.domain.shared.error import ConflictError, NotFoundError, ValidationError
 from osa.domain.shared.model.hook import ColumnDef
 from osa.infrastructure.persistence.api_naming import feature_pg_schema, feature_pg_table
 from osa.infrastructure.persistence.feature_table import (
@@ -87,11 +87,19 @@ class PostgresFeatureStore(FeatureStore):
         Redoing an insert after a partial failure converges instead of
         duplicating rows (#160): existing rows for ``record_srn`` in this
         feature table are deleted before the insert, in the same transaction.
+
+        DML runs on the injected session (#219 phase 4) — the caller's unit of
+        work owns commit/rollback, so records, metadata, and feature rows
+        written in one stage land or vanish together. The table object comes
+        from the ``feature_tables`` catalog (as the read path builds it);
+        runtime reflection was the only reason this ever needed a raw engine
+        connection.
         """
         if not rows:
             return 0
 
         _validate_pg_identifier(feature)
+        table = await self._catalog_table(feature)
 
         now = datetime.now(UTC)
         enriched_rows = [
@@ -104,23 +112,27 @@ class PostgresFeatureStore(FeatureStore):
             for row in rows
         ]
 
-        # Bulk insert in chunks of 1000
+        # Replace-by-record: drop any prior rows for this record so a redo
+        # after a partial failure converges instead of duplicating (#160).
+        await self._session.execute(table.delete().where(table.c.record_srn == record_srn))
+
         chunk_size = 1000
         total = 0
-        pg_schema = feature_pg_schema()
-        pg_table = feature_pg_table(feature)
-        async with self._engine.begin() as conn:
-            # Reflect the actual table to get correct column types for casts
-            metadata = sa.MetaData(schema=pg_schema)
-            await conn.run_sync(metadata.reflect, only=[pg_table])
-            table = metadata.tables[f"{pg_schema}.{pg_table}"]
-
-            # Replace-by-record: drop any prior rows for this record so a redo
-            # after a partial failure converges instead of duplicating (#160).
-            await conn.execute(table.delete().where(table.c.record_srn == record_srn))
-
-            for i in range(0, len(enriched_rows), chunk_size):
-                chunk = enriched_rows[i : i + chunk_size]
-                await conn.execute(table.insert(), chunk)
-                total += len(chunk)
+        for i in range(0, len(enriched_rows), chunk_size):
+            chunk = enriched_rows[i : i + chunk_size]
+            await self._session.execute(table.insert(), chunk)
+            total += len(chunk)
+        await self._session.flush()
         return total
+
+    async def _catalog_table(self, feature: str) -> sa.Table:
+        """Build the feature's table object from the ``feature_tables`` catalog."""
+        result = await self._session.execute(
+            select(feature_tables_table.c.feature_schema).where(
+                feature_tables_table.c.hook_name == feature
+            )
+        )
+        row = result.first()
+        if row is None:
+            raise NotFoundError(f"No feature table registered for hook '{feature}'.")
+        return build_feature_table(feature, FeatureSchema.model_validate(row[0]))
