@@ -55,10 +55,6 @@ class RecordService(Service):
             raise NotFoundError(f"Record not found: {srn}")
         return record
 
-    async def count(self) -> int:
-        """Total published records on this node."""
-        return await self.record_repo.count()
-
     async def srns_for_ingest_batch(
         self, ingest_run_id: str, batch_index: int
     ) -> dict[str, RecordSRN]:

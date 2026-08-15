@@ -69,6 +69,23 @@ async def seed_record(
                 "published_at": published_at or datetime.now(UTC),
             },
         )
+        # Mirror the production writer's lockstep statistics bump (#219): read
+        # surfaces render counts from table_statistics, so seeded records must
+        # count exactly like published ones.
+        await conn.execute(
+            text(
+                """
+                INSERT INTO table_statistics
+                    (schema_id, schema_version, table_name, row_count,
+                     records_covered, updated_at)
+                VALUES (:schema_id, :schema_version, 'records', 1, NULL, now())
+                ON CONFLICT (schema_id, schema_version, table_name)
+                DO UPDATE SET row_count = table_statistics.row_count + 1,
+                              updated_at = now()
+                """
+            ),
+            {"schema_id": schema_id, "schema_version": schema_version},
+        )
 
 
 async def seed_hook_run(

@@ -2,17 +2,17 @@
 
 A ``features.<hook>`` table is global (UNIQUE(hook_name)) and shared by every
 convention that registers the hook name, across schemas. This reader answers
-"which feature tables does this schema expose" (through its conventions) and
-counts a feature table's rows scoped to one schema's records. Composed by both
-``/data/`` read adapters (table streaming + catalog/manifest).
+"which feature tables does this schema expose" (through its conventions).
+Row/coverage counts come from the lockstep ``table_statistics`` (#219) — this
+reader never counts. Composed by both ``/data/`` read adapters (table
+streaming + catalog/manifest).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-import sqlalchemy as sa
-from sqlalchemy import and_, func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.shared.model.srn import SchemaId
@@ -41,29 +41,6 @@ class SchemaFeatureReader:
             (row["hook_name"], FeatureSchema.model_validate(row["feature_schema"]))
             for row in result.mappings()
         ]
-
-    async def count_rows(self, ft: sa.Table, schema_id: SchemaId) -> int:
-        """Row count of a feature table scoped to the schema's records."""
-        stmt = (
-            select(func.count())
-            .select_from(ft.join(records_table, records_table.c.srn == ft.c.record_srn))
-            .where(and_(*self.records_scope(schema_id)))
-        )
-        return int((await self.session.execute(stmt)).scalar_one())
-
-    async def count_covered_records(self, ft: sa.Table, schema_id: SchemaId) -> int:
-        """Distinct records with ≥1 row in this feature table (join coverage).
-
-        Feature tables are 1-to-many with records, so ``count_rows`` alone can't
-        tell a 1-row table that covers 1 record from one that covers many; this
-        is ``COUNT(DISTINCT record_srn)`` over the same schema-scoped join.
-        """
-        stmt = (
-            select(func.count(func.distinct(ft.c.record_srn)))
-            .select_from(ft.join(records_table, records_table.c.srn == ft.c.record_srn))
-            .where(and_(*self.records_scope(schema_id)))
-        )
-        return int((await self.session.execute(stmt)).scalar_one())
 
     @staticmethod
     def records_scope(schema_id: SchemaId) -> list[Any]:

@@ -32,6 +32,3 @@ class RecordRepository(Port, Protocol):
         that batch's index and are correctly excluded.
         """
         ...
-
-    @abstractmethod
-    async def count(self) -> int: ...

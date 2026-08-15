@@ -172,6 +172,26 @@ class FakeCatalogStore:
     async def get_schema_manifest(self, schema_id: SchemaId) -> SchemaManifest | None:
         return _manifest() if schema_id == SCHEMA_ID else None
 
+    async def get_record_columns(self, schema_id: SchemaId) -> list | None:
+        # Mirrors the adapter contract (#219 phase 1): columns without counts.
+        if schema_id != SCHEMA_ID:
+            return None
+        return next(
+            tr.columns for tr in _manifest().table_resources if tr.kind == TableKind.RECORDS
+        )
+
+    async def get_feature_columns(self, schema_id: SchemaId, feature_name) -> list | None:
+        if schema_id != SCHEMA_ID:
+            return None
+        return next(
+            (
+                tr.columns
+                for tr in _manifest().table_resources
+                if tr.kind == TableKind.FEATURE and tr.name == feature_name.root
+            ),
+            None,
+        )
+
     async def get_latest_schema_id(self, schema_short_id: str) -> SchemaId | None:
         return SCHEMA_ID if schema_short_id == "sample-data" else None
 

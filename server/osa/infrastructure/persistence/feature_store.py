@@ -18,7 +18,11 @@ from osa.infrastructure.persistence.feature_table import (
     FeatureSchema,
     build_feature_table,
 )
-from osa.infrastructure.persistence.statistics_upsert import bump_table_statistics
+from osa.domain.shared.model.srn import SchemaId
+from osa.infrastructure.persistence.statistics_upsert import (
+    FeatureDelta,
+    bump_table_statistics,
+)
 from osa.infrastructure.persistence.tables import feature_tables_table, records_table
 
 _PG_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
@@ -135,19 +139,20 @@ class PostgresFeatureStore(FeatureStore):
         # coverage on its first feature write only. The schema identity comes
         # from the record row itself (feature tables are shared across
         # schemas), so attribution cannot drift from the data.
-        schema_id, schema_version = await self._record_schema(record_srn)
+        schema = await self._record_schema(record_srn)
         await bump_table_statistics(
             self._session,
-            schema_id=schema_id,
-            schema_version=schema_version,
-            table_name=feature,
-            row_delta=total - deleted,
-            coverage_delta=1 if deleted == 0 else 0,
+            schema=schema,
+            delta=FeatureDelta(
+                feature=feature,
+                rows=total - deleted,
+                covered=1 if deleted == 0 else 0,
+            ),
         )
         await self._session.flush()
         return total
 
-    async def _record_schema(self, record_srn: str) -> tuple[str, str]:
+    async def _record_schema(self, record_srn: str) -> SchemaId:
         """The owning record's schema identity (PK lookup, in-transaction)."""
         result = await self._session.execute(
             select(records_table.c.schema_id, records_table.c.schema_version).where(
@@ -157,7 +162,7 @@ class PostgresFeatureStore(FeatureStore):
         row = result.first()
         if row is None:
             raise NotFoundError(f"No record '{record_srn}' to attach feature rows to.")
-        return row[0], row[1]
+        return SchemaId.parse(f"{row[0]}@{row[1]}")
 
     async def _catalog_table(self, feature: str) -> sa.Table:
         """Build the feature's table object from the ``feature_tables`` catalog."""

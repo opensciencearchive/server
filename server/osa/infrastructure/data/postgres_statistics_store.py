@@ -1,10 +1,16 @@
-"""Postgres adapter for the instance-statistics snapshot.
+"""Postgres adapter for instance statistics + table_statistics verification.
 
-Storage size is summed via ``pg_total_relation_size`` over ``records`` plus every
-dynamic ``features.*`` and ``metadata.*`` table (enumerated from their catalogs —
-never string-built from user input; ``to_regclass`` yields NULL for a missing
-table so a dropped table can't error the sum). Feature-row totals are a genuine
-O(rows) scan, which is exactly why the result is materialized.
+Storage size is the one fact only observable by polling the storage engine —
+``pg_total_relation_size`` over ``records`` plus every dynamic ``features.*``
+and ``metadata.*`` table (enumerated from their catalogs — never string-built
+from user input; ``to_regclass`` yields NULL for a missing table so a dropped
+table can't error the sum). Everything countable comes from the
+lockstep-maintained ``table_statistics`` (#219): the snapshot SUMs stored
+counts instead of sweeping tables with COUNT(*).
+
+The verifier methods (:meth:`table_statistics_drift` / :meth:`repair_table_statistics`)
+hold the truth query — the same group-bys the backfill migration ran — and are
+the only sanctioned whole-table counting after deploy.
 """
 
 from __future__ import annotations
@@ -16,15 +22,21 @@ import sqlalchemy as sa
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from osa.domain.record.model.statistics import InstanceStats
+from osa.domain.data.model.statistics import (
+    FeatureCount,
+    InstanceStats,
+    RecordsCount,
+    StatisticsDrift,
+    TableCountEntry,
+)
 from osa.infrastructure.persistence.api_naming import (
     feature_pg_schema,
     metadata_pg_schema,
 )
 from osa.infrastructure.persistence.tables import (
-    feature_tables_table,
     instance_statistics_table,
     records_table,
+    table_statistics_table,
 )
 
 # Feature/metadata pg_table names are system-generated and validated on creation
@@ -37,10 +49,17 @@ class PostgresStatisticsStore:
         self.session = session
 
     async def count_this_month(self) -> int:
+        # Live but bounded: index-served month window (idx_records_published_at).
         stmt = (
             select(func.count())
             .select_from(records_table)
             .where(records_table.c.published_at >= func.date_trunc("month", func.now()))
+        )
+        return int((await self.session.execute(stmt)).scalar_one())
+
+    async def records_total(self) -> int:
+        stmt = select(func.coalesce(func.sum(table_statistics_table.c.row_count), 0)).where(
+            table_statistics_table.c.table_name == "records"
         )
         return int((await self.session.execute(stmt)).scalar_one())
 
@@ -95,14 +114,122 @@ class PostgresStatisticsStore:
         return int(result.scalar_one() or 0)
 
     async def _feature_rows(self) -> int:
-        names = (
-            (await self.session.execute(select(feature_tables_table.c.pg_table))).scalars().all()
+        """Total feature rows = SUM over the lockstep counts — no table sweep."""
+        stmt = select(func.coalesce(func.sum(table_statistics_table.c.row_count), 0)).where(
+            table_statistics_table.c.table_name != "records"
         )
-        schema = feature_pg_schema()
-        total = 0
-        for name in names:
-            if not _SAFE_IDENT.match(name):
+        return int((await self.session.execute(stmt)).scalar_one())
+
+    # ------------------------------------------------------------------ #
+    # Verifier: recompute truth, diff, repair (#219 phase 6)
+    # ------------------------------------------------------------------ #
+
+    async def table_statistics_drift(self) -> list[StatisticsDrift]:
+        truth = {_key(e): e for e in await self._recompute_truth()}
+        stored = {_key(e): e for e in await self._read_stored()}
+        drift: list[StatisticsDrift] = []
+        for key in sorted(truth.keys() | stored.keys()):
+            t, s = truth.get(key), stored.get(key)
+            if (s.counts if s else None) != (t.counts if t else None):
+                drift.append(
+                    StatisticsDrift(
+                        schema_id=key[0],
+                        schema_version=key[1],
+                        table_name=key[2],
+                        stored=s.counts if s else None,
+                        actual=t.counts if t else None,
+                    )
+                )
+        return drift
+
+    async def repair_table_statistics(self) -> None:
+        """Replace stored counts wholesale with recomputed truth, in one tx."""
+        truth = await self._recompute_truth()
+        await self.session.execute(sa.delete(table_statistics_table))
+        if truth:
+            await self.session.execute(
+                sa.insert(table_statistics_table),
+                [
+                    {
+                        "schema_id": e.schema_id,
+                        "schema_version": e.schema_version,
+                        "table_name": e.table_name,
+                        "row_count": e.counts.row_count,
+                        "records_covered": (
+                            e.counts.records_covered if isinstance(e.counts, FeatureCount) else None
+                        ),
+                        "updated_at": datetime.now(UTC),
+                    }
+                    for e in truth
+                ],
+            )
+
+    async def _read_stored(self) -> list[TableCountEntry]:
+        result = await self.session.execute(select(table_statistics_table))
+        return [
+            TableCountEntry(
+                schema_id=row["schema_id"],
+                schema_version=row["schema_version"],
+                table_name=row["table_name"],
+                counts=(
+                    RecordsCount(row_count=row["row_count"])
+                    if row["table_name"] == "records"
+                    else FeatureCount(
+                        row_count=row["row_count"],
+                        records_covered=row["records_covered"] or 0,
+                    )
+                ),
+            )
+            for row in result.mappings()
+        ]
+
+    async def _recompute_truth(self) -> list[TableCountEntry]:
+        """The backfill migration's truth query, kept runnable (#219)."""
+        entries: list[TableCountEntry] = []
+        records = await self.session.execute(
+            text(
+                """
+                SELECT schema_id, schema_version, count(*) AS n
+                FROM records GROUP BY schema_id, schema_version
+                """
+            )
+        )
+        for schema_id, schema_version, n in records.fetchall():
+            entries.append(
+                TableCountEntry(
+                    schema_id=schema_id,
+                    schema_version=schema_version,
+                    table_name="records",
+                    counts=RecordsCount(row_count=n),
+                )
+            )
+        tables = await self.session.execute(text("SELECT hook_name, pg_table FROM feature_tables"))
+        fschema = feature_pg_schema()
+        for hook_name, pg_table in tables.fetchall():
+            if not _SAFE_IDENT.match(pg_table):
                 continue
-            stmt = text(f'SELECT count(*) FROM "{schema}"."{name}"')
-            total += int((await self.session.execute(stmt)).scalar_one())
-        return total
+            result = await self.session.execute(
+                text(
+                    f"""
+                    SELECT r.schema_id, r.schema_version, count(ft.id) AS n,
+                           count(DISTINCT ft.record_srn) AS covered
+                    FROM "{fschema}"."{pg_table}" ft
+                    JOIN records r ON r.srn = ft.record_srn
+                    GROUP BY r.schema_id, r.schema_version
+                    """
+                )
+            )
+            for schema_id, schema_version, n, covered in result.fetchall():
+                entries.append(
+                    TableCountEntry(
+                        schema_id=schema_id,
+                        schema_version=schema_version,
+                        table_name=hook_name,
+                        counts=FeatureCount(row_count=n, records_covered=covered),
+                    )
+                )
+        return entries
+
+
+def _key(e: TableCountEntry) -> tuple[str, str, str]:
+    return (e.schema_id, e.schema_version, e.table_name)

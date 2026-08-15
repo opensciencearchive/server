@@ -722,7 +722,7 @@ class WorkerPool:
 
     async def _run_statistics_refresh(self) -> None:
         """Periodically refresh the materialized instance-statistics snapshot."""
-        from osa.domain.record.port.statistics_store import StatisticsStore
+        from osa.domain.data.port.statistics_store import StatisticsStore
 
         while not self._shutdown:
             try:
