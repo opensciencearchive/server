@@ -18,7 +18,7 @@ import sqlalchemy as sa
 
 from osa.domain.data.model.query_plan import (
     PaginationCursor,
-    PaginationParams,
+    BoundedPage,
     QueryPlan,
     SortDirection,
     SortSpec,
@@ -48,7 +48,7 @@ def _records_plan(cursor: str) -> QueryPlan:
     return QueryPlan(
         schema_id=SCHEMA,
         table_kind=TableKind.RECORDS,
-        pagination=PaginationParams(cursor=PaginationCursor(value=cursor)),
+        pagination=BoundedPage(cursor=PaginationCursor(value=cursor)),
     )
 
 
@@ -57,7 +57,7 @@ def _feature_plan(cursor: str) -> QueryPlan:
         schema_id=SCHEMA,
         table_kind=TableKind.FEATURE,
         feature_name="chem_features",
-        pagination=PaginationParams(cursor=PaginationCursor(value=cursor)),
+        pagination=BoundedPage(cursor=PaginationCursor(value=cursor)),
         sort=[SortSpec(column="id", direction=SortDirection.ASC)],
     )
 

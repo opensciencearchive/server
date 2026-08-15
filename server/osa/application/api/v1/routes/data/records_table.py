@@ -19,7 +19,11 @@ from osa.application.api.v1.routes.data._params import FilterRequestBody, parse_
 from osa.application.api.v1.routes.data._streaming import build_table_response
 from osa.application.api.v1.routes.data.formats import DataResponseFormat
 from osa.application.api.v1.routes.data.tables import format_key, register_table_routes
-from osa.domain.data.query.read_table import ReadRecordsTable, ReadRecordsTableHandler
+from osa.domain.data.query.read_table import (
+    ReadMode,
+    ReadRecordsTable,
+    ReadRecordsTableHandler,
+)
 
 
 def _make_get_endpoint(fmt: DataResponseFormat):
@@ -36,6 +40,7 @@ def _make_get_endpoint(fmt: DataResponseFormat):
                 cursor=cursor,
                 limit=limit,
                 sort=parse_sort(sort),
+                mode=ReadMode.PAGE if fmt.paginated else ReadMode.STREAM,
                 timeout=fmt.timeout,
             )
         )
@@ -58,6 +63,7 @@ def _make_post_endpoint(fmt: DataResponseFormat):
                 cursor=body.cursor,
                 limit=body.limit,
                 sort=parse_sort(body.sort),
+                mode=ReadMode.PAGE if fmt.paginated else ReadMode.STREAM,
                 timeout=fmt.timeout,
             )
         )

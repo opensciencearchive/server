@@ -14,6 +14,7 @@ from osa.application.api.v1.routes.data._streaming import build_table_response
 from osa.application.api.v1.routes.data.formats import FORMATS
 from osa.domain.data.model.manifest import ColumnSpec
 from osa.domain.data.model.query_plan import (
+    BoundedPage,
     QueryPlan,
     SortDirection,
     SortSpec,
@@ -47,7 +48,9 @@ async def _body(resp) -> bytes:
 
 
 def _plan(limit: int = 50) -> QueryPlan:
-    return QueryPlan(schema_id=SCHEMA, table_kind=TableKind.RECORDS, pagination={"limit": limit})
+    return QueryPlan(
+        schema_id=SCHEMA, table_kind=TableKind.RECORDS, pagination=BoundedPage(limit=limit)
+    )
 
 
 @pytest.mark.asyncio
@@ -124,7 +127,7 @@ async def test_paginated_records_id_sort_encodes_srn() -> None:
     plan = QueryPlan(
         schema_id=SCHEMA,
         table_kind=TableKind.RECORDS,
-        pagination={"limit": 2},
+        pagination=BoundedPage(limit=2),
         sort=[SortSpec(column="id", direction=SortDirection.ASC)],
     )
     resp = await build_table_response(_aiter(rows), JSON_FMT, COLUMNS, plan)
@@ -147,7 +150,7 @@ async def test_paginated_features_id_sort_encodes_row_id() -> None:
         schema_id=SCHEMA,
         table_kind=TableKind.FEATURE,
         feature_name="chem_features",
-        pagination={"limit": 2},
+        pagination=BoundedPage(limit=2),
         # default FEATURE sort is id asc
     )
     resp = await build_table_response(_aiter(rows), JSON_FMT, COLUMNS, plan)
@@ -172,7 +175,7 @@ async def test_paginated_feature_hook_column_named_srn_does_not_hijack_tiebreak(
         schema_id=SCHEMA,
         table_kind=TableKind.FEATURE,
         feature_name="chem_features",
-        pagination={"limit": 2},
+        pagination=BoundedPage(limit=2),
         # default FEATURE sort is id asc
     )
     resp = await build_table_response(_aiter(rows), JSON_FMT, COLUMNS, plan)

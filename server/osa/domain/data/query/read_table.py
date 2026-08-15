@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
+from enum import StrEnum
 from typing import Any
 
 from pydantic import Field
@@ -22,8 +23,9 @@ from osa.config import Config
 from osa.domain.data.model.filter import FilterExpr
 from osa.domain.data.model.manifest import ColumnSpec
 from osa.domain.data.model.query_plan import (
+    BoundedPage,
+    FullStream,
     PaginationCursor,
-    PaginationParams,
     QueryPlan,
     SortSpec,
     TableKind,
@@ -35,12 +37,24 @@ from osa.domain.shared.model.ids import FeatureName
 from osa.domain.shared.query import Query, QueryHandler
 
 
+class ReadMode(StrEnum):
+    """How much of the table a read may return — chosen by the response format.
+
+    ``PAGE`` is the default everywhere; ``STREAM`` (the whole table) must be
+    named explicitly and only the CSV/gzip dump formats do (#219 phase 2).
+    """
+
+    PAGE = "page"
+    STREAM = "stream"
+
+
 class ReadRecordsTable(Query):
     schema: str  # URL segment: ``<id>`` or ``<id>@<semver>``
     filter: FilterExpr | None = None
     cursor: str | None = None
     limit: int = 50
     sort: list[SortSpec] = Field(default_factory=list)
+    mode: ReadMode = ReadMode.PAGE
     timeout: timedelta | None = None  # execution budget chosen by the response format
 
 
@@ -58,8 +72,10 @@ class TableRead:
     rows: AsyncIterator[Mapping[str, Any]]
 
 
-def _pagination(cmd: ReadRecordsTable, config: Config) -> PaginationParams:
-    return PaginationParams.clamped(
+def _pagination(cmd: ReadRecordsTable, config: Config) -> BoundedPage | FullStream:
+    if cmd.mode == ReadMode.STREAM:
+        return FullStream()
+    return BoundedPage.clamped(
         cursor=PaginationCursor(value=cmd.cursor) if cmd.cursor else None,
         limit=cmd.limit,
         max_limit=config.data.max_page_limit,

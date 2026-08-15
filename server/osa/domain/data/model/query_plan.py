@@ -18,7 +18,7 @@ import json
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -53,7 +53,14 @@ class PaginationCursor(BaseModel):
         return self.value
 
 
-class PaginationParams(BaseModel):
+class BoundedPage(BaseModel):
+    """A page read: cursor + limit, compiled to ``LIMIT limit+1`` in SQL.
+
+    The only pagination interactive paths can construct — reading without a
+    bound requires naming :class:`FullStream` explicitly (#219 phase 2).
+    """
+
+    mode: Literal["page"] = "page"
     cursor: PaginationCursor | None = None
     limit: int = Field(default=50, ge=1)
 
@@ -64,8 +71,8 @@ class PaginationParams(BaseModel):
         cursor: PaginationCursor | None = None,
         limit: int,
         max_limit: int,
-    ) -> "PaginationParams":
-        """Build params with ``limit`` clamped into ``[1, max_limit]``.
+    ) -> "BoundedPage":
+        """Build a page with ``limit`` clamped into ``[1, max_limit]``.
 
         Clamp, don't reject: a consumer asking for "everything" with a big
         number gets the max page, not a 422. The ceiling is operator
@@ -73,6 +80,19 @@ class PaginationParams(BaseModel):
         argument rather than living here as a constant.
         """
         return cls(cursor=cursor, limit=max(1, min(limit, max_limit)))
+
+
+class FullStream(BaseModel):
+    """An explicitly unbounded read — CSV / gzipped-CSV dumps only.
+
+    Carries no limit and no cursor by construction; the store serves it
+    through a server-side cursor so memory stays bounded.
+    """
+
+    mode: Literal["stream"] = "stream"
+
+
+Pagination = Annotated[BoundedPage | FullStream, Field(discriminator="mode")]
 
 
 class Keyset(BaseModel):
@@ -106,7 +126,7 @@ _TIEBREAK_COLUMNS: dict[TableKind, str] = {
     TableKind.FEATURE: "id",
 }
 
-# Default sort keys per table kind (data-model.md §PaginationParams).
+# Default sort keys per table kind.
 _DEFAULT_SORTS: dict[TableKind, list[SortSpec]] = {
     TableKind.RECORDS: [
         SortSpec(column="created_at", direction=SortDirection.DESC),
@@ -121,7 +141,7 @@ class QueryPlan(BaseModel):
     table_kind: TableKind
     feature_name: FeatureName | None = None
     filter: FilterExpr | None = None
-    pagination: PaginationParams = Field(default_factory=PaginationParams)
+    pagination: Pagination = Field(default_factory=BoundedPage)
     sort: list[SortSpec] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -145,6 +165,8 @@ class QueryPlan(BaseModel):
         the REST paginated-JSON path and the view queries build on this, so
         the encode side of pagination cannot fork.
         """
+        if not isinstance(self.pagination, BoundedPage):
+            raise ValueError("take_page requires a BoundedPage plan; dumps never paginate")
         limit = self.pagination.limit
         page: list[Mapping[str, Any]] = []
         truncated = False
