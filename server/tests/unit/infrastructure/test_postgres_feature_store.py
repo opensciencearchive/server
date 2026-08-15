@@ -158,9 +158,15 @@ class TestInsertFeatures:
         catalog_result = MagicMock()
         catalog_result.first.return_value = (fschema.model_dump(),)
         results = [catalog_result]
+        # Subsequent calls: the replace-DELETE (rowcount consumed for the stats
+        # delta), insert chunks, the record-schema PK lookup, and the stats
+        # upsert — one generic result covers them all.
+        generic = MagicMock()
+        generic.rowcount = 0
+        generic.first.return_value = ("compound", "1.0.0")
 
         async def _execute(*args, **kwargs):
-            return results.pop(0) if results else MagicMock()
+            return results.pop(0) if results else generic
 
         session.execute = AsyncMock(side_effect=_execute)
         return session
@@ -177,8 +183,9 @@ class TestInsertFeatures:
         count = await store.insert_features("pocket_detect", "urn:rec:1", rows, _RUN_ID)
 
         assert count == 2
-        # Catalog SELECT + replace-DELETE (#160) + one insert chunk.
-        assert session.execute.call_count == 3
+        # Catalog SELECT + replace-DELETE (#160) + one insert chunk
+        # + record-schema lookup + lockstep stats upsert (#219 ph5).
+        assert session.execute.call_count == 5
 
     @pytest.mark.asyncio
     async def test_deletes_existing_rows_for_record_before_insert(self):
@@ -226,8 +233,9 @@ class TestInsertFeatures:
         count = await store.insert_features("hook", "urn:rec:1", rows, _RUN_ID)
 
         assert count == 2500
-        # Catalog SELECT + replace-DELETE + 3 insert chunks (1000 + 1000 + 500).
-        assert session.execute.call_count == 5
+        # Catalog SELECT + replace-DELETE + 3 insert chunks (1000 + 1000 + 500)
+        # + record-schema lookup + stats upsert.
+        assert session.execute.call_count == 7
 
     @pytest.mark.asyncio
     async def test_single_chunk_for_small_batch(self):
@@ -238,7 +246,7 @@ class TestInsertFeatures:
         count = await store.insert_features("hook", "urn:rec:1", rows, _RUN_ID)
 
         assert count == 999
-        assert session.execute.call_count == 3
+        assert session.execute.call_count == 5
 
     @pytest.mark.asyncio
     async def test_insert_rejects_invalid_hook_name(self):

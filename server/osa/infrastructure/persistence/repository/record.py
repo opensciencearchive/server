@@ -4,10 +4,13 @@ from sqlalchemy import Integer, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from collections import Counter
+
 from osa.domain.record.model.aggregate import Record
 from osa.domain.record.port.repository import RecordRepository
 from osa.domain.shared.model.srn import RecordSRN
 from osa.infrastructure.persistence.mappers.record import record_to_dict, row_to_record
+from osa.infrastructure.persistence.statistics_upsert import bump_table_statistics
 from osa.infrastructure.persistence.tables import records_table
 
 
@@ -18,16 +21,29 @@ class PostgresRecordRepository(RecordRepository):
         self.session = session
 
     async def save(self, record: Record) -> None:
-        """Persist a record. Records are immutable, so this is insert-only."""
+        """Persist a record. Records are immutable, so this is insert-only.
+
+        The records count in ``table_statistics`` is bumped in the same
+        transaction (#219 phase 5) — counts always equal committed data.
+        """
         record_dict = record_to_dict(record)
         stmt = insert(records_table).values(**record_dict)
         await self.session.execute(stmt)
+        await bump_table_statistics(
+            self.session,
+            schema_id=record.schema_id.id.root,
+            schema_version=record.schema_id.version.root,
+            table_name="records",
+            row_delta=1,
+        )
         await self.session.flush()
 
     async def save_many(self, records: list[Record]) -> list[Record]:
         """Multi-row INSERT with ON CONFLICT DO NOTHING.
 
-        Returns the records that were actually inserted (duplicates are skipped).
+        Returns the records that were actually inserted (duplicates are
+        skipped). The per-schema statistics delta is exactly the rows this
+        statement actually inserted — redoing a batch nets zero (#219 phase 5).
         """
         if not records:
             return []
@@ -44,9 +60,19 @@ class PostgresRecordRepository(RecordRepository):
             .returning(records_table.c.srn)
         )
         result = await self.session.execute(stmt)
-        await self.session.flush()
         inserted_srns = {row[0] for row in result.fetchall()}
-        return [r for r in records if str(r.srn) in inserted_srns]
+        inserted = [r for r in records if str(r.srn) in inserted_srns]
+        per_schema = Counter((r.schema_id.id.root, r.schema_id.version.root) for r in inserted)
+        for (schema_id, schema_version), delta in per_schema.items():
+            await bump_table_statistics(
+                self.session,
+                schema_id=schema_id,
+                schema_version=schema_version,
+                table_name="records",
+                row_delta=delta,
+            )
+        await self.session.flush()
+        return inserted
 
     async def get(self, srn: RecordSRN) -> Record | None:
         """Get a record by SRN."""

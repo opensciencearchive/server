@@ -343,6 +343,29 @@ metadata_tables_table = Table(
 
 
 # ============================================================================
+# TABLE STATISTICS (lockstep row/coverage counts, #219)
+# ============================================================================
+# One row per (schema version, table): the records table or a feature table.
+# Maintained by additive upsert INSIDE the writing adapter's transaction
+# (osa/infrastructure/persistence/statistics_upsert.py), so counts always equal
+# committed data. Absent row = zero. records_covered is NULL for the records
+# row — coverage ("records with ≥1 feature row") is a feature-table concept;
+# for records it is definitionally row_count, and storing a duplicate invites
+# drift. Only three writers exist: the lockstep upsert, the rev-B backfill
+# migration, and the admin verifier's repair path.
+table_statistics_table = Table(
+    "table_statistics",
+    metadata,
+    Column("schema_id", Text, primary_key=True),
+    Column("schema_version", Text, primary_key=True),
+    Column("table_name", Text, primary_key=True),
+    Column("row_count", BigInteger, nullable=False, server_default="0"),
+    Column("records_covered", BigInteger, nullable=True),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+
+# ============================================================================
 # INSTANCE STATISTICS (materialized snapshot of O(rows) aggregates)
 # ============================================================================
 # Single-row snapshot refreshed periodically by the WorkerPool. Holds the

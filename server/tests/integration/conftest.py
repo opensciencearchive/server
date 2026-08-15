@@ -164,7 +164,7 @@ async def pg_session(pg_engine: AsyncEngine):
                 "TRUNCATE TABLE depositions, conventions, schemas, ontologies, "
                 "ontology_terms, events, deliveries, records, validation_runs, "
                 "feature_tables, metadata_tables, hooks, hook_releases, hook_runs, "
-                "users, identities, refresh_tokens, "
+                "table_statistics, users, identities, refresh_tokens, "
                 "role_assignments CASCADE"
             )
         )
