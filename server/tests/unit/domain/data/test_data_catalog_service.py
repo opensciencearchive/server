@@ -77,6 +77,28 @@ class FakeReadStore:
     async def get_schema_manifest(self, schema_id: SchemaId) -> SchemaManifest | None:
         return self.manifest
 
+    async def get_record_columns(self, schema_id: SchemaId) -> list[ColumnSpec] | None:
+        # Mirrors the adapter contract: columns from the catalog, no manifest.
+        if self.manifest is None:
+            return None
+        return next(
+            tr.columns for tr in self.manifest.table_resources if tr.kind == TableKind.RECORDS
+        )
+
+    async def get_feature_columns(
+        self, schema_id: SchemaId, feature_name: FeatureName
+    ) -> list[ColumnSpec] | None:
+        if self.manifest is None:
+            return None
+        return next(
+            (
+                tr.columns
+                for tr in self.manifest.table_resources
+                if tr.kind == TableKind.FEATURE and tr.name == feature_name.root
+            ),
+            None,
+        )
+
     async def get_latest_schema_id(self, schema_short_id: str) -> SchemaId | None:
         return SchemaId.parse(f"{schema_short_id}@1.0.0")
 

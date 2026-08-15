@@ -35,7 +35,7 @@ from osa.domain.semantics.model.value import (
     NumberConstraints,
     TermConstraints,
 )
-from osa.domain.shared.model.ids import RecordId
+from osa.domain.shared.model.ids import FeatureName, RecordId
 from osa.domain.shared.model.srn import Domain, RecordSRN, SchemaId
 from osa.infrastructure.data.schema_feature_reader import SchemaFeatureReader
 from osa.infrastructure.persistence.feature_table import (
@@ -152,9 +152,35 @@ class PostgresCatalogReadStore:
         if row is None:
             return None
 
+        field_specs, column_specs = self._field_and_column_specs(row["fields"])
+        record_count = await self._records_count(schema_id)
+        records_resource = TableResource(
+            name="records",
+            kind=TableKind.RECORDS,
+            # Implicit columns (id, srn, schema_id, version, created_at) precede
+            # the schema's declared metadata fields — this is the CSV header order.
+            columns=[*IMPLICIT_RECORD_COLUMN_SPECS, *column_specs],
+            row_count=record_count,
+            formats=list(_ALL_FORMATS),
+        )
+        feature_resources = await self._feature_resources(schema_id)
+        return SchemaManifest(
+            id=schema_id.id.root,
+            version=schema_id.version.root,
+            srn=schema_id.to_srn(self.node_domain).render(),
+            title=row["title"],
+            fields=field_specs,
+            table_resources=[records_resource, *feature_resources],
+        )
+
+    @staticmethod
+    def _field_and_column_specs(
+        fields_blob: list[dict],
+    ) -> tuple[list[FieldSpec], list[ColumnSpec]]:
+        """Map a schema's serialized fields to manifest field/column specs."""
         field_specs: list[FieldSpec] = []
         column_specs: list[ColumnSpec] = []
-        for f in row["fields"]:
+        for f in fields_blob:
             # The blob IS a serialized FieldDefinition — validate it back into
             # the domain model and read typed attributes, never raw dict keys.
             fd = FieldDefinition.model_validate(f)
@@ -179,26 +205,33 @@ class PostgresCatalogReadStore:
                 )
             )
             column_specs.append(ColumnSpec(name=fd.name, type=fd.type))
+        return field_specs, column_specs
 
-        record_count = await self._records_count(schema_id)
-        records_resource = TableResource(
-            name="records",
-            kind=TableKind.RECORDS,
-            # Implicit columns (id, srn, schema_id, version, created_at) precede
-            # the schema's declared metadata fields — this is the CSV header order.
-            columns=[*IMPLICIT_RECORD_COLUMN_SPECS, *column_specs],
-            row_count=record_count,
-            formats=list(_ALL_FORMATS),
+    # ------------------------------------------------------------------ #
+    # Columns-only table resolution (#219 phase 1)
+    # ------------------------------------------------------------------ #
+
+    async def get_record_columns(self, schema_id: SchemaId) -> list[ColumnSpec] | None:
+        """Records column schema from the ``schemas`` catalog — no row data touched."""
+        stmt = select(schemas_table.c.fields).where(
+            schemas_table.c.id == schema_id.id.root,
+            schemas_table.c.version == schema_id.version.root,
         )
-        feature_resources = await self._feature_resources(schema_id)
-        return SchemaManifest(
-            id=schema_id.id.root,
-            version=schema_id.version.root,
-            srn=schema_id.to_srn(self.node_domain).render(),
-            title=row["title"],
-            fields=field_specs,
-            table_resources=[records_resource, *feature_resources],
-        )
+        result = await self.session.execute(stmt)
+        row = result.mappings().first()
+        if row is None:
+            return None
+        _, column_specs = self._field_and_column_specs(row["fields"])
+        return [*IMPLICIT_RECORD_COLUMN_SPECS, *column_specs]
+
+    async def get_feature_columns(
+        self, schema_id: SchemaId, feature_name: FeatureName
+    ) -> list[ColumnSpec] | None:
+        """Feature column schema from the ``feature_tables`` catalog — no row data."""
+        for hook_name, fschema in await self._features.feature_tables(schema_id):
+            if hook_name == feature_name.root:
+                return [*IMPLICIT_FEATURE_COLUMN_SPECS, *self._feature_column_specs(fschema)]
+        return None
 
     async def _feature_resources(self, schema_id: SchemaId) -> list[TableResource]:
         """Build a TableResource for each feature table registered on the schema."""

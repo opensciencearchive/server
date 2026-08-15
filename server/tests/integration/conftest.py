@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     async_sessionmaker,
@@ -126,6 +126,24 @@ async def pg_engine():
     await ensure_system_user(engine)
     yield engine
     await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def captured_sql(pg_engine: AsyncEngine):
+    """Record every SQL statement the test's engine emits (#219).
+
+    Yields a mutable list of statement strings; ``.clear()`` it after the
+    arrange phase so assertions see only the act phase. Backs the request-path
+    tripwires: zero ``count(`` statements, ``LIMIT`` present on bounded reads.
+    """
+    statements: list[str] = []
+
+    def _capture(conn, cursor, statement, parameters, context, executemany) -> None:
+        statements.append(statement)
+
+    event.listen(pg_engine.sync_engine, "before_cursor_execute", _capture)
+    yield statements
+    event.remove(pg_engine.sync_engine, "before_cursor_execute", _capture)
 
 
 @pytest_asyncio.fixture
