@@ -38,12 +38,16 @@ class HookRegistry(Port, Protocol):
     ) -> ReleaseOutcome:
         """Mint the next release for an existing hook and advance the live pointer.
 
-        Idempotent on ``(name, digest)``: re-submitting an existing digest returns
-        the existing release without minting a new version or moving the pointer
-        (FR-006/R5), with ``ReleaseOutcome.created == False``. Version assignment +
-        pointer advance happen under a row lock on the ``hooks`` row so concurrent
-        submitters serialize (FR-009/R7); ``created`` is decided under that same
-        lock so it is race-free.
+        Idempotent on **definition equality with the live release** (#217): a
+        redeploy of exactly what is live (image, digest, config, limits,
+        source_ref — ``built_by`` excluded) returns the live release without
+        minting a version or moving the pointer, with
+        ``ReleaseOutcome.created == False``. Any difference mints vN+1 — hook
+        runs execute from the live release, so digest-only dedupe would make a
+        config-only redeploy silently never take effect. Version assignment +
+        pointer advance happen under a row lock on the ``hooks`` row so
+        concurrent submitters serialize (FR-009/R7); ``created`` is decided
+        under that same lock so it is race-free.
         """
         ...
 

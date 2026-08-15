@@ -58,7 +58,8 @@ class ConventionService(Service):
         are unversioned and mutable, so re-declaring the same state is a no-op and
         a differing declaration updates the convention in place — no caller version,
         no conflict path. The schema (versioned, immutable) and each hook release
-        (idempotent on digest) are reused when already present. Feature-table
+        (idempotent on definition-equality with the live release) are reused
+        when already present. Feature-table
         creation is now inlined at the deploy command handler (#160, decision 9);
         the ``ConventionRegistered`` event this method still appends is audit-only
         (no subscribers) — it lives on for the ``/events`` changefeed.
@@ -87,7 +88,7 @@ class ConventionService(Service):
         )
 
         # 2) Hooks: upsert each identity (reject a differing contract) + mint its
-        #    release (idempotent on digest, advancing the live pointer).
+        #    release (idempotent on definition-equality, advancing the live pointer).
         for spec in hooks:
             await self.hook_registry.upsert_identity(spec.identity.name, spec.identity.feature)
             await self.hook_registry.create_release(
@@ -95,7 +96,7 @@ class ConventionService(Service):
             )
 
         # 2b) Ingester: same treatment as hooks (#180 §1) — upsert identity +
-        #     mint release (idempotent on digest, advancing the live pointer).
+        #     mint release (idempotent on definition-equality, advancing the live pointer).
         #     Unconditional: name and source_ref are required on the model, so
         #     every declared ingester carries a provenance chain.
         if ingester is not None:

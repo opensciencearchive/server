@@ -471,7 +471,9 @@ hook_releases_table = Table(
     Column("built_by", Text, nullable=True),
     Column("built_at", DateTime(timezone=True), nullable=False),
     UniqueConstraint("hook_name", "version", name="uq_hook_releases_hook_version"),
-    UniqueConstraint("hook_name", "digest", name="uq_hook_releases_hook_digest"),
+    # NB: deliberately NO (name, digest) unique constraint (#217) — a config-only
+    # redeploy mints a new release with the same digest (idempotency is
+    # definition-equality against the live release, decided in the adapter).
 )
 
 Index(
