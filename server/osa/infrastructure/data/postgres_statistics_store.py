@@ -124,7 +124,23 @@ class PostgresStatisticsStore:
     # Verifier: recompute truth, diff, repair (#219 phase 6)
     # ------------------------------------------------------------------ #
 
+    async def _lock_statistics(self) -> None:
+        """Serialize the verifier against every counted write (PR #220 review).
+
+        Taken BEFORE the truth read, held to commit. Lockstep is what makes one
+        lock sufficient: every write to a counted table bumps
+        ``table_statistics`` in its own transaction, so an in-flight writer
+        blocks here while its data rows are still uncommitted (correctly absent
+        from our truth) and re-applies its additive delta on the repaired base
+        after we commit. Without this, a write landing between truth read and
+        delete+reinsert is clobbered — and being additive, the base stays wrong
+        forever, not just until the next repair. EXCLUSIVE blocks writers only;
+        manifest reads proceed.
+        """
+        await self.session.execute(text("LOCK TABLE table_statistics IN EXCLUSIVE MODE"))
+
     async def table_statistics_drift(self) -> list[StatisticsDrift]:
+        await self._lock_statistics()
         truth = {_key(e): e for e in await self._recompute_truth()}
         stored = {_key(e): e for e in await self._read_stored()}
         drift: list[StatisticsDrift] = []
@@ -144,6 +160,7 @@ class PostgresStatisticsStore:
 
     async def repair_table_statistics(self) -> None:
         """Replace stored counts wholesale with recomputed truth, in one tx."""
+        await self._lock_statistics()
         truth = await self._recompute_truth()
         await self.session.execute(sa.delete(table_statistics_table))
         if truth:

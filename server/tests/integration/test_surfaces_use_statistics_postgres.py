@@ -9,10 +9,11 @@ the one-time backfill migration and the admin verifier.
 Skips automatically unless OSA_DATABASE__URL points at PostgreSQL.
 """
 
+import asyncio
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from osa.domain.auth.model.principal import Principal, ProviderIdentity
 from osa.domain.auth.model.role import Role
@@ -238,3 +239,45 @@ class TestVerifier:
 
         report3 = await handler.run(VerifyTableStatistics(repair=False))
         assert report3.drift == []
+
+    async def test_repair_does_not_clobber_concurrent_lockstep_writes(
+        self, pg_engine: AsyncEngine, pg_session: AsyncSession, monkeypatch
+    ):
+        """Greptile P1 on #220: a write committing between repair's truth read
+        and its delete+reinsert must not be lost — and because increments are
+        additive, a lost one would skew the base FOREVER, not just until the
+        next repair. The fix: repair locks ``table_statistics`` before reading
+        truth; lockstep means every counted write blocks at its stats bump and
+        re-applies its delta on the repaired base after repair commits.
+        """
+        await _seed_all(pg_engine, pg_session)
+        store = PostgresStatisticsStore(pg_session)
+
+        concurrent_write_started = asyncio.Event()
+        original_truth = store._recompute_truth
+
+        async def paused_truth():
+            truth = await original_truth()
+            # Window between truth read and delete+reinsert: let a concurrent
+            # lockstep writer run. Under the fix it blocks on the table lock;
+            # under the bug it commits here and repair clobbers its increment.
+            concurrent_write_started.set()
+            await asyncio.sleep(0.3)
+            return truth
+
+        monkeypatch.setattr(store, "_recompute_truth", paused_truth)
+
+        async def concurrent_publish() -> None:
+            await concurrent_write_started.wait()
+            factory = async_sessionmaker(pg_engine, expire_on_commit=False)
+            async with factory() as session:
+                await PostgresRecordRepository(session).save_many([_record(9)])
+                await session.commit()
+
+        writer = asyncio.create_task(concurrent_publish())
+        await store.repair_table_statistics()
+        await pg_session.commit()
+        await asyncio.wait_for(writer, timeout=10)
+
+        # 3 seeded + 1 concurrent — the concurrent increment must survive.
+        assert await store.records_total() == 4
