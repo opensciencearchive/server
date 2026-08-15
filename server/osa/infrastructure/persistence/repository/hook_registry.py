@@ -123,20 +123,28 @@ class PostgresHookRegistry(HookRegistry):
         if hook_row is None:
             raise NotFoundError(f"Hook not found: {name}")
 
-        # Idempotency on (hook_name, digest): return the existing release, no
-        # new version, pointer unchanged (R5). Decided under the row lock, so
-        # `created` is race-free under concurrent identical submissions.
-        dup = await self.session.execute(
-            select(hook_releases_table).where(
-                and_(
-                    hook_releases_table.c.hook_name == name.root,
-                    hook_releases_table.c.digest == runtime.digest,
-                )
+        # Idempotency by DEFINITION EQUALITY against the live release (#217),
+        # mirroring the ingester registry: only a redeploy of exactly what is
+        # live is a no-op. Any difference — image, digest, config, limits,
+        # source_ref — mints vN+1; hook runs execute from the live release, so
+        # digest-only dedupe made config-only redeploys silently never take
+        # effect. ``built_by`` is excluded: who built it does not change what
+        # it is. Decided under the row lock, so ``created`` is race-free under
+        # concurrent identical submissions.
+        live_id = hook_row["live_release_id"]
+        if live_id is not None:
+            live = await self.session.execute(
+                select(hook_releases_table).where(hook_releases_table.c.id == live_id)
             )
-        )
-        dup_row = dup.mappings().first()
-        if dup_row is not None:
-            return ReleaseOutcome(release=self._to_release(dict(dup_row)), created=False)
+            live_row = live.mappings().first()
+            if live_row is not None and (
+                live_row["image"] == runtime.image
+                and live_row["digest"] == runtime.digest
+                and live_row["config"] == runtime.config
+                and live_row["limits"] == runtime.limits.model_dump()
+                and live_row["source_ref"] == source_ref
+            ):
+                return ReleaseOutcome(release=self._to_release(dict(live_row)), created=False)
 
         max_version = await self.session.scalar(
             select(func.coalesce(func.max(hook_releases_table.c.version), 0)).where(

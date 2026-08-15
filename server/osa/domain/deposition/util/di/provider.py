@@ -20,6 +20,7 @@ from osa.domain.deposition.query.list_conventions import ListConventionsHandler
 from osa.domain.deposition.query.list_depositions import ListDepositionsHandler
 from osa.domain.deposition.query.list_ingesters import ListIngestersHandler
 from osa.domain.deposition.service.convention import ConventionService
+from osa.domain.ingest.service.ingester_registry import IngesterRegistryService
 from osa.domain.validation.service.hook_registry import HookRegistryService
 from osa.domain.deposition.service.deposition import DepositionService
 from osa.domain.metadata.service.metadata import MetadataService
@@ -56,6 +57,7 @@ class DepositionProvider(Provider):
         schema_service: SchemaService,
         metadata_service: MetadataService,
         hook_registry: HookRegistryService,
+        ingester_registry: IngesterRegistryService,
         outbox: Outbox,
     ) -> ConventionService:
         return ConventionService(
@@ -63,6 +65,7 @@ class DepositionProvider(Provider):
             schema_service=schema_service,
             metadata_service=metadata_service,
             hook_registry=hook_registry,
+            ingester_registry=ingester_registry,
             outbox=outbox,
         )
 

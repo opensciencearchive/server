@@ -21,6 +21,7 @@ from osa.domain.ingest.event.events import (
     IngestBatchPublished,
     NextBatchRequested,
 )
+from osa.domain.ingest.model.ingester_release import IngesterReleaseId
 from osa.domain.ingest.model.ingest_run import (
     Applied,
     IngestRun,
@@ -32,7 +33,7 @@ from osa.domain.shared.error import NotFoundError, PermanentError, TransientErro
 from osa.domain.shared.event import EventId
 from osa.domain.shared.failure import DecisionKind, FailureKind, FailurePolicy, RuntimeFailure
 from osa.domain.shared.model.hook import HookName, OciConfig, OciLimits, TableFeatureSpec
-from osa.domain.shared.model.source import IngesterDefinition
+from osa.domain.shared.model.source import IngesterDefinition, IngesterName
 from osa.domain.shared.model.srn import ConventionSlug, Domain, LocalId, RecordSRN, RecordVersion
 from osa.domain.shared.model.workflow import StageOutcome, WorkflowName, WorkflowStage
 from osa.domain.shared.port.ingester_runner import IngesterOutput
@@ -120,6 +121,7 @@ def _make_run(
     return IngestRun(
         id=IngestRunId("run-1"),
         convention_id="test-conv",
+        release_id=IngesterReleaseId(uuid4()),
         status=status,
         batch_size=100,
         batches_ingested=batches_ingested,
@@ -242,7 +244,12 @@ def _make_handler(
     convention_service = AsyncMock()
     conv = AsyncMock()
     conv.hooks = [HookName(n) for n in hook_names]
-    conv.ingester = IngesterDefinition(image="ghcr.io/x/ing:v1", digest="sha256:abc")
+    conv.ingester = IngesterDefinition(
+        name=IngesterName("from_pdb"),
+        image="ghcr.io/x/ing:v1",
+        digest="sha256:abc",
+        source_ref="git+https://example.com/r@deadbeef",
+    )
     conv.id = ConventionSlug.parse("test-conv")
     convention_service.get_convention.return_value = conv
 

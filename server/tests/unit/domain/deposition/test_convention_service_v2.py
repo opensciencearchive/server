@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 from tests.factories import make_convention_docs
 
 from osa.domain.deposition.event.convention_registered import ConventionRegistered
@@ -18,7 +19,7 @@ from osa.domain.shared.model.hook import (
     OciConfig,
     TableFeatureSpec,
 )
-from osa.domain.shared.model.source import IngesterDefinition
+from osa.domain.shared.model.source import IngesterDefinition, IngesterName
 from osa.domain.shared.model.srn import (
     ConventionSlug,
     SchemaId,
@@ -70,12 +71,16 @@ def _make_hook_deploy(name: str = "detect_pockets") -> HookDeploy:
     )
 
 
-def _make_ingester_def() -> IngesterDefinition:
-    return IngesterDefinition(
+def _make_ingester_def(**overrides) -> IngesterDefinition:
+    kwargs = dict(
+        name=IngesterName("rcsb_pdb"),
         image="osa-sources/rcsb-pdb:latest",
         digest="sha256:abc123",
         config={"email": "test@example.com", "batch_size": 100},
+        source_ref="git+https://example.com/rcsb-pdb@abc",
     )
+    kwargs.update(overrides)
+    return IngesterDefinition(**kwargs)
 
 
 def _make_service(
@@ -83,6 +88,7 @@ def _make_service(
     schema_service: AsyncMock | None = None,
     outbox: AsyncMock | None = None,
     hook_registry: AsyncMock | None = None,
+    ingester_registry: AsyncMock | None = None,
 ) -> ConventionService:
     """Create a ConventionService with mock deps."""
     mock_schema_service = schema_service or AsyncMock()
@@ -99,6 +105,7 @@ def _make_service(
         schema_service=mock_schema_service,
         metadata_service=AsyncMock(),
         hook_registry=hook_registry or AsyncMock(),
+        ingester_registry=ingester_registry or AsyncMock(),
         outbox=outbox or AsyncMock(),
     )
 
@@ -199,3 +206,58 @@ class TestConventionRegisteredEvent:
         emitted = outbox.append.call_args[0][0]
         assert isinstance(emitted, ConventionRegistered)
         assert emitted.convention_id == result.id
+
+
+class TestDeployMintsIngesterRelease:
+    """Deploy wires the ingester registry (#180 §1): a declared ingester gets an
+    identity + release minted in the same deploy, unconditionally — greenfield,
+    no unnamed/pre-registry path. Name and source_ref are required at the model
+    boundary, so the only deploy-time behavior to test is the minting itself."""
+
+    def _ingester(self, **overrides) -> IngesterDefinition:
+        kwargs = dict(
+            name=IngesterName("from_pdb"),
+            image="ghcr.io/example/ingester:v1",
+            digest="sha256:abc123",
+            source_ref="git+https://example.com/repo@deadbeef",
+        )
+        kwargs.update(overrides)
+        return IngesterDefinition(**kwargs)
+
+    @pytest.mark.asyncio
+    async def test_declared_ingester_mints_identity_and_release(self):
+        registry = AsyncMock()
+        service = _make_service(ingester_registry=registry)
+        await _deploy(service, ingester=self._ingester(), built_by="ci@example")
+
+        registry.upsert_identity.assert_awaited_once()
+        name_arg, schema_arg = registry.upsert_identity.await_args[0]
+        assert name_arg == IngesterName("from_pdb")
+        assert schema_arg.root == "testschema12345678"
+
+        registry.create_release.assert_awaited_once()
+        rel_args = registry.create_release.await_args
+        assert rel_args[0][0] == IngesterName("from_pdb")
+        runtime = rel_args[0][1]
+        assert runtime.image == "ghcr.io/example/ingester:v1"
+        assert runtime.digest == "sha256:abc123"
+        assert rel_args[0][2] == "git+https://example.com/repo@deadbeef"
+        assert rel_args[0][3] == "ci@example"
+
+    @pytest.mark.asyncio
+    async def test_no_ingester_mints_nothing(self):
+        registry = AsyncMock()
+        service = _make_service(ingester_registry=registry)
+        await _deploy(service, ingester=None)
+        registry.upsert_identity.assert_not_awaited()
+        registry.create_release.assert_not_awaited()
+
+    def test_nameless_ingester_is_unrepresentable(self):
+        """Greenfield: a declared ingester IS an identity — pydantic rejects the
+        nameless form at construction, so no service-level guard can exist."""
+        with pytest.raises(PydanticValidationError):
+            IngesterDefinition(image="ghcr.io/x:v1", digest="sha256:def456")
+
+    def test_ingester_without_source_ref_is_unrepresentable(self):
+        with pytest.raises(PydanticValidationError):
+            self._ingester(source_ref=None)

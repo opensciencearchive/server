@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from osa.domain.auth.model.principal import Principal
 from osa.domain.deposition.model.deploy import HookDeploy
@@ -28,6 +28,7 @@ from osa.domain.shared.model.hook import (
 from osa.domain.shared.model.source import (
     IngesterDefinition,
     IngesterLimits,
+    IngesterName,
     IngesterScheduleConfig,
     InitialRunConfig,
 )
@@ -94,15 +95,25 @@ class DeployConventionIngester(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str  # build-fan-out key (cloud); not persisted server-side
+    # Build fan-out key (cloud) AND, normalised at this boundary, the ingester's
+    # registry identity (#180 §1). Wire names are free-form (class names,
+    # declared slugs); the domain only ever sees a canonical IngesterName.
+    name: str
     config: dict[str, Any] | None = None
     limits: IngesterLimits = Field(default_factory=IngesterLimits)
     schedule: IngesterScheduleConfig | None = None
     initial_run: InitialRunConfig | None = None
     release: DeployConventionRelease
 
+    @field_validator("name")
+    @classmethod
+    def _name_normalises(cls, v: str) -> str:
+        IngesterName.from_raw(v)  # overlong/unnormalisable → 422 here, not deep in deploy
+        return v
+
     def to_definition(self) -> IngesterDefinition:
         return IngesterDefinition(
+            name=IngesterName.from_raw(self.name),
             image=self.release.image,
             digest=self.release.digest,
             config=self.config,

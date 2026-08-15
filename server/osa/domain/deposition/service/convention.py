@@ -7,11 +7,13 @@ from osa.domain.deposition.model.deploy import HookDeploy
 from osa.domain.deposition.model.docs import ConventionDocs
 from osa.domain.deposition.model.value import FileRequirements
 from osa.domain.deposition.port.convention_repository import ConventionRepository
+from osa.domain.ingest.service.ingester_registry import IngesterRegistryService
 from osa.domain.metadata.service.metadata import MetadataService
 from osa.domain.semantics.model.value import FieldDefinition
 from osa.domain.semantics.service.schema import SchemaService
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.event import EventId
+from osa.domain.shared.model.hook import OciConfig, OciLimits
 from osa.domain.shared.model.source import IngesterDefinition
 from osa.domain.shared.model.srn import (
     ConventionSlug,
@@ -30,6 +32,7 @@ class ConventionService(Service):
     schema_service: SchemaService  # TODO: replace with a port?
     metadata_service: MetadataService  # TODO: replace with a port?
     hook_registry: HookRegistryService
+    ingester_registry: IngesterRegistryService
     outbox: Outbox
 
     async def deploy(
@@ -55,7 +58,8 @@ class ConventionService(Service):
         are unversioned and mutable, so re-declaring the same state is a no-op and
         a differing declaration updates the convention in place — no caller version,
         no conflict path. The schema (versioned, immutable) and each hook release
-        (idempotent on digest) are reused when already present. Feature-table
+        (idempotent on definition-equality with the live release) are reused
+        when already present. Feature-table
         creation is now inlined at the deploy command handler (#160, decision 9);
         the ``ConventionRegistered`` event this method still appends is audit-only
         (no subscribers) — it lives on for the ``/events`` changefeed.
@@ -84,11 +88,31 @@ class ConventionService(Service):
         )
 
         # 2) Hooks: upsert each identity (reject a differing contract) + mint its
-        #    release (idempotent on digest, advancing the live pointer).
+        #    release (idempotent on definition-equality, advancing the live pointer).
         for spec in hooks:
             await self.hook_registry.upsert_identity(spec.identity.name, spec.identity.feature)
             await self.hook_registry.create_release(
                 spec.identity.name, spec.runtime, spec.source_ref, built_by
+            )
+
+        # 2b) Ingester: same treatment as hooks (#180 §1) — upsert identity +
+        #     mint release (idempotent on definition-equality, advancing the live pointer).
+        #     Unconditional: name and source_ref are required on the model, so
+        #     every declared ingester carries a provenance chain.
+        if ingester is not None:
+            await self.ingester_registry.upsert_identity(
+                ingester.name, LocalId(created_schema.id.id.root)
+            )
+            await self.ingester_registry.create_release(
+                ingester.name,
+                OciConfig(
+                    image=ingester.image,
+                    digest=ingester.digest,
+                    config=ingester.config if ingester.config is not None else {},
+                    limits=OciLimits(**ingester.limits.model_dump()),
+                ),
+                ingester.source_ref,
+                built_by,
             )
 
         # 3) Convention referencing hooks by name (upsert by slug).

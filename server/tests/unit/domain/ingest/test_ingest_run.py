@@ -3,7 +3,9 @@
 from datetime import UTC, datetime
 
 import pytest
+from uuid import uuid4
 
+from osa.domain.ingest.model.ingester_release import IngesterReleaseId
 from osa.domain.ingest.model.ingest_run import IngestRun, IngestStatus
 from osa.domain.shared.error import InvalidStateError
 from osa.domain.shared.failure import FailureKind
@@ -13,6 +15,7 @@ def _make_run(**overrides) -> IngestRun:
     defaults = {
         "id": "test-run-id",
         "convention_id": "urn:osa:localhost:conv:test-conv@1.0.0",
+        "release_id": IngesterReleaseId(uuid4()),
         "status": IngestStatus.PENDING,
         "started_at": datetime.now(UTC),
     }

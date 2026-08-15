@@ -1,10 +1,21 @@
 """Shared source domain models used across deposition and ingest domains."""
 
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, ClassVar, Literal, Union
 
 from pydantic import Discriminator, Field, Tag, field_validator
 
+from osa.domain.shared.model.names import PgName
 from osa.domain.shared.model.value import ValueObject
+
+
+class IngesterName(PgName):
+    """An ingester's stable name (#180).
+
+    Lives in the shared kernel because the deploy path (deposition domain)
+    registers ingesters that the ingest domain later runs.
+    """
+
+    kind: ClassVar[str] = "ingester name"
 
 
 class IngesterLimits(ValueObject):
@@ -83,14 +94,20 @@ RecordSource = Annotated[
 
 
 class IngesterDefinition(ValueObject):
-    """Complete specification for an ingester: image reference + config + limits."""
+    """Complete specification for an ingester: identity + image + config + limits.
 
+    ``name`` is the ingester's registry identity (#180 §1) — a declared ingester
+    IS an identity, so a nameless one is unrepresentable. ``source_ref`` is the
+    reproducibility anchor for the build that produced ``image`` (parity with a
+    hook release's ``source_ref``); a release without provenance is equally
+    unrepresentable.
+    """
+
+    name: IngesterName
     image: str
     digest: str
     config: dict[str, Any] | None = None
     limits: IngesterLimits = Field(default_factory=IngesterLimits)
     schedule: IngesterScheduleConfig | None = None
     initial_run: InitialRunConfig | None = None
-    # Reproducibility anchor for the build that produced ``image`` (parity with
-    # a hook's release ``source_ref``). ``None`` for ingesters predating the field.
-    source_ref: str | None = None
+    source_ref: str

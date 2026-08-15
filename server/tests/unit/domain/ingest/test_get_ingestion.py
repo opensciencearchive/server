@@ -4,10 +4,12 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from uuid import uuid4
 
 from osa.domain.auth.model.principal import Principal
 from osa.domain.auth.model.role import Role
 from osa.domain.auth.model.value import ProviderIdentity, UserId
+from osa.domain.ingest.model.ingester_release import IngesterReleaseId
 from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId, IngestStatus
 from osa.domain.ingest.query.get_ingestion import GetIngestion, GetIngestionHandler
 from osa.domain.shared.error import NotFoundError
@@ -28,6 +30,7 @@ def _make_run(**overrides) -> IngestRun:
     defaults = {
         "id": IngestRunId("run-1"),
         "convention_id": "test-conv",
+        "release_id": IngesterReleaseId(uuid4()),
         "status": IngestStatus.RUNNING,
         "batch_size": 100,
         "started_at": _T0,
@@ -90,6 +93,7 @@ class TestGetIngestionService:
         service = IngestService(
             ingest_repo=repo,
             convention_service=AsyncMock(),
+            ingester_registry=AsyncMock(),
             outbox=AsyncMock(),
             node_domain=Domain("localhost"),
             instrumentation=MagicMock(),

@@ -30,7 +30,10 @@ class HookRegistryService(Service):
         source_ref: str,
         built_by: str | None = None,
     ) -> ReleaseOutcome:
-        """Mint vN+1 for an existing hook (idempotent on digest); advance live.
+        """Mint vN+1 for an existing hook; advance live.
+
+        Idempotent on definition-equality with the live release (#217) — only
+        a redeploy of exactly what is live is a no-op; see the port docstring.
 
         Returns a :class:`ReleaseOutcome` whose ``created`` flag (decided under
         the registry's row lock) distinguishes a new version from an idempotent

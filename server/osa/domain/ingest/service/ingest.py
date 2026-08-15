@@ -15,6 +15,7 @@ from osa.domain.ingest.model.ingest_run import (
 )
 from osa.domain.ingest.port.instrumentation import IngestInstrumentation
 from osa.domain.ingest.port.repository import IngestRunRepository
+from osa.domain.ingest.service.ingester_registry import IngesterRegistryService
 from osa.domain.shared.error import ConflictError, NotFoundError
 from osa.domain.shared.event import EventId
 from osa.domain.shared.failure import FailureKind
@@ -31,6 +32,7 @@ class IngestService(Service):
 
     ingest_repo: IngestRunRepository
     convention_service: ConventionService
+    ingester_registry: IngesterRegistryService
     outbox: Outbox
     node_domain: Domain
     instrumentation: IngestInstrumentation
@@ -64,12 +66,18 @@ class IngestService(Service):
                 code="ingest_already_running",
             )
 
+        # Resolve the ingester's live release once, at run start, and snapshot
+        # it on the run (#180 §1) — mirroring how validation snapshots hook
+        # releases. No live release ⇒ the run is refused (NotFoundError).
+        release = await self.ingester_registry.require_live_release(convention.ingester.name)
+
         run_id = IngestRunId(str(uuid4()))
         now = datetime.now(UTC)
 
         ingest_run = IngestRun(
             id=run_id,
             convention_id=convention_id,
+            release_id=release.id,
             status=IngestStatus.PENDING,
             batch_size=batch_size,
             limit=limit,

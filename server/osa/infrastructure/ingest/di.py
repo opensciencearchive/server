@@ -13,6 +13,7 @@ from osa.infrastructure.s3.client import S3Client
 from osa.domain.ingest.port.repository import IngestRunRepository
 from osa.domain.ingest.port.storage import IngestStoragePort
 from osa.domain.ingest.service.ingest import IngestService
+from osa.domain.ingest.service.ingester_registry import IngesterRegistryService
 from osa.domain.shared.model.srn import Domain
 from osa.domain.shared.outbox import Outbox
 from osa.infrastructure.persistence.adapter.ingest_storage import FilesystemIngestStorage
@@ -35,11 +36,16 @@ class IngestProvider(Provider):
     def get_ingest_repo(self, session: AsyncSession) -> IngestRunRepository:
         return PostgresIngestRunRepository(session)
 
+    # Ingester registry service (#180 §1) — identity + releases for the code
+    # that fetches raw data, mirroring the hook registry service.
+    ingester_registry_service = provide(IngesterRegistryService, scope=Scope.UOW)
+
     @provide(scope=Scope.UOW)
     def get_ingest_service(
         self,
         ingest_repo: IngestRunRepository,
         convention_service: ConventionService,
+        ingester_registry: IngesterRegistryService,
         outbox: Outbox,
         node_domain: Domain,
         instrumentation: IngestInstrumentation,
@@ -47,6 +53,7 @@ class IngestProvider(Provider):
         return IngestService(
             ingest_repo=ingest_repo,
             convention_service=convention_service,
+            ingester_registry=ingester_registry,
             outbox=outbox,
             node_domain=node_domain,
             instrumentation=instrumentation,

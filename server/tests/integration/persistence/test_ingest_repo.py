@@ -8,6 +8,7 @@ later per-batch give-up can't overwrite an earlier run abort).
 from datetime import UTC, datetime
 
 import pytest
+import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.ingest.model.ingest_run import (
@@ -17,15 +18,42 @@ from osa.domain.ingest.model.ingest_run import (
     IngestStatus,
     RunClosed,
 )
+from osa.domain.ingest.model.ingester_release import IngesterReleaseId
 from osa.domain.shared.error import NotFoundError
 from osa.domain.shared.failure import FailureKind
+from osa.domain.shared.model.hook import OciConfig
+from osa.domain.shared.model.source import IngesterName
+from osa.domain.shared.model.srn import LocalId
 from osa.infrastructure.persistence.repository.ingest import PostgresIngestRunRepository
+from osa.infrastructure.persistence.repository.ingester_registry import (
+    PostgresIngesterRegistry,
+)
 
 
-def _make_run(run_id: str = "ing-1", status: IngestStatus = IngestStatus.RUNNING) -> IngestRun:
+@pytest_asyncio.fixture
+async def release_id(pg_session: AsyncSession) -> IngesterReleaseId:
+    """Seed an ingester + release; ingest_runs.release_id is a NOT NULL FK."""
+    registry = PostgresIngesterRegistry(pg_session)
+    await registry.upsert_identity(IngesterName("from_pdb"), LocalId("proteinschema"))
+    outcome = await registry.create_release(
+        IngesterName("from_pdb"),
+        OciConfig(image="ghcr.io/x:v1", digest="sha256:abc"),
+        "git+https://example.com/r@deadbeef",
+        None,
+    )
+    return outcome.release.id
+
+
+def _make_run(
+    run_id: str = "ing-1",
+    status: IngestStatus = IngestStatus.RUNNING,
+    *,
+    release_id: IngesterReleaseId,
+) -> IngestRun:
     return IngestRun(
         id=IngestRunId(run_id),
         convention_id="test-conv",
+        release_id=release_id,
         status=status,
         batch_size=100,
         batches_ingested=1,
@@ -35,9 +63,11 @@ def _make_run(run_id: str = "ing-1", status: IngestStatus = IngestStatus.RUNNING
 
 @pytest.mark.asyncio
 class TestFailureSurfacing:
-    async def test_record_failure_round_trips_reason_and_kind(self, pg_session: AsyncSession):
+    async def test_record_failure_round_trips_reason_and_kind(
+        self, pg_session: AsyncSession, release_id
+    ):
         repo = PostgresIngestRunRepository(pg_session)
-        await repo.save(_make_run("ing-rt"))
+        await repo.save(_make_run("ing-rt", release_id=release_id))
 
         await repo.record_failure("ing-rt", reason="source exited 3", kind=FailureKind.UPSTREAM)
 
@@ -46,9 +76,9 @@ class TestFailureSurfacing:
         assert fetched.failure_reason == "source exited 3"
         assert fetched.failure_kind is FailureKind.UPSTREAM
 
-    async def test_record_failure_allows_null_kind(self, pg_session: AsyncSession):
+    async def test_record_failure_allows_null_kind(self, pg_session: AsyncSession, release_id):
         repo = PostgresIngestRunRepository(pg_session)
-        await repo.save(_make_run("ing-null"))
+        await repo.save(_make_run("ing-null", release_id=release_id))
 
         await repo.record_failure("ing-null", reason="retries exhausted", kind=None)
 
@@ -58,11 +88,11 @@ class TestFailureSurfacing:
         assert fetched.failure_kind is None
 
     async def test_record_failure_does_not_clobber_an_existing_reason(
-        self, pg_session: AsyncSession
+        self, pg_session: AsyncSession, release_id
     ):
         """An abort sets the reason first; a later batch give-up must not overwrite it."""
         repo = PostgresIngestRunRepository(pg_session)
-        await repo.save(_make_run("ing-clobber"))
+        await repo.save(_make_run("ing-clobber", release_id=release_id))
 
         aborted = await repo.abort(
             "ing-clobber",
@@ -94,9 +124,11 @@ class TestTerminalRunGuard:
     non-terminal status, mirroring `abort`.
     """
 
-    async def test_increment_failed_is_noop_on_terminal_run(self, pg_session: AsyncSession):
+    async def test_increment_failed_is_noop_on_terminal_run(
+        self, pg_session: AsyncSession, release_id
+    ):
         repo = PostgresIngestRunRepository(pg_session)
-        await repo.save(_make_run("ing-tf"))
+        await repo.save(_make_run("ing-tf", release_id=release_id))
         await repo.abort(
             "ing-tf",
             reason="bad image",
@@ -112,9 +144,11 @@ class TestTerminalRunGuard:
         assert fetched.batches_failed == 0
         assert fetched.status is IngestStatus.FAILED
 
-    async def test_increment_completed_is_noop_on_terminal_run(self, pg_session: AsyncSession):
+    async def test_increment_completed_is_noop_on_terminal_run(
+        self, pg_session: AsyncSession, release_id
+    ):
         repo = PostgresIngestRunRepository(pg_session)
-        await repo.save(_make_run("ing-tc"))
+        await repo.save(_make_run("ing-tc", release_id=release_id))
         await repo.abort(
             "ing-tc", reason="rbac", kind=FailureKind.RBAC, completed_at=datetime.now(UTC)
         )
@@ -127,17 +161,19 @@ class TestTerminalRunGuard:
         assert fetched.batches_completed == 0
         assert fetched.published_count == 0
 
-    async def test_increment_still_works_on_a_running_run(self, pg_session: AsyncSession):
+    async def test_increment_still_works_on_a_running_run(
+        self, pg_session: AsyncSession, release_id
+    ):
         """Sanity: the guard doesn't break the normal (non-terminal) path."""
         repo = PostgresIngestRunRepository(pg_session)
-        await repo.save(_make_run("ing-live"))
+        await repo.save(_make_run("ing-live", release_id=release_id))
 
         result = await repo.increment_failed("ing-live")
 
         assert isinstance(result, Applied)
         assert result.run.batches_failed == 1
 
-    async def test_increment_on_missing_run_raises(self, pg_session: AsyncSession):
+    async def test_increment_on_missing_run_raises(self, pg_session: AsyncSession, release_id):
         """A genuinely-missing run is exceptional — not a RunClosed no-op."""
         repo = PostgresIngestRunRepository(pg_session)
         with pytest.raises(NotFoundError):
@@ -148,9 +184,11 @@ class TestTerminalRunGuard:
 class TestMarkBatchIngested:
     """Idempotent batch-ingested marker with GREATEST semantics (#160)."""
 
-    async def test_advances_counter_to_batch_index_plus_one(self, pg_session: AsyncSession):
+    async def test_advances_counter_to_batch_index_plus_one(
+        self, pg_session: AsyncSession, release_id
+    ):
         repo = PostgresIngestRunRepository(pg_session)
-        run = _make_run("ing-mb1")
+        run = _make_run("ing-mb1", release_id=release_id)
         run.batches_ingested = 0
         await repo.save(run)
 
@@ -160,9 +198,9 @@ class TestMarkBatchIngested:
         assert result.run.batches_ingested == 1
         assert result.run.ingestion_finished is False
 
-    async def test_idempotent_on_repeat_with_same_index(self, pg_session: AsyncSession):
+    async def test_idempotent_on_repeat_with_same_index(self, pg_session: AsyncSession, release_id):
         repo = PostgresIngestRunRepository(pg_session)
-        run = _make_run("ing-mb2")
+        run = _make_run("ing-mb2", release_id=release_id)
         run.batches_ingested = 0
         await repo.save(run)
 
@@ -175,10 +213,12 @@ class TestMarkBatchIngested:
         assert first.run.batches_ingested == 4
         assert second.run.batches_ingested == 4
 
-    async def test_never_rolls_back_a_counter_that_ran_ahead(self, pg_session: AsyncSession):
+    async def test_never_rolls_back_a_counter_that_ran_ahead(
+        self, pg_session: AsyncSession, release_id
+    ):
         """A late delivery for an earlier batch must not lower the counter."""
         repo = PostgresIngestRunRepository(pg_session)
-        run = _make_run("ing-mb3")
+        run = _make_run("ing-mb3", release_id=release_id)
         run.batches_ingested = 5
         await repo.save(run)
 
@@ -187,9 +227,9 @@ class TestMarkBatchIngested:
         assert isinstance(result, Applied)
         assert result.run.batches_ingested == 5  # GREATEST(5, 2) = 5
 
-    async def test_ingestion_finished_latches_true(self, pg_session: AsyncSession):
+    async def test_ingestion_finished_latches_true(self, pg_session: AsyncSession, release_id):
         repo = PostgresIngestRunRepository(pg_session)
-        run = _make_run("ing-mb4")
+        run = _make_run("ing-mb4", release_id=release_id)
         run.batches_ingested = 0
         await repo.save(run)
 
@@ -202,9 +242,9 @@ class TestMarkBatchIngested:
         assert isinstance(again, Applied)
         assert again.run.ingestion_finished is True
 
-    async def test_noop_on_terminal_run(self, pg_session: AsyncSession):
+    async def test_noop_on_terminal_run(self, pg_session: AsyncSession, release_id):
         repo = PostgresIngestRunRepository(pg_session)
-        await repo.save(_make_run("ing-mb5"))
+        await repo.save(_make_run("ing-mb5", release_id=release_id))
         await repo.abort(
             "ing-mb5",
             reason="bad image",
@@ -219,7 +259,23 @@ class TestMarkBatchIngested:
         assert fetched is not None
         assert fetched.batches_ingested == 1  # _make_run seeds 1; abort didn't advance it
 
-    async def test_missing_run_raises(self, pg_session: AsyncSession):
+    async def test_missing_run_raises(self, pg_session: AsyncSession, release_id):
         repo = PostgresIngestRunRepository(pg_session)
         with pytest.raises(NotFoundError):
             await repo.mark_batch_ingested("does-not-exist", 0, ingestion_finished=False)
+
+
+@pytest.mark.asyncio
+class TestReleaseSnapshot:
+    """ingest_runs.release_id (#180 §1) round-trips against real PG.
+
+    Greenfield: the column is NOT NULL with a real FK — there is no
+    release-less run to round-trip."""
+
+    async def test_release_id_round_trips_with_fk(self, pg_session: AsyncSession, release_id):
+        repo = PostgresIngestRunRepository(pg_session)
+        await repo.save(_make_run("ing-rel", release_id=release_id))
+
+        loaded = await repo.get("ing-rel")
+        assert loaded is not None
+        assert loaded.release_id == release_id
