@@ -1,0 +1,47 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.title {
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.chipRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.failedNote,
+.withdrawnNote {
+  font-size: var(--text-sm);
+  color: var(--color-danger);
+  margin: 0;
+}
+
+.deprecatedNote {
+  font-size: var(--text-sm);
+  color: var(--color-warning, var(--color-text-subtle));
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.note {
+  font-size: var(--text-sm);
+  color: var(--color-text-subtle);
+}

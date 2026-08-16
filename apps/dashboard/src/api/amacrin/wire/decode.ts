@@ -24,6 +24,7 @@ import type {
 import type { Deployment, DeploymentStatus } from "@/domain/deployment";
 import { type Organisation, isRole } from "@/domain/organisation";
 import type { BuildListItem, OrgMember } from "@/domain/tenant";
+import type { OsaVersion } from "@/domain/osa-version";
 import type { Session } from "@/domain/user";
 
 import {
@@ -40,6 +41,7 @@ import {
   wireOrgMemberList,
   wireOrganisation,
   wireOrganisationList,
+  wireOsaVersionList,
 } from "./schemas";
 
 export class DecodeError extends Error {
@@ -175,6 +177,7 @@ export function decodeArchive(raw: unknown): Archive {
     domain: wire.domain,
     status: toArchiveStatus(wire.status, wire.error_message),
     orcidAdmins: wire.config.auth?.admins?.orcid ?? [],
+    osaVersionPin: wire.osa_version_pin,
     deploymentConfig,
     createdAt: parseDate(wire.created_at, "archive"),
     updatedAt: parseDate(wire.updated_at, "archive"),
@@ -363,4 +366,25 @@ export function decodeBuildList(raw: unknown): BuildListItem[] {
     statusKind: toBuildStatus(wire).kind,
     createdAt: parseDate(wire.created_at, "build"),
   }));
+}
+
+// ---------------------------------------------------------------------------
+// OSA versions (#222)
+// ---------------------------------------------------------------------------
+
+const OSA_VERSION_STATUSES = ["supported", "deprecated", "withdrawn"] as const;
+
+export function decodeOsaVersionList(raw: unknown): OsaVersion[] {
+  return parse(wireOsaVersionList, raw, "osa-versions").map((wire) => {
+    const status = OSA_VERSION_STATUSES.find((s) => s === wire.status);
+    if (!status) {
+      throw new DecodeError(`unknown OSA version status "${wire.status}"`);
+    }
+    return {
+      version: wire.version,
+      status,
+      isDefault: wire.is_default,
+      notesUrl: wire.notes_url ?? null,
+    };
+  });
 }

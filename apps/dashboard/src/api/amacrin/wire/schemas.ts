@@ -57,12 +57,27 @@ export const wireArchive = z.object({
   domain: z.string(),
   config: wireArchiveConfig,
   status: z.string(),
+  /** Desired version (always present); deployed version rides osa_version. */
+  osa_version_pin: z.string(),
+  osa_version: z.string().nullish(),
   error_message: z.string().nullish(),
   created_at: z.string(),
   updated_at: z.string(),
 });
 
 export const wireArchiveList = z.array(wireArchive);
+
+export const wireOsaVersion = z.object({
+  version: z.string(),
+  image_digest: z.string().nullish(),
+  status: z.string(),
+  is_default: z.boolean(),
+  released_at: z.string().nullish(),
+  registered_at: z.string(),
+  notes_url: z.string().nullish(),
+});
+
+export const wireOsaVersionList = z.array(wireOsaVersion);
 
 export const wireDeployment = z.object({
   id: z.string(),

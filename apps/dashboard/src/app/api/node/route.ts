@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { latestOsaVersion } from "@/server/ghcr";
 import { osaApiUrl, sessionSecret } from "@/server/env";
 import { SESSION_COOKIE, readSession } from "@/server/session";
 
@@ -38,10 +39,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const base = osaApiUrl();
   const auth = { authorization: `Bearer ${session.osaToken}` };
-  const [discRes, readyRes, statsRes] = await Promise.allSettled([
-    fetch(`${base}/`, { headers: { accept: "application/json" } }),
-    fetch(`${base}/api/v1/ready`, { headers: { accept: "application/json" } }),
-    fetch(`${base}/api/v1/stats`, { headers: { ...auth, accept: "application/json" } }),
+  // Update awareness (#222) rides along: latest published release from the
+  // registry, cached ~1h, null on failure — never blocks the overview.
+  const [[discRes, readyRes, statsRes], latest] = await Promise.all([
+    Promise.allSettled([
+      fetch(`${base}/`, { headers: { accept: "application/json" } }),
+      fetch(`${base}/api/v1/ready`, { headers: { accept: "application/json" } }),
+      fetch(`${base}/api/v1/stats`, {
+        headers: { ...auth, accept: "application/json" },
+      }),
+    ]),
+    latestOsaVersion(),
   ]);
 
   const discovery = await json(discRes);
@@ -63,5 +71,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       : "unknown",
     records: typeof stats.records === "number" ? stats.records : null,
     schemas: Array.isArray(schemas) ? schemas.length : 0,
+    latestOsaVersion: latest,
   });
 }

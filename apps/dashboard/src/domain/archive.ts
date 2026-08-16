@@ -38,6 +38,12 @@ export interface Archive {
   status: ArchiveStatus;
   /** Administrator ORCID iDs from the non-secret auth config. */
   orcidAdmins: string[];
+  /**
+   * Desired OSA server version (the registry pin). The DEPLOYED version
+   * lives on the latest Deployment; pin ≠ deployed means an upgrade is in
+   * flight or its deployment failed (the pin moves first, by design).
+   */
+  osaVersionPin: string;
   deploymentConfig: ArchiveDeploymentConfig | null;
   createdAt: Date;
   updatedAt: Date;

@@ -154,4 +154,5 @@ export const wireNodeOverview = z.object({
   status: z.enum(["ready", "degraded", "unknown"]),
   records: z.number().nullable(),
   schemas: z.number(),
+  latestOsaVersion: z.string().nullable().default(null),
 });

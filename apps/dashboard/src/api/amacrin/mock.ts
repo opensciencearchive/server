@@ -9,6 +9,8 @@ import { ApiError, SlugTakenError } from "@/api/http/errors";
 import type { Archive } from "@/domain/archive";
 import type { Build, ComponentBuild } from "@/domain/build";
 import type { Deployment } from "@/domain/deployment";
+import type { OsaVersion } from "@/domain/osa-version";
+import { compareOsaVersions } from "@/domain/osa-version";
 import type { Organisation } from "@/domain/organisation";
 import type { BuildListItem, OrgMember } from "@/domain/tenant";
 import type { Session } from "@/domain/user";
@@ -31,6 +33,32 @@ function notFound(what: string): ApiError {
 
 /** The OSA server version the mock control plane provisions. */
 const MOCK_OSA_VERSION = "v0.0.9";
+
+/** The mock registry: one older deprecated, the pin, and two upgrades. */
+const MOCK_OSA_VERSIONS: OsaVersion[] = [
+  {
+    version: "v0.0.11",
+    status: "supported",
+    isDefault: true,
+    notesUrl:
+      "https://github.com/opensciencearchive/server/releases/tag/v0.0.11",
+  },
+  {
+    version: "v0.0.10",
+    status: "supported",
+    isDefault: false,
+    notesUrl:
+      "https://github.com/opensciencearchive/server/releases/tag/v0.0.10",
+  },
+  {
+    version: "v0.0.9",
+    status: "supported",
+    isDefault: false,
+    notesUrl:
+      "https://github.com/opensciencearchive/server/releases/tag/v0.0.9",
+  },
+  { version: "v0.0.8", status: "deprecated", isDefault: false, notesUrl: null },
+];
 
 /** The signed-in user, as a member of any org they create. */
 const SELF_MEMBER: OrgMember = {
@@ -152,6 +180,10 @@ export class MockAmacrinService implements AmacrinService {
       organisationId: orgId,
       name: input.name,
       slug: input.slug,
+      // New archives are born on the registry default (the cloud rule).
+      osaVersionPin:
+        MOCK_OSA_VERSIONS.find((v) => v.isDefault)?.version ??
+        MOCK_OSA_VERSION,
       domain: `${input.slug}.amacr.in`,
       status: { kind: "deploying" },
       orcidAdmins: input.adminOrcidIds,
@@ -215,6 +247,62 @@ export class MockAmacrinService implements AmacrinService {
     const state = this.archives.get(archiveId);
     if (!state) return Promise.reject(notFound("archive"));
     return Promise.resolve([state.deployment, ...state.past]);
+  }
+
+  listOsaVersions(): Promise<OsaVersion[]> {
+    return Promise.resolve([...MOCK_OSA_VERSIONS]);
+  }
+
+  upgradeArchive(archiveId: string, toVersion: string): Promise<Deployment> {
+    const state = this.archives.get(archiveId);
+    if (!state) return Promise.reject(notFound("archive"));
+    const target = MOCK_OSA_VERSIONS.find((v) => v.version === toVersion);
+    if (!target) return Promise.reject(notFound("OSA version"));
+    if (target.status !== "supported") {
+      return Promise.reject(
+        new ApiError({
+          status: 400,
+          code: "validation_error",
+          message: `OSA version '${toVersion}' is ${target.status} — not an upgrade target`,
+        }),
+      );
+    }
+    if (compareOsaVersions(toVersion, state.archive.osaVersionPin) <= 0) {
+      return Promise.reject(
+        new ApiError({
+          status: 400,
+          code: "validation_error",
+          message: `'${toVersion}' is not newer than the archive's current version '${state.archive.osaVersionPin}' — upgrades are forward-only`,
+        }),
+      );
+    }
+    if (state.archive.status.kind === "deploying") {
+      return Promise.reject(
+        new ApiError({
+          status: 422,
+          code: "invalid_state",
+          message: "deployment already in progress for this archive",
+        }),
+      );
+    }
+    // The pin moves WITH the deployment start — mirroring the cloud tx.
+    state.archive = {
+      ...state.archive,
+      osaVersionPin: toVersion,
+      status: { kind: "deploying" },
+      updatedAt: T0,
+    };
+    state.past = [state.deployment, ...state.past];
+    state.deployment = {
+      id: this.mintId("deploy"),
+      archiveId,
+      provider: "aws_eks",
+      status: { kind: "pending" },
+      osaVersion: null,
+      startedAt: new Date(state.past[0]!.startedAt.getTime() + 60_000),
+    };
+    state.pollsUntilAdvance = 2;
+    return Promise.resolve(state.deployment);
   }
 
   destroyArchive(
@@ -402,6 +490,7 @@ export class MockAmacrinService implements AmacrinService {
     const archive: Archive = {
       ...args,
       domain: `${args.slug}.amacr.in`,
+      osaVersionPin: MOCK_OSA_VERSION,
       deploymentConfig: {
         provider: "aws_eks",
         region: "eu-west-1",

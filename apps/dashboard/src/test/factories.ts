@@ -23,6 +23,7 @@ export function buildArchive(over?: Partial<Archive>): Archive {
     domain: "alpine-climate.amacr.in",
     status: { kind: "running" },
     orcidAdmins: ["0000-0002-1825-0097"],
+    osaVersionPin: "v0.0.9",
     deploymentConfig: { provider: "aws_eks", region: "eu-west-1", volumeSizeGb: 5 },
     createdAt: new Date("2026-07-14T10:02:11Z"),
     updatedAt: new Date("2026-07-25T14:06:00Z"),

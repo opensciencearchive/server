@@ -2,6 +2,7 @@ export { Badge } from "./badge/Badge";
 export { BarChart } from "./bar-chart/BarChart";
 export { Button } from "./button/Button";
 export { Card, CardFooter } from "./card/Card";
+export { Checkbox } from "./checkbox/Checkbox";
 export { CopyButton } from "./copy-button/CopyButton";
 export { DataTable, type Column } from "./data-table/DataTable";
 export { Dialog } from "./dialog/Dialog";

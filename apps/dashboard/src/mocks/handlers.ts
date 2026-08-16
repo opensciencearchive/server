@@ -20,6 +20,7 @@ import deploymentSucceeded from "./fixtures/deployment.succeeded.json";
 import me from "./fixtures/me.json";
 import members from "./fixtures/members.json";
 import organisations from "./fixtures/organisations.json";
+import osaVersions from "./fixtures/osa-versions.json";
 
 const ARCHIVES = [archiveRunning, archiveError, archiveDeploying];
 
@@ -101,6 +102,7 @@ export const handlers = [
   }),
 
   // ── archives ────────────────────────────────────────────────────────
+  http.get("*/api/v1/osa-versions", () => HttpResponse.json(osaVersions)),
   http.get("*/api/v1/archives", () => HttpResponse.json(ARCHIVES)),
   http.get("*/api/v1/archives/:id", ({ params }) => {
     const archive = ARCHIVES.find((a) => a.id === params["id"]);
@@ -108,6 +110,9 @@ export const handlers = [
       ? HttpResponse.json(archive)
       : jsonError(404, "not_found", `archive '${String(params["id"])}' not found`);
   }),
+  http.post("*/api/v1/archives/:id/upgrade", () =>
+    HttpResponse.json(deploymentPending, { status: 202 }),
+  ),
   http.post("*/api/v1/archives/:id/deploy", ({ params }) =>
     HttpResponse.json(
       {
