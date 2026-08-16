@@ -1,6 +1,13 @@
-"""Events API routes - changefeed for federation."""
+"""Events API routes - changefeed for federation.
+
+Thin HTTP ↔ DTO coercion only: the changefeed read (look-ahead pagination,
+payload shaping) and its explicit ``public()`` gate live in
+``ListEventsHandler`` (arch-survey 2026-08-16 F1 — this route previously
+injected the EventLog service directly, bypassing the gate machinery).
+"""
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from dishka.integrations.fastapi import DishkaRoute, FromDishka
@@ -8,7 +15,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from osa.domain.shared.event import EventId
-from osa.domain.shared.event_log import EventLog
+from osa.domain.shared.event_log import ListEvents, ListEventsHandler
 
 router = APIRouter(
     prefix="/events",
@@ -36,41 +43,32 @@ class EventListResponse(BaseModel):
 
 @router.get("")
 async def list_events(
-    event_log: FromDishka[EventLog],
+    handler: FromDishka[ListEventsHandler],
     limit: int = Query(50, ge=1, le=500, description="Maximum number of events"),
     after: UUID | None = Query(None, description="Cursor: return events after this ID"),
     types: list[str] | None = Query(None, description="Filter by event types"),
-    order: str = Query("asc", description="Order: 'asc' (oldest first) or 'desc' (newest first)"),
+    order: Literal["asc", "desc"] = Query(
+        "asc", description="'asc' (oldest first, federation) or 'desc' (newest first)"
+    ),
 ) -> EventListResponse:
     """List events from the event log (changefeed).
 
     Use order=asc (default) for federation, order=desc for viewing recent events.
     Use the cursor to paginate through results.
     """
-    newest_first = order == "desc"
-    after_id = EventId(after) if after else None
-    events = await event_log.list_events(
-        limit=limit + 1, after=after_id, event_types=types, newest_first=newest_first
+    page = await handler.run(
+        ListEvents(
+            limit=limit,
+            after=EventId(after) if after else None,
+            types=types,
+            order=order,
+        )
     )
-
-    # Check if there are more results
-    has_more = len(events) > limit
-    if has_more:
-        events = events[:limit]
-
-    # Cursor is the ID of the last event
-    cursor = str(events[-1].id) if events else None
-
     return EventListResponse(
         events=[
-            EventResponse(
-                id=e.id,
-                type=type(e).__name__,
-                created_at=e.created_at,
-                data=e.model_dump(mode="json", exclude={"id", "created_at"}),
-            )
-            for e in events
+            EventResponse(id=e.id, type=e.type, created_at=e.created_at, data=e.data)
+            for e in page.events
         ],
-        cursor=cursor,
-        has_more=has_more,
+        cursor=page.cursor,
+        has_more=page.has_more,
     )

@@ -1,17 +1,22 @@
-"""Validation API routes."""
+"""Validation API routes.
+
+Thin HTTP ↔ DTO coercion only: the status→shape rule and the explicit
+``public()`` gate live in ``GetValidationRunHandler``; a missing run raises
+``NotFoundError``, mapped centrally (arch-survey 2026-08-16 F1 — this route
+previously injected ValidationService directly and owned the decision tree).
+"""
 
 from datetime import datetime
 
 from dishka.integrations.fastapi import DishkaRoute, FromDishka
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from osa.domain.validation.model import (
-    HookStatus,
-    RunStatus,
+from osa.domain.validation.model import HookStatus, RunStatus
+from osa.domain.validation.query.get_validation_run import (
+    GetValidationRun,
+    GetValidationRunHandler,
 )
-from osa.domain.validation.service.validation import ValidationService
-
 
 router = APIRouter(
     prefix="/validation",
@@ -66,40 +71,15 @@ class ValidationStatusResponse(BaseModel):
 )
 async def get_validation_status(
     run_id: str,
-    service: FromDishka[ValidationService],
+    handler: FromDishka[GetValidationRunHandler],
 ) -> ValidationStatusResponse:
-    run = await service.get_run(run_id)
-    if not run:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Validation run not found: {run_id}",
-        )
-
-    results_dto = [
-        HookResultDTO(
-            hook_name=r.hook_name.root,
-            status=r.status,
-            rejection_reason=r.rejection_reason,
-            error_message=r.error_message,
-            duration_seconds=r.duration_seconds,
-        )
-        for r in run.results
-    ]
-
-    summary = None
-    progress = None
-
-    if run.status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.REJECTED):
-        summary = run.summary
-    elif run.status == RunStatus.RUNNING:
-        progress = {"status": "running"}
-
+    result = await handler.run(GetValidationRun(run_id=run_id))
     return ValidationStatusResponse(
-        run_id=run_id,
-        status=run.status,
-        summary=summary,
-        progress=progress,
-        results=results_dto,
-        started_at=run.started_at,
-        completed_at=run.completed_at,
+        run_id=result.run_id,
+        status=result.status,
+        summary=result.summary,
+        progress=result.progress.model_dump() if result.progress else None,
+        results=[HookResultDTO(**r.model_dump()) for r in result.results],
+        started_at=result.started_at,
+        completed_at=result.completed_at,
     )

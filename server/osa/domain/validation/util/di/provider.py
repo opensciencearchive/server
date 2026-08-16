@@ -6,6 +6,9 @@ from osa.domain.shared.model.srn import Domain
 from osa.domain.validation.command.create_release import CreateReleaseHandler
 from osa.domain.validation.command.set_live import SetLiveHandler
 from osa.domain.validation.query.get_hook_run import GetHookRunHandler
+from osa.domain.validation.query.get_validation_run import (
+    GetValidationRunHandler,
+)
 from osa.domain.validation.query.get_hook_run_logs import GetHookRunLogsHandler
 from osa.domain.validation.query.get_release import GetReleaseHandler
 from osa.domain.validation.query.list_hooks import ListHooksHandler
@@ -35,6 +38,7 @@ class ValidationProvider(Provider):
 
     # Hook-run provenance + logs read handlers (#147).
     get_hook_run_handler = provide(GetHookRunHandler, scope=Scope.UOW)
+    get_validation_run_handler = provide(GetValidationRunHandler, scope=Scope.UOW)
     get_hook_run_logs_handler = provide(GetHookRunLogsHandler, scope=Scope.UOW)
 
     @provide(scope=Scope.UOW)

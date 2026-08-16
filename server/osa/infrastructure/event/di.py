@@ -12,7 +12,7 @@ from osa.application.workflow.process_batch import ProcessBatch
 from osa.application.workflow.process_submission import ProcessSubmission
 from osa.config import Config
 from osa.domain.shared.event import EventHandler
-from osa.domain.shared.event_log import EventLog
+from osa.domain.shared.event_log import EventLog, ListEventsHandler
 from osa.domain.shared.model.subscription_registry import SubscriptionRegistry
 from osa.domain.shared.outbox import Outbox
 from osa.domain.shared.port.event_repository import EventRepository
@@ -102,6 +102,8 @@ class EventProvider(Provider):
     @provide(scope=Scope.UOW)
     def get_event_log(self, repo: EventRepository) -> EventLog:
         return EventLog(repo)
+
+    list_events_handler = provide(ListEventsHandler, scope=Scope.UOW)
 
     @provide(scope=Scope.APP)
     def get_handler_types(self) -> HandlerTypes:
