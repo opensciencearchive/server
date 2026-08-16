@@ -10,6 +10,7 @@ import { useDeploymentStatus } from "../deployments/useDeploymentStatus";
 import { DeploymentHistory } from "../deployments/DeploymentHistory";
 import { DeploymentPanel } from "../deployments/DeploymentPanel";
 import { NextSteps } from "../tenant-insights/NextSteps";
+import { UpgradeCallout } from "../archive-upgrade/UpgradeCallout";
 import { WhatsInHere } from "../tenant-insights/WhatsInHere";
 import { useArchive } from "./useArchives";
 import { useNodeOverview } from "./useNodeOverview";
@@ -99,6 +100,7 @@ function PlatformHero({
       </div>
 
       <PlatformMetaStrip archive={data} />
+      <UpgradeCallout archive={data} />
     </div>
   );
 }
