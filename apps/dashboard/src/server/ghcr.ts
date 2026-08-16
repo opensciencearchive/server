@@ -8,9 +8,15 @@
  * `null` on any failure so callers degrade instead of breaking.
  */
 
+import { nextPageUrl } from "./link-header";
+
 const GHCR_IMAGE = "opensciencearchive/osa";
 const CACHE_TTL_MS = 60 * 60 * 1000;
 const MAX_PAGES = 50;
+// One deadline for the whole lookup: /api/node awaits this, and the version
+// hint is optional — a slow registry must degrade to null, not stall the
+// overview behind its loading skeleton.
+const DEADLINE_MS = 4_000;
 const RELEASE_TAG = /^v(\d+)\.(\d+)\.(\d+)$/;
 
 let cached: { value: string | null; at: number } | null = null;
@@ -29,8 +35,10 @@ export function resetLatestOsaVersionCache(): void {
 }
 
 async function fetchLatest(): Promise<string | null> {
+  const signal = AbortSignal.timeout(DEADLINE_MS);
   const tokenRes = await fetch(
     `https://ghcr.io/token?scope=repository:${GHCR_IMAGE}:pull`,
+    { signal },
   );
   if (!tokenRes.ok) return null;
   const token = (await tokenRes.json()).token as string | undefined;
@@ -41,11 +49,12 @@ async function fetchLatest(): Promise<string | null> {
   for (let page = 0; url !== null && page < MAX_PAGES; page++) {
     const res: Response = await fetch(url, {
       headers: { authorization: `Bearer ${token}` },
+      signal,
     });
     if (!res.ok) return null;
     const body = (await res.json()) as { tags?: string[] };
     tags.push(...(body.tags ?? []));
-    url = nextPageUrl(res.headers.get("link"));
+    url = nextPageUrl(res.headers.get("link"), "https://ghcr.io");
   }
 
   const releases = tags
@@ -58,13 +67,4 @@ async function fetchLatest(): Promise<string | null> {
         Number(a.m[3]) - Number(b.m[3]),
     );
   return releases.at(-1)?.tag ?? null;
-}
-
-function nextPageUrl(link: string | null): string | null {
-  if (!link || !link.includes('rel="next"')) return null;
-  const start = link.indexOf("<");
-  const end = link.indexOf(">", start);
-  if (start === -1 || end === -1) return null;
-  const path = link.slice(start + 1, end);
-  return path.startsWith("http") ? path : `https://ghcr.io${path}`;
 }

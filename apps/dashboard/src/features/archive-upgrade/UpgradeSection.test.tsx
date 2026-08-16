@@ -57,6 +57,22 @@ describe("UpgradeSection", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows the registry as unavailable, not up to date, when it errors", async () => {
+    const services = makeTestServices();
+    vi.spyOn(services.amacrin, "listOsaVersions").mockRejectedValue(
+      new Error("registry down"),
+    );
+    renderWithProviders(
+      <UpgradeSection archive={buildArchive({ id: "arch_sky1mag3ry" })} />,
+      { services },
+    );
+    expect(
+      await screen.findByText("Version check unavailable"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Up to date")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upgrade…" })).toBeDisabled();
+  });
+
   it("warns when the pinned version is deprecated", async () => {
     const services = makeTestServices();
     renderWithProviders(

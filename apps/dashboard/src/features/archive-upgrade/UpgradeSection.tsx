@@ -47,6 +47,8 @@ export function UpgradeSection({ archive }: { archive: Archive }) {
           <span className="mono">{pin}</span>
           {versions.isPending ? (
             <Skeleton height="1.25rem" width="8rem" />
+          ) : versions.isError ? (
+            <Badge tone="neutral">Version check unavailable</Badge>
           ) : newest ? (
             <Badge tone="info" withDot>
               Update available → {newest.version}
@@ -80,7 +82,15 @@ export function UpgradeSection({ archive }: { archive: Archive }) {
         <Button
           variant="primary"
           disabled={blocked || !newest}
-          title={blocked ? reason : !newest ? "Already on the newest supported version." : undefined}
+          title={
+            blocked
+              ? reason
+              : versions.isError
+                ? "Couldn't reach the version registry — try again later."
+                : !newest
+                  ? "Already on the newest supported version."
+                  : undefined
+          }
           onClick={() => setDialogOpen(true)}
         >
           Upgrade…
