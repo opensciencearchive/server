@@ -3,6 +3,7 @@ import { ApiError, SlugTakenError } from "@/api/http/errors";
 import type { Archive } from "@/domain/archive";
 import type { Build } from "@/domain/build";
 import type { Deployment } from "@/domain/deployment";
+import type { OsaVersion } from "@/domain/osa-version";
 import type { Organisation } from "@/domain/organisation";
 import type { BuildListItem, OrgMember } from "@/domain/tenant";
 import type { Session } from "@/domain/user";
@@ -19,6 +20,7 @@ import {
   decodeOrganisation,
   decodeOrganisationList,
   decodeSession,
+  decodeOsaVersionList,
 } from "./wire/decode";
 import type {
   AmacrinService,
@@ -145,6 +147,21 @@ export class RealAmacrinService implements AmacrinService {
       await this.client.get(
         `/api/v1/archives/${encodeURIComponent(archiveId)}/deployments`,
       ),
+    );
+  }
+
+  async listOsaVersions(): Promise<OsaVersion[]> {
+    return decodeOsaVersionList(await this.client.get("/api/v1/osa-versions"));
+  }
+
+  async upgradeArchive(
+    archiveId: string,
+    toVersion: string,
+  ): Promise<Deployment> {
+    return decodeDeployment(
+      await this.client.post(`/api/v1/archives/${archiveId}/upgrade`, {
+        to_version: toVersion,
+      }),
     );
   }
 

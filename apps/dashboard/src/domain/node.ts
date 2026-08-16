@@ -10,6 +10,8 @@ export interface NodeOverview {
   domain: string;
   description: string;
   osaVersion: string;
+  /** Newest published release (registry check), null when unknown. */
+  latestOsaVersion: string | null;
   status: NodeStatus;
   /** Published record count, or null when stats are unavailable. */
   records: number | null;

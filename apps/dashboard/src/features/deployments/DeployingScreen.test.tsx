@@ -18,6 +18,7 @@ const ARCHIVE: Archive = {
   domain: "alpine.amacr.in",
   status: { kind: "deploying" },
   orcidAdmins: [],
+  osaVersionPin: "v0.0.9",
   deploymentConfig: null,
   createdAt: new Date(0),
   updatedAt: new Date(0),

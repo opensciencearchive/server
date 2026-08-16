@@ -8,6 +8,7 @@
 import type { Archive } from "@/domain/archive";
 import type { Build } from "@/domain/build";
 import type { Deployment } from "@/domain/deployment";
+import type { OsaVersion } from "@/domain/osa-version";
 import type { Organisation } from "@/domain/organisation";
 import type { BuildListItem, OrgMember } from "@/domain/tenant";
 import type { Session } from "@/domain/user";
@@ -64,6 +65,14 @@ export interface AmacrinService {
   getDeploymentStatus(archiveId: string): Promise<Deployment>;
   /** GET /archives/{id}/deployments — deployment history, newest first. */
   listDeployments(archiveId: string): Promise<Deployment[]>;
+  /** GET /osa-versions — the registry, newest first (#222). */
+  listOsaVersions(): Promise<OsaVersion[]>;
+  /**
+   * POST /archives/{id}/upgrade — move the version pin, forward-only (202).
+   * The pin moves in the same transaction that starts the deployment: a
+   * failed upgrade deployment retries at the NEW version, never rolls back.
+   */
+  upgradeArchive(archiveId: string, toVersion: string): Promise<Deployment>;
   /** POST /archives/{id}/destroy — the only removal path (Owner only). */
   destroyArchive(
     archiveId: string,

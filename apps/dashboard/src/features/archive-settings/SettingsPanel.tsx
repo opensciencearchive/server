@@ -10,6 +10,8 @@ import { useServices } from "@/api/services";
 import { useArchive } from "@/features/archives/useArchives";
 import { useSession } from "@/features/auth/useSession";
 import { useRedeploy } from "@/features/deployments/useRedeploy";
+import { UpgradeSection } from "@/features/archive-upgrade/UpgradeSection";
+import { SelfHostVersion } from "@/features/archive-upgrade/SelfHostVersion";
 import { Button, Card, PageHeader, Skeleton } from "@/ui";
 
 import { blockedReason } from "./blocked";
@@ -65,6 +67,7 @@ function SelfHostSettings() {
           from the dashboard.
         </p>
       </div>
+      <SelfHostVersion />
     </Card>
   );
 }
@@ -86,6 +89,7 @@ function SettingsSections({
 }) {
   return (
     <div className={styles.sections}>
+      <UpgradeSection archive={archive} />
       <RotateCredentialsForm archive={archive} />
       <RedeploySection archive={archive} />
       <DestroySection archive={archive} isOwner={isOwner} />
