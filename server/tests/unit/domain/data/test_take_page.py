@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
 from osa.domain.data.model.query_plan import (
-    PaginationParams,
+    BoundedPage,
     QueryPlan,
     TableKind,
     decode_cursor,
@@ -30,7 +30,7 @@ def _plan(limit: int) -> QueryPlan:
         schema_id=SchemaId.parse("alloy-sample@1.0.0"),
         table_kind=TableKind.FEATURE,
         feature_name="tensile_test",
-        pagination=PaginationParams(limit=limit),
+        pagination=BoundedPage(limit=limit),
     )
 
 

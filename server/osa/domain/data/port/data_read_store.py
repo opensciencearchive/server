@@ -20,11 +20,11 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from osa.domain.data.model.catalog import NodeCatalog
-    from osa.domain.data.model.manifest import SchemaManifest
+    from osa.domain.data.model.manifest import ColumnSpec, SchemaManifest
     from osa.domain.data.model.query_plan import QueryPlan
     from osa.domain.data.model.record_summary import RecordSummary
     from osa.domain.data.model.skill import AuthorDocs, SampleValue
-    from osa.domain.shared.model.ids import RecordId
+    from osa.domain.shared.model.ids import FeatureName, RecordId
     from osa.domain.shared.model.srn import SchemaId
 
 
@@ -51,6 +51,24 @@ class DataCatalogReadStore(Protocol):
 
     async def get_schema_manifest(self, schema_id: "SchemaId") -> "SchemaManifest | None":
         """Full manifest for a schema. ``None`` if unknown."""
+        ...
+
+    async def get_record_columns(self, schema_id: "SchemaId") -> "list[ColumnSpec] | None":
+        """The records table's column schema (implicit + declared fields).
+
+        A catalog lookup only — never touches row data (#219: table resolution
+        must stay O(1) as tables grow). ``None`` if the schema is unknown.
+        """
+        ...
+
+    async def get_feature_columns(
+        self, schema_id: "SchemaId", feature_name: "FeatureName"
+    ) -> "list[ColumnSpec] | None":
+        """A feature table's column schema (implicit + declared columns).
+
+        Same catalog-only contract as :meth:`get_record_columns`. ``None`` if
+        the feature is not registered on this schema.
+        """
         ...
 
     async def get_latest_schema_id(self, schema_short_id: str) -> "SchemaId | None":

@@ -9,8 +9,9 @@ non-streaming reads behind ``GET /data``, ``GET /data/{schema}``, and
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.domain.data.model.catalog import (
@@ -28,6 +29,11 @@ from osa.domain.data.model.manifest import (
 )
 from osa.domain.data.model.query_plan import TableKind
 from osa.domain.data.model.record_summary import RecordSummary
+from osa.domain.data.model.statistics import (
+    FeatureCount,
+    RecordsCount,
+    SchemaTableCounts,
+)
 from osa.domain.data.model.skill import AuthorDocs, SampleValue
 from osa.domain.semantics.model.value import (
     FieldDefinition,
@@ -35,7 +41,7 @@ from osa.domain.semantics.model.value import (
     NumberConstraints,
     TermConstraints,
 )
-from osa.domain.shared.model.ids import RecordId
+from osa.domain.shared.model.ids import FeatureName, RecordId
 from osa.domain.shared.model.srn import Domain, RecordSRN, SchemaId
 from osa.infrastructure.data.schema_feature_reader import SchemaFeatureReader
 from osa.infrastructure.persistence.feature_table import (
@@ -46,6 +52,7 @@ from osa.infrastructure.persistence.tables import (
     conventions_table,
     records_table,
     schemas_table,
+    table_statistics_table,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,6 +69,14 @@ _JSON_TYPE_TO_FIELD_TYPE: dict[str, FieldType] = {
 
 # All URL-exposed format suffixes (mirrors the route-layer FORMATS registry).
 _ALL_FORMATS = ["", "csv", "csv.gz"]
+
+
+@dataclass(frozen=True)
+class _SchemaSpecs:
+    """A schema's manifest projections: rich field specs + bare column specs."""
+
+    fields: list[FieldSpec]
+    columns: list[ColumnSpec]
 
 
 class PostgresCatalogReadStore:
@@ -152,9 +167,35 @@ class PostgresCatalogReadStore:
         if row is None:
             return None
 
+        specs = self._field_and_column_specs(row["fields"])
+        counts = await self._table_counts(schema_id)
+        records_resource = TableResource(
+            name="records",
+            kind=TableKind.RECORDS,
+            # Implicit columns (id, srn, schema_id, version, created_at) precede
+            # the schema's declared metadata fields — this is the CSV header order.
+            columns=[*IMPLICIT_RECORD_COLUMN_SPECS, *specs.columns],
+            row_count=counts.records.row_count,
+            formats=list(_ALL_FORMATS),
+        )
+        feature_resources = await self._feature_resources(schema_id, counts)
+        return SchemaManifest(
+            id=schema_id.id.root,
+            version=schema_id.version.root,
+            srn=schema_id.to_srn(self.node_domain).render(),
+            title=row["title"],
+            fields=specs.fields,
+            table_resources=[records_resource, *feature_resources],
+        )
+
+    @staticmethod
+    def _field_and_column_specs(
+        fields_blob: list[dict],
+    ) -> _SchemaSpecs:
+        """Map a schema's serialized fields to manifest field/column specs."""
         field_specs: list[FieldSpec] = []
         column_specs: list[ColumnSpec] = []
-        for f in row["fields"]:
+        for f in fields_blob:
             # The blob IS a serialized FieldDefinition — validate it back into
             # the domain model and read typed attributes, never raw dict keys.
             fd = FieldDefinition.model_validate(f)
@@ -179,34 +220,66 @@ class PostgresCatalogReadStore:
                 )
             )
             column_specs.append(ColumnSpec(name=fd.name, type=fd.type))
+        return _SchemaSpecs(fields=field_specs, columns=column_specs)
 
-        record_count = await self._records_count(schema_id)
-        records_resource = TableResource(
-            name="records",
-            kind=TableKind.RECORDS,
-            # Implicit columns (id, srn, schema_id, version, created_at) precede
-            # the schema's declared metadata fields — this is the CSV header order.
-            columns=[*IMPLICIT_RECORD_COLUMN_SPECS, *column_specs],
-            row_count=record_count,
-            formats=list(_ALL_FORMATS),
-        )
-        feature_resources = await self._feature_resources(schema_id)
-        return SchemaManifest(
-            id=schema_id.id.root,
-            version=schema_id.version.root,
-            srn=schema_id.to_srn(self.node_domain).render(),
-            title=row["title"],
-            fields=field_specs,
-            table_resources=[records_resource, *feature_resources],
-        )
+    # ------------------------------------------------------------------ #
+    # Columns-only table resolution (#219 phase 1)
+    # ------------------------------------------------------------------ #
 
-    async def _feature_resources(self, schema_id: SchemaId) -> list[TableResource]:
+    async def get_record_columns(self, schema_id: SchemaId) -> list[ColumnSpec] | None:
+        """Records column schema from the ``schemas`` catalog — no row data touched."""
+        stmt = select(schemas_table.c.fields).where(
+            schemas_table.c.id == schema_id.id.root,
+            schemas_table.c.version == schema_id.version.root,
+        )
+        result = await self.session.execute(stmt)
+        row = result.mappings().first()
+        if row is None:
+            return None
+        specs = self._field_and_column_specs(row["fields"])
+        return [*IMPLICIT_RECORD_COLUMN_SPECS, *specs.columns]
+
+    async def get_feature_columns(
+        self, schema_id: SchemaId, feature_name: FeatureName
+    ) -> list[ColumnSpec] | None:
+        """Feature column schema from the ``feature_tables`` catalog — no row data."""
+        for hook_name, fschema in await self._features.feature_tables(schema_id):
+            if hook_name == feature_name.root:
+                return [*IMPLICIT_FEATURE_COLUMN_SPECS, *self._feature_column_specs(fschema)]
+        return None
+
+    async def _table_counts(self, schema_id: SchemaId) -> SchemaTableCounts:
+        """Lockstep counts per table for one schema version (#219 phase 6).
+
+        One indexed select over ``table_statistics``; an absent row is zero
+        (the model defaults). Manifest renders must never recount tables.
+        """
+        stmt = select(
+            table_statistics_table.c.table_name,
+            table_statistics_table.c.row_count,
+            table_statistics_table.c.records_covered,
+        ).where(
+            table_statistics_table.c.schema_id == schema_id.id.root,
+            table_statistics_table.c.schema_version == schema_id.version.root,
+        )
+        result = await self.session.execute(stmt)
+        counts = SchemaTableCounts()
+        for table_name, row_count, covered in result.all():
+            if table_name == "records":
+                counts.records = RecordsCount(row_count=row_count)
+            else:
+                counts.features[table_name] = FeatureCount(
+                    row_count=row_count, records_covered=covered or 0
+                )
+        return counts
+
+    async def _feature_resources(
+        self, schema_id: SchemaId, counts: SchemaTableCounts
+    ) -> list[TableResource]:
         """Build a TableResource for each feature table registered on the schema."""
         resources: list[TableResource] = []
         for hook_name, fschema in await self._features.feature_tables(schema_id):
-            ft = build_feature_table(hook_name, fschema)
-            count = await self._features.count_rows(ft, schema_id)
-            covered = await self._features.count_covered_records(ft, schema_id)
+            count = counts.feature(hook_name)
             resources.append(
                 TableResource(
                     name=hook_name,
@@ -214,8 +287,8 @@ class PostgresCatalogReadStore:
                     # Implicit columns (id, record_srn, created_at) precede the
                     # hook's declared data columns — this is the CSV header order.
                     columns=[*IMPLICIT_FEATURE_COLUMN_SPECS, *self._feature_column_specs(fschema)],
-                    row_count=count,
-                    records_covered=covered,
+                    row_count=count.row_count,
+                    records_covered=count.records_covered,
                     formats=list(_ALL_FORMATS),
                 )
             )
@@ -304,18 +377,6 @@ class PostgresCatalogReadStore:
         # Pick the highest SemVer (string sort is wrong for e.g. 1.10.0 vs 1.9.0).
         latest = max(versions, key=lambda v: tuple(int(p) for p in v.split("-")[0].split(".")))
         return SchemaId.parse(f"{schema_short_id}@{latest}")
-
-    async def _records_count(self, schema_id: SchemaId) -> int:
-        t = records_table
-        stmt = (
-            select(func.count())
-            .select_from(t)
-            .where(
-                t.c.schema_id == schema_id.id.root,
-                t.c.schema_version == schema_id.version.root,
-            )
-        )
-        return int((await self.session.execute(stmt)).scalar_one())
 
     @staticmethod
     def _feature_column_specs(fschema: FeatureSchema) -> list[ColumnSpec]:

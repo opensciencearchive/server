@@ -6,7 +6,12 @@ from dishka.integrations.fastapi import DishkaRoute, FromDishka
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from osa.domain.record.query.get_stats import GetStats, GetStatsHandler
+from osa.domain.data.command.verify_statistics import (
+    StatisticsDriftReport,
+    VerifyTableStatistics,
+    VerifyTableStatisticsHandler,
+)
+from osa.domain.data.query.get_stats import GetStats, GetStatsHandler
 
 router = APIRouter(
     prefix="/stats",
@@ -34,6 +39,19 @@ class StatsResponse(BaseModel):
     features_per_record: float
     computed_at: datetime | None
     data_url: str = "/api/v1/data"
+
+
+@router.post("/verify")
+async def verify_statistics(
+    handler: FromDishka[VerifyTableStatisticsHandler],
+    repair: bool = False,
+) -> StatisticsDriftReport:
+    """Recompute table_statistics truth; report drift; repair on request.
+
+    ADMIN-gated (handler ``__auth__``). The only sanctioned whole-table
+    counting after deploy — defence in depth for the lockstep counts (#219).
+    """
+    return await handler.run(VerifyTableStatistics(repair=repair))
 
 
 @router.get("")

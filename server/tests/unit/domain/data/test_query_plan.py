@@ -7,7 +7,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from osa.domain.data.model.query_plan import (
     PaginationCursor,
-    PaginationParams,
+    BoundedPage,
     QueryPlan,
     SortDirection,
     SortSpec,
@@ -49,23 +49,23 @@ def test_limit_above_max_clamps_to_max() -> None:
     # Clamp, don't reject: a consumer asking for "everything" with a big
     # number gets the max page, not a 422. The clamp *policy* lives HERE, on
     # the canonical model; the *bound* comes from config (DataConfig).
-    assert PaginationParams.clamped(limit=5000, max_limit=1000).limit == 1000
-    assert PaginationParams.clamped(limit=5000, max_limit=200).limit == 200
+    assert BoundedPage.clamped(limit=5000, max_limit=1000).limit == 1000
+    assert BoundedPage.clamped(limit=5000, max_limit=200).limit == 200
 
 
 def test_limit_below_one_clamps_to_one() -> None:
-    assert PaginationParams.clamped(limit=0, max_limit=1000).limit == 1
-    assert PaginationParams.clamped(limit=-5, max_limit=1000).limit == 1
+    assert BoundedPage.clamped(limit=0, max_limit=1000).limit == 1
+    assert BoundedPage.clamped(limit=-5, max_limit=1000).limit == 1
 
 
 def test_clamped_preserves_cursor() -> None:
-    p = PaginationParams.clamped(cursor=PaginationCursor(value="CUR"), limit=10, max_limit=1000)
+    p = BoundedPage.clamped(cursor=PaginationCursor(value="CUR"), limit=10, max_limit=1000)
     assert str(p.cursor) == "CUR"
     assert p.limit == 10
 
 
 def test_limit_default_is_50() -> None:
-    assert PaginationParams().limit == 50
+    assert BoundedPage().limit == 50
 
 
 def test_cursor_roundtrip() -> None:

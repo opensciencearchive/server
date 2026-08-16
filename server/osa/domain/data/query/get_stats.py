@@ -1,9 +1,15 @@
-"""GetStats query handler — public node statistics."""
+"""GetStats query handler — public node statistics (data read surface).
+
+Relocated from the record domain with #219 phase 6: statistics are read-surface
+content, and the records total now comes from the lockstep-maintained
+``table_statistics`` (SUM over stored counts) instead of a full-table COUNT on
+the request path. ``records_this_month`` stays live — an index-served month
+window, the one sanctioned counting statement here.
+"""
 
 from datetime import datetime
 
-from osa.domain.record.port.statistics_store import StatisticsStore
-from osa.domain.record.service.record import RecordService
+from osa.domain.data.port.statistics_store import StatisticsStore
 from osa.domain.shared.authorization.gate import public
 from osa.domain.shared.query import Query, QueryHandler, Result
 
@@ -21,20 +27,13 @@ class StatsResult(Result):
 
 
 class GetStatsHandler(QueryHandler[GetStats, StatsResult]):
-    """Node statistics: live counts + the materialized storage/feature snapshot.
-
-    ``records`` and ``records_this_month`` are read live (cheap, indexed) so they
-    stay fresh; ``storage_bytes`` and ``features_per_record`` come from the
-    periodically-refreshed snapshot, falling back to a live computation on cold
-    start (before the first refresh).
-    """
+    """Node statistics: lockstep counts + the materialized storage snapshot."""
 
     __auth__ = public()
-    record_service: RecordService
     stats_store: StatisticsStore
 
     async def run(self, cmd: GetStats) -> StatsResult:
-        records = await self.record_service.count()
+        records = await self.stats_store.records_total()
         records_this_month = await self.stats_store.count_this_month()
 
         snapshot = await self.stats_store.read_snapshot()

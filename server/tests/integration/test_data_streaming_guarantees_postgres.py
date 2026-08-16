@@ -28,7 +28,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from osa.domain.data.model.query_plan import PaginationParams, QueryPlan, TableKind
+from osa.domain.data.model.query_plan import FullStream, QueryPlan, TableKind
 from osa.domain.semantics.model.schema import Schema
 from osa.domain.semantics.model.value import Cardinality, FieldDefinition, FieldType
 from osa.domain.shared.model.srn import SchemaId
@@ -101,11 +101,13 @@ async def _bulk_seed(engine: AsyncEngine, n: int) -> None:
         )
 
 
-def _records_plan(limit: int = 1000) -> QueryPlan:
+def _records_plan() -> QueryPlan:
+    # These are the DUMP-path guarantees: the server-side-cursor behaviours
+    # only FullStream reads retain after #219's LIMIT pushdown.
     return QueryPlan(
         schema_id=SCHEMA,
         table_kind=TableKind.RECORDS,
-        pagination=PaginationParams(limit=limit),
+        pagination=FullStream(),
     )
 
 

@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from osa.domain.data.model.filter import FilterOperator, FeatureFieldRef, Predicate
 from osa.domain.data.model.query_plan import (
     PaginationCursor,
-    PaginationParams,
+    BoundedPage,
     QueryPlan,
     SortDirection,
     SortSpec,
@@ -138,7 +138,7 @@ def _feature_plan(filter_expr=None, limit=50) -> QueryPlan:
         table_kind=TableKind.FEATURE,
         feature_name=HOOK,
         filter=filter_expr,
-        pagination=PaginationParams(limit=limit),
+        pagination=BoundedPage(limit=limit),
     )
 
 
@@ -259,7 +259,7 @@ class TestFeatureCreatedAtCursor:
                 table_kind=TableKind.FEATURE,
                 feature_name=HOOK,
                 sort=sort,
-                pagination=PaginationParams(cursor=PaginationCursor(value=cursor)),
+                pagination=BoundedPage(cursor=PaginationCursor(value=cursor)),
             ),
         )
         assert [r["id"] for r in page2] == [all_rows[2]["id"]]

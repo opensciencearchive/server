@@ -120,6 +120,9 @@ async def _seed_feature(
         [{"score": float(i), "label": f"l{i}"} for i in range(n)],
         run_id,
     )
+    # Feature DML rides the caller's unit of work (#219 phase 4) — commit so
+    # the app under test (its own sessions) can see the seeded rows.
+    await session.commit()
 
 
 @pytest.fixture

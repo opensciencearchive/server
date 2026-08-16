@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import sqlalchemy as sa
 
-from osa.domain.shared.error import ConflictError, ValidationError
+from osa.domain.shared.error import ConflictError, NotFoundError, ValidationError
 from osa.domain.shared.model.hook import ColumnDef
 from osa.infrastructure.persistence.feature_store import PostgresFeatureStore
-from osa.infrastructure.persistence.feature_table import FEATURES_SCHEMA
+from osa.infrastructure.persistence.feature_table import FEATURES_SCHEMA, FeatureSchema
 
 
 _RUN_ID = "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
@@ -142,10 +142,39 @@ class TestCreateTable:
 
 
 class TestInsertFeatures:
+    """insert_features runs DML on the injected session (#219 phase 4), with
+    the table built from the feature_tables catalog — call order is
+    catalog SELECT, replace-DELETE, then insert chunks."""
+
+    @staticmethod
+    def _mock_session(feature_columns: list[str] | None = None) -> AsyncMock:
+        session = AsyncMock()
+        fschema = FeatureSchema(
+            columns=[
+                ColumnDef(name=c, json_type="number", required=False)
+                for c in (feature_columns or ["score"])
+            ]
+        )
+        catalog_result = MagicMock()
+        catalog_result.first.return_value = (fschema.model_dump(),)
+        results = [catalog_result]
+        # Subsequent calls: the replace-DELETE (rowcount consumed for the stats
+        # delta), insert chunks, the record-schema PK lookup, and the stats
+        # upsert — one generic result covers them all.
+        generic = MagicMock()
+        generic.rowcount = 0
+        generic.first.return_value = ("compound", "1.0.0")
+
+        async def _execute(*args, **kwargs):
+            return results.pop(0) if results else generic
+
+        session.execute = AsyncMock(side_effect=_execute)
+        return session
+
     @pytest.mark.asyncio
     async def test_inserts_rows(self):
-        engine, conn = _mock_engine_with_reflect("pocket_detect", ["score", "pocket_id"])
-        store = PostgresFeatureStore(engine=engine, session=AsyncMock())
+        session = self._mock_session(["score", "pocket_id"])
+        store = PostgresFeatureStore(engine=AsyncMock(), session=session)
         rows = [
             {"score": 0.95, "pocket_id": "P1"},
             {"score": 0.82, "pocket_id": "P2"},
@@ -154,41 +183,41 @@ class TestInsertFeatures:
         count = await store.insert_features("pocket_detect", "urn:rec:1", rows, _RUN_ID)
 
         assert count == 2
-        # Replace semantics (#160): one DELETE (scoped to the record) + one insert chunk.
-        assert conn.execute.call_count == 2
+        # Catalog SELECT + replace-DELETE (#160) + one insert chunk
+        # + record-schema lookup + lockstep stats upsert (#219 ph5).
+        assert session.execute.call_count == 5
 
     @pytest.mark.asyncio
     async def test_deletes_existing_rows_for_record_before_insert(self):
         """Replace-by-record: a DELETE scoped to record_srn precedes the insert (#160)."""
-        engine, conn = _mock_engine_with_reflect("pocket_detect", ["score"])
-        store = PostgresFeatureStore(engine=engine, session=AsyncMock())
+        session = self._mock_session()
+        store = PostgresFeatureStore(engine=AsyncMock(), session=session)
 
         await store.insert_features("pocket_detect", "urn:rec:1", [{"score": 0.95}], _RUN_ID)
 
-        # First execute is the DELETE; second is the insert.
-        delete_stmt = conn.execute.call_args_list[0][0][0]
-        compiled = delete_stmt.compile()
-        assert "DELETE FROM" in str(compiled)
-        assert "record_srn" in str(compiled)
+        delete_stmt = session.execute.call_args_list[1][0][0]
+        compiled = str(delete_stmt.compile())
+        assert "DELETE FROM" in compiled
+        assert "record_srn" in compiled
 
     @pytest.mark.asyncio
     async def test_empty_rows_returns_zero(self):
-        engine = AsyncMock()
-        store = PostgresFeatureStore(engine=engine, session=AsyncMock())
+        session = AsyncMock()
+        store = PostgresFeatureStore(engine=AsyncMock(), session=session)
 
         count = await store.insert_features("pocket_detect", "urn:rec:1", [], _RUN_ID)
 
         assert count == 0
+        session.execute.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_enriches_rows_with_record_srn(self):
-        engine, conn = _mock_engine_with_reflect("pocket_detect", ["score"])
-        store = PostgresFeatureStore(engine=engine, session=AsyncMock())
+        session = self._mock_session()
+        store = PostgresFeatureStore(engine=AsyncMock(), session=session)
 
         await store.insert_features("pocket_detect", "urn:rec:1", [{"score": 0.95}], _RUN_ID)
 
-        call_args = conn.execute.call_args
-        params = call_args[0][1]  # second positional arg is the params list
+        params = session.execute.call_args_list[2][0][1]
         assert len(params) == 1
         assert params[0]["record_srn"] == "urn:rec:1"
         assert params[0]["run_id"] == _RUN_ID
@@ -197,32 +226,31 @@ class TestInsertFeatures:
 
     @pytest.mark.asyncio
     async def test_chunks_large_inserts(self):
-        engine, conn = _mock_engine_with_reflect("hook", ["score"])
-        store = PostgresFeatureStore(engine=engine, session=AsyncMock())
+        session = self._mock_session()
+        store = PostgresFeatureStore(engine=AsyncMock(), session=session)
         rows = [{"score": float(i)} for i in range(2500)]
 
         count = await store.insert_features("hook", "urn:rec:1", rows, _RUN_ID)
 
         assert count == 2500
-        # 1 replace-DELETE + 3 insert chunks (1000 + 1000 + 500).
-        assert conn.execute.call_count == 4
+        # Catalog SELECT + replace-DELETE + 3 insert chunks (1000 + 1000 + 500)
+        # + record-schema lookup + stats upsert.
+        assert session.execute.call_count == 7
 
     @pytest.mark.asyncio
     async def test_single_chunk_for_small_batch(self):
-        engine, conn = _mock_engine_with_reflect("hook", ["score"])
-        store = PostgresFeatureStore(engine=engine, session=AsyncMock())
+        session = self._mock_session()
+        store = PostgresFeatureStore(engine=AsyncMock(), session=session)
         rows = [{"score": float(i)} for i in range(999)]
 
         count = await store.insert_features("hook", "urn:rec:1", rows, _RUN_ID)
 
         assert count == 999
-        # 1 replace-DELETE + 1 insert chunk.
-        assert conn.execute.call_count == 2
+        assert session.execute.call_count == 5
 
     @pytest.mark.asyncio
     async def test_insert_rejects_invalid_hook_name(self):
-        engine = AsyncMock()
-        store = PostgresFeatureStore(engine=engine, session=AsyncMock())
+        store = PostgresFeatureStore(engine=AsyncMock(), session=AsyncMock())
 
         with pytest.raises(ValidationError, match="Invalid identifier"):
             await store.insert_features("'; DROP TABLE --", "urn:rec:1", [{"score": 1}], _RUN_ID)
@@ -236,12 +264,14 @@ class TestInsertFeatures:
             await store.create_table("'; DROP TABLE --", _make_columns())
 
     @pytest.mark.asyncio
-    async def test_reflects_table_before_insert(self):
-        """insert_features reflects the real table schema instead of guessing types."""
-        engine, conn = _mock_engine_with_reflect("hook", ["score"])
-        store = PostgresFeatureStore(engine=engine, session=AsyncMock())
+    async def test_unregistered_feature_raises_not_found(self):
+        """The table is built from the feature_tables catalog — an unregistered
+        hook is a NotFoundError, never a guessed table shape."""
+        session = AsyncMock()
+        missing = MagicMock()
+        missing.first.return_value = None
+        session.execute = AsyncMock(return_value=missing)
+        store = PostgresFeatureStore(engine=AsyncMock(), session=session)
 
-        await store.insert_features("hook", "urn:rec:1", [{"score": 0.95}], _RUN_ID)
-
-        # run_sync should have been called for reflection
-        conn.run_sync.assert_called_once()
+        with pytest.raises(NotFoundError):
+            await store.insert_features("ghost_hook", "urn:rec:1", [{"score": 1.0}], _RUN_ID)

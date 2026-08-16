@@ -245,3 +245,6 @@ server/osa.yaml
 
 # MCP widget bundles staged into the server package (built from packages/osa-widgets)
 server/osa/application/api/mcp/bundles/
+
+# graphify knowledge-graph outputs (generated caches, any directory)
+graphify-out/

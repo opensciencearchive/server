@@ -78,7 +78,16 @@ records_table = Table(
 )
 
 Index("idx_records_convention_id", records_table.c.convention_id)
-Index("idx_records_schema_id", records_table.c.schema_id)
+# Serves the default table read — schema equality prefix + (published_at, srn)
+# ordering — as one (backward) index range scan, including the row-value keyset
+# predicate (#219). Subsumes the old idx_records_schema_id (left prefix).
+Index(
+    "idx_records_schema_version_published",
+    records_table.c.schema_id,
+    records_table.c.schema_version,
+    records_table.c.published_at,
+    records_table.c.srn,
+)
 # Expression must be the raw ``->>`` text accessor (NOT .as_string(), which adds a
 # redundant CAST) so it matches the bulk-publish ON CONFLICT ((source->>'type'),
 # (source->>'id')) — Postgres matches ON CONFLICT to a unique index by exact
@@ -330,6 +339,29 @@ metadata_tables_table = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False),
     UniqueConstraint("schema_id", "schema_major", name="uq_metadata_tables_id_major"),
     UniqueConstraint("pg_table", name="uq_metadata_tables_pg_table"),
+)
+
+
+# ============================================================================
+# TABLE STATISTICS (lockstep row/coverage counts, #219)
+# ============================================================================
+# One row per (schema version, table): the records table or a feature table.
+# Maintained by additive upsert INSIDE the writing adapter's transaction
+# (osa/infrastructure/persistence/statistics_upsert.py), so counts always equal
+# committed data. Absent row = zero. records_covered is NULL for the records
+# row — coverage ("records with ≥1 feature row") is a feature-table concept;
+# for records it is definitionally row_count, and storing a duplicate invites
+# drift. Only three writers exist: the lockstep upsert, the rev-B backfill
+# migration, and the admin verifier's repair path.
+table_statistics_table = Table(
+    "table_statistics",
+    metadata,
+    Column("schema_id", Text, primary_key=True),
+    Column("schema_version", Text, primary_key=True),
+    Column("table_name", Text, primary_key=True),
+    Column("row_count", BigInteger, nullable=False, server_default="0"),
+    Column("records_covered", BigInteger, nullable=True),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
 

@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from osa.domain.data.model.filter import FilterOperator, MetadataFieldRef, Predicate
 from osa.domain.data.model.query_plan import (
     PaginationCursor,
-    PaginationParams,
+    BoundedPage,
     QueryPlan,
     SortDirection,
     SortSpec,
@@ -92,7 +92,7 @@ def _records_plan(filter_expr=None, limit=50, cursor=None) -> QueryPlan:
         schema_id=SCHEMA,
         table_kind=TableKind.RECORDS,
         filter=filter_expr,
-        pagination=PaginationParams(limit=limit, cursor=cursor),
+        pagination=BoundedPage(limit=limit, cursor=cursor),
     )
 
 
@@ -259,7 +259,7 @@ class TestStreamPaginationOrder:
         plan2 = QueryPlan(
             schema_id=SCHEMA,
             table_kind=TableKind.RECORDS,
-            pagination=PaginationParams(limit=50, cursor=PaginationCursor(value=cursor)),
+            pagination=BoundedPage(limit=50, cursor=PaginationCursor(value=cursor)),
             sort=[SortSpec(column="created_at", direction=SortDirection.DESC)],
         )
         page2 = await _drain(rs, plan2)
@@ -297,7 +297,7 @@ class TestStreamPaginationOrder:
                 schema_id=SCHEMA,
                 table_kind=TableKind.RECORDS,
                 sort=sort,
-                pagination=PaginationParams(cursor=PaginationCursor(value=cursor)),
+                pagination=BoundedPage(cursor=PaginationCursor(value=cursor)),
             ),
         )
         assert [r["id"] for r in page2] == ["rec2"]
@@ -359,7 +359,7 @@ class TestMetadataDateCursor:
                 schema_id=ASSAY_SCHEMA,
                 table_kind=TableKind.RECORDS,
                 sort=sort,
-                pagination=PaginationParams(cursor=PaginationCursor(value=cursor)),
+                pagination=BoundedPage(cursor=PaginationCursor(value=cursor)),
             ),
         )
         assert [r["id"] for r in page2] == ["arec2"]

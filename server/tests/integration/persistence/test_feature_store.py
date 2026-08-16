@@ -122,6 +122,9 @@ class TestFeatureStoreInsert:
         ]
         count = await store.insert_features("insert_hook", record_srn, rows, run_id)
         assert count == 3
+        # DML rides the caller's unit of work (#219 phase 4): commit before
+        # verifying through a separate engine connection.
+        await pg_session.commit()
 
         # Verify data is in the table
         async with pg_engine.begin() as conn:
@@ -175,6 +178,7 @@ class TestFeatureStoreInsert:
             run_id,
         )
         assert second == 2
+        await pg_session.commit()
 
         async with pg_engine.begin() as conn:
             result = await conn.execute(
@@ -210,6 +214,7 @@ class TestFeatureStoreInsert:
         await store.insert_features("replace_scope_hook", srn_b, [{"score": 0.2}], run_id)
         # Redo record A — B must be untouched.
         await store.insert_features("replace_scope_hook", srn_a, [{"score": 0.5}], run_id)
+        await pg_session.commit()
 
         async with pg_engine.begin() as conn:
             result = await conn.execute(
@@ -279,3 +284,4 @@ class TestFeatureStoreJsonbColumns:
         ]
         count = await store.insert_features("jsonb_hook", record_srn, rows, run_id)
         assert count == 1
+        await pg_session.commit()

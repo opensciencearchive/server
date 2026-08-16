@@ -82,24 +82,32 @@ class DataCatalogService(Service):
         Unknown schema or table raises ``NotFoundError`` (404 before bytes).
         """
         schema_id = await self.resolve_schema(schema)
-        manifest = await self.get_schema_manifest(schema_id)
-        # TableResource.name is a plain str ("records" or a feature-table name).
-        name = (
-            "records"
-            if table_kind == TableKind.RECORDS
-            else (feature_name.root if feature_name is not None else None)
+        # Columns come straight from the schema/feature catalogs (#219): table
+        # resolution must stay O(1) as tables grow, so the manifest — which
+        # carries per-table row counts — is never built on this path. Matching
+        # stays by name AND kind by construction: the records lookup never
+        # consults features, and the feature lookup can never yield records.
+        record_columns = await self.read_store.get_record_columns(schema_id)
+        if record_columns is None:
+            raise NotFoundError(
+                f"No schema '{schema_id.render()}'. See /api/v1/data for the catalog.",
+                code="schema_not_found",
+            )
+        if table_kind == TableKind.RECORDS:
+            return ResolvedTable(schema_id=schema_id, columns=record_columns)
+        name = feature_name.root if feature_name is not None else None
+        columns = (
+            await self.read_store.get_feature_columns(schema_id, feature_name)
+            if feature_name is not None
+            else None
         )
-        resource = next(
-            (tr for tr in manifest.table_resources if tr.name == name and tr.kind == table_kind),
-            None,
-        )
-        if resource is None:
+        if columns is None:
             raise NotFoundError(
                 f"No table '{name}' on schema '{schema}'. "
                 f"See /api/v1/data/{schema_id.render()} for its table resources.",
                 code="table_not_found",
             )
-        return ResolvedTable(schema_id=schema_id, columns=resource.columns)
+        return ResolvedTable(schema_id=schema_id, columns=columns)
 
     async def get_record_by_id(self, id: RecordId, version: int | None) -> RecordSummary:
         record = await self.read_store.get_record_by_id(id, version)

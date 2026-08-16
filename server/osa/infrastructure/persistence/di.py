@@ -15,9 +15,10 @@ from osa.domain.deposition.port.storage import FileStoragePort
 from osa.domain.metadata.service.metadata import MetadataService
 from osa.domain.record.port.feature_reader import FeatureReader
 from osa.domain.record.port.repository import RecordRepository
-from osa.domain.record.port.statistics_store import StatisticsStore
+from osa.domain.data.port.statistics_store import StatisticsStore
 from osa.domain.record.query.get_record import GetRecordHandler
-from osa.domain.record.query.get_stats import GetStatsHandler
+from osa.domain.data.command.verify_statistics import VerifyTableStatisticsHandler
+from osa.domain.data.query.get_stats import GetStatsHandler
 from osa.domain.record.service import RecordService
 from osa.infrastructure.persistence.adapter.feature_reader import PostgresFeatureReader
 from osa.domain.feature.port.storage import FeatureStoragePort
@@ -223,3 +224,4 @@ class PersistenceProvider(Provider):
     # Record query handlers
     get_record_handler = provide(GetRecordHandler, scope=Scope.UOW)
     get_stats_handler = provide(GetStatsHandler, scope=Scope.UOW)
+    verify_table_statistics_handler = provide(VerifyTableStatisticsHandler, scope=Scope.UOW)

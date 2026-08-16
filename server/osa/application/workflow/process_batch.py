@@ -606,7 +606,9 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
             ingest_run_id=event.ingest_run_id,
         )
 
-        # Checkpoint C: records durable before feature inserts (separate engine + FK).
+        # Checkpoint C: a redo boundary — records durable so a crash during the
+        # feature stage replays from here. (Feature DML shares the UoW session
+        # since #219 phase 4; the old separate-engine FK ordering is gone.)
         await self.uow.commit()
         return mapping
 

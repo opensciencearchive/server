@@ -33,6 +33,7 @@ from osa.domain.data.model.filter import (
     Predicate,
 )
 from osa.domain.data.model.query_plan import (
+    BoundedPage,
     QueryPlan,
     SortDirection,
     TableKind,
@@ -147,15 +148,24 @@ class PostgresTableReadStore:
         )
 
         col_names = [c.name for c in metadata_schema.columns]
-        # ``stream()`` opens a server-side cursor. The try/finally closes it on
-        # client disconnect (the generator is thrown a CancelledError), returning
-        # the connection to the pool (research §2).
-        result = await self.session.stream(stmt)
+        if isinstance(plan.pagination, BoundedPage):
+            # LIMIT in the statement lets PG top-N / stop the index scan after
+            # limit+1 rows instead of sorting the whole joined result; at page
+            # sizes a server-side cursor is pure overhead (#219 phase 2).
+            stmt = stmt.limit(plan.pagination.limit + 1)
+            result = await self.session.execute(stmt)
+            for row in result.mappings():
+                yield self._records_row_to_mapping(row, col_names)
+            return
+        # FullStream: ``stream()`` opens a server-side cursor. The try/finally
+        # closes it on client disconnect (the generator is thrown a
+        # CancelledError), returning the connection to the pool (research §2).
+        stream_result = await self.session.stream(stmt)
         try:
-            async for row in result.mappings():
+            async for row in stream_result.mappings():
                 yield self._records_row_to_mapping(row, col_names)
         finally:
-            await result.close()
+            await stream_result.close()
 
     def _records_row_to_mapping(self, row: RowMapping, col_names: list[str]) -> dict[str, Any]:
         srn = RecordSRN.parse(row["srn"])
@@ -190,11 +200,25 @@ class PostgresTableReadStore:
             )
         page = KeysetPage(
             [
-                SortKey(sort_expr, descending=is_desc, nulls_last=True),
-                SortKey(tiebreak_expr, descending=is_desc),
+                SortKey(
+                    sort_expr,
+                    descending=is_desc,
+                    nulls_last=True,
+                    nullable=self._column_nullable(sort_expr),
+                ),
+                SortKey(tiebreak_expr, descending=is_desc, nullable=False),
             ]
         )
         return page.order_by(), self._cursor_after(plan, page, sort_expr, tiebreak_expr)
+
+    @staticmethod
+    def _column_nullable(expr: sa.ColumnElement[Any]) -> bool:
+        """A column's DDL nullability, conservatively True for non-Column
+        expressions. NOT NULL is what licenses plain ASC/DESC emission and the
+        row-value cursor predicate — both index-servable (#219 phase 3)."""
+        if isinstance(expr, sa.Column):
+            return bool(expr.nullable)
+        return True
 
     def _cursor_after(
         self,
@@ -209,10 +233,11 @@ class PostgresTableReadStore:
         coerced to their column's Python type; a non-conforming value raises
         ``ValueError`` → 400 (the cursor is client-supplied input).
         """
-        if plan.pagination.cursor is None:
+        cursor = plan.pagination.cursor if isinstance(plan.pagination, BoundedPage) else None
+        if cursor is None:
             return None
         try:
-            decoded = decode_cursor(str(plan.pagination.cursor))
+            decoded = decode_cursor(str(cursor))
             return page.after(
                 (
                     self._coerce_cursor_value(decoded["s"], sort_expr),
@@ -282,12 +307,18 @@ class PostgresTableReadStore:
             .order_by(*order_keys)
         )
 
-        result = await self.session.stream(stmt)
+        if isinstance(plan.pagination, BoundedPage):
+            stmt = stmt.limit(plan.pagination.limit + 1)
+            result = await self.session.execute(stmt)
+            for row in result.mappings():
+                yield dict(row)
+            return
+        stream_result = await self.session.stream(stmt)
         try:
-            async for row in result.mappings():
+            async for row in stream_result.mappings():
                 yield dict(row)
         finally:
-            await result.close()
+            await stream_result.close()
 
     async def _resolve_feature_table(
         self, schema_id: SchemaId, feature_name: str
@@ -325,8 +356,13 @@ class PostgresTableReadStore:
             )
         page = KeysetPage(
             [
-                SortKey(sort_expr, descending=is_desc, nulls_last=True),
-                SortKey(tiebreak_expr, descending=is_desc),
+                SortKey(
+                    sort_expr,
+                    descending=is_desc,
+                    nulls_last=True,
+                    nullable=self._column_nullable(sort_expr),
+                ),
+                SortKey(tiebreak_expr, descending=is_desc, nullable=False),
             ]
         )
         return page.order_by(), self._cursor_after(plan, page, sort_expr, tiebreak_expr)

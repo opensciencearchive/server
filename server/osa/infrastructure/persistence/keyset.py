@@ -3,7 +3,20 @@
 Derives both ORDER BY and WHERE predicate from a single sort specification
 so that NULL handling is consistent between the two.
 
-Key insight for NULLS LAST ordering:
+NULLS emission is nullability-aware (#219 phase 3): a NOT NULL sort column
+emits plain ``ASC``/``DESC`` — semantically identical when no NULLs exist, and
+textually matchable to a default btree in either scan direction (the planner
+matches orderings textually, so an explicit ``NULLS LAST`` on DESC forces a
+Sort node no index can absorb). Only genuinely nullable columns carry explicit
+``NULLS LAST``/``NULLS FIRST``.
+
+The cursor predicate follows the same split: when every key is NOT NULL and
+same-direction, the row-value form ``(k0, k1) < (:v0, :v1)`` is emitted — PG
+collapses it to a single index range scan. The OR-form (which defeats that
+collapse) is kept only where row-values are not equivalent: nullable or
+mixed-direction sorts.
+
+Key insight for NULLS LAST ordering on nullable columns:
 - Non-null cursor value: "strictly after" must include ``OR expr IS NULL``
   because NULLs sort after all non-null values.
 - Null cursor value: only the tiebreaker applies
@@ -18,7 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-from sqlalchemy import ColumnElement, UnaryExpression, and_, false, or_
+from sqlalchemy import ColumnElement, UnaryExpression, and_, false, or_, tuple_
 
 
 @dataclass(frozen=True)
@@ -28,9 +41,14 @@ class SortKey:
     expression: ColumnElement[Any]
     descending: bool = False
     nulls_last: bool = True
+    nullable: bool = True
 
     def order_clause(self) -> UnaryExpression[Any]:
         clause = self.expression.desc() if self.descending else self.expression.asc()
+        if not self.nullable:
+            # No NULLs can exist; plain ASC/DESC matches a default btree in
+            # both scan directions where an explicit NULLS clause would not.
+            return clause
         return clause.nullslast() if self.nulls_last else clause.nullsfirst()
 
 
@@ -40,8 +58,8 @@ class KeysetPage:
     Usage::
 
         page = KeysetPage([
-            SortKey(sort_expr, descending=is_desc, nulls_last=True),
-            SortKey(t.c.id, descending=is_desc),
+            SortKey(sort_expr, descending=is_desc, nullable=...),
+            SortKey(t.c.id, descending=is_desc, nullable=False),
         ])
         stmt = stmt.order_by(*page.order_by())
         if cursor:
@@ -61,6 +79,12 @@ class KeysetPage:
                 f"Cursor length {len(cursor_values)} does not match key length {len(self._keys)}"
             )
 
+        if self._row_value_eligible(cursor_values):
+            row = tuple_(*[k.expression for k in self._keys])
+            # All keys share one direction: strictly-after is a single
+            # row-wise comparison, which PG serves as one index range scan.
+            return row < cursor_values if self._keys[0].descending else row > cursor_values
+
         # Build from right to left:  for keys (k0, k1), the predicate is
         #   strictly_after(k0, v0) OR (eq(k0, v0) AND strictly_after(k1, v1))
         result: ColumnElement[Any] = false()
@@ -78,6 +102,17 @@ class KeysetPage:
                 result = or_(after_i, and_(eq_part, result))
 
         return result
+
+    def _row_value_eligible(self, cursor_values: tuple[Any, ...]) -> bool:
+        """Row-value comparison is exactly equivalent to the OR-form only when
+        NULLs are impossible (every key NOT NULL, every cursor value present)
+        and all keys scan the same direction."""
+        directions = {k.descending for k in self._keys}
+        return (
+            len(directions) == 1
+            and all(not k.nullable for k in self._keys)
+            and all(v is not None for v in cursor_values)
+        )
 
 
 def _null_eq(expr: ColumnElement[Any], value: Any) -> ColumnElement[Any]:
@@ -105,6 +140,10 @@ def _strictly_after(key: SortKey, value: Any) -> ColumnElement[Any] | None:
 
     # Cursor is at a non-null value
     gt = expr < value if key.descending else expr > value
+
+    if not key.nullable:
+        # No NULL region exists; the plain comparison is complete.
+        return gt
 
     if key.nulls_last:
         # NULLs come after all non-nulls → include them

@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     async_sessionmaker,
@@ -68,6 +68,23 @@ async def seed_record(
                 "meta": json.dumps(metadata or {}),
                 "published_at": published_at or datetime.now(UTC),
             },
+        )
+        # Mirror the production writer's lockstep statistics bump (#219): read
+        # surfaces render counts from table_statistics, so seeded records must
+        # count exactly like published ones.
+        await conn.execute(
+            text(
+                """
+                INSERT INTO table_statistics
+                    (schema_id, schema_version, table_name, row_count,
+                     records_covered, updated_at)
+                VALUES (:schema_id, :schema_version, 'records', 1, NULL, now())
+                ON CONFLICT (schema_id, schema_version, table_name)
+                DO UPDATE SET row_count = table_statistics.row_count + 1,
+                              updated_at = now()
+                """
+            ),
+            {"schema_id": schema_id, "schema_version": schema_version},
         )
 
 
@@ -129,6 +146,24 @@ async def pg_engine():
 
 
 @pytest_asyncio.fixture
+async def captured_sql(pg_engine: AsyncEngine):
+    """Record every SQL statement the test's engine emits (#219).
+
+    Yields a mutable list of statement strings; ``.clear()`` it after the
+    arrange phase so assertions see only the act phase. Backs the request-path
+    tripwires: zero ``count(`` statements, ``LIMIT`` present on bounded reads.
+    """
+    statements: list[str] = []
+
+    def _capture(conn, cursor, statement, parameters, context, executemany) -> None:
+        statements.append(statement)
+
+    event.listen(pg_engine.sync_engine, "before_cursor_execute", _capture)
+    yield statements
+    event.remove(pg_engine.sync_engine, "before_cursor_execute", _capture)
+
+
+@pytest_asyncio.fixture
 async def pg_session(pg_engine: AsyncEngine):
     """Per-test session with TRUNCATE cleanup."""
     factory = async_sessionmaker(pg_engine, expire_on_commit=False)
@@ -146,7 +181,7 @@ async def pg_session(pg_engine: AsyncEngine):
                 "TRUNCATE TABLE depositions, conventions, schemas, ontologies, "
                 "ontology_terms, events, deliveries, records, validation_runs, "
                 "feature_tables, metadata_tables, hooks, hook_releases, hook_runs, "
-                "users, identities, refresh_tokens, "
+                "table_statistics, users, identities, refresh_tokens, "
                 "role_assignments CASCADE"
             )
         )

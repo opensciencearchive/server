@@ -19,7 +19,7 @@ from osa.domain.data.model.filter import FilterExpr
 from osa.domain.data.model.manifest import ColumnSpec
 from osa.domain.data.model.query_plan import (
     PaginationCursor,
-    PaginationParams,
+    BoundedPage,
     QueryPlan,
     SortSpec,
     TableKind,
@@ -75,16 +75,17 @@ class DataViewService(Service):
             schema, table_kind, feature_name=feature_name
         )
         self._check_required_columns(resolved.columns, require_columns)
+        page = BoundedPage.clamped(
+            cursor=PaginationCursor(value=cursor) if cursor else None,
+            limit=limit,
+            max_limit=self.config.data.max_page_limit,
+        )
         plan = QueryPlan(
             schema_id=resolved.schema_id,
             table_kind=table_kind,
             feature_name=feature_name,
             filter=filter,
-            pagination=PaginationParams.clamped(
-                cursor=PaginationCursor(value=cursor) if cursor else None,
-                limit=limit,
-                max_limit=self.config.data.max_page_limit,
-            ),
+            pagination=page,
             sort=list(sort),
         )
         if table_kind == TableKind.RECORDS:
@@ -98,7 +99,7 @@ class DataViewService(Service):
                 table=table,
                 filter=filter,
                 sort=list(sort),
-                limit=plan.pagination.limit,
+                limit=page.limit,
             ),
             columns=resolved.columns,
             rows=[self._render_row(row, resolved.columns) for row in slice_.rows],
