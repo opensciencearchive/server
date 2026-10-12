@@ -55,9 +55,9 @@ dev-detached:
 dev-down:
     docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml down
 
-# Open the web UI in browser
+# Open the management dashboard in browser
 open-ui:
-    open http://localhost:8080
+    open http://localhost:8081
 
 # === Widgets (MCP Apps UI bundles) ===
 
@@ -76,28 +76,15 @@ widgets-test:
 
 # === Code Quality ===
 
-# Lint all code (server + web)
+# Lint all code
 lint:
     cd server && just lint
-    cd web && pnpm lint
 
 # === Individual Service Development ===
 
 # Run server independently (requires database)
 server-dev:
     cd server && just dev
-
-# Run web frontend independently
-web-dev:
-    cd web && pnpm dev
-
-# Build web frontend for production
-web-build:
-    cd web && pnpm build
-
-# Lint web frontend code
-web-lint:
-    cd web && pnpm lint
 
 # === Seed ===
 

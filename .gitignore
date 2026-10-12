@@ -228,12 +228,6 @@ server/.ruff_cache/
 server/__pycache__/
 server/*.egg-info/
 
-# Monorepo - Web specific
-web/node_modules/
-web/.next/
-web/.env.local
-web/.turbo/
-
 # Docker
 .docker/
 

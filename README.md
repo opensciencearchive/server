@@ -172,7 +172,7 @@ Working on the server or dashboard itself:
 ```bash
 git clone https://github.com/opensciencearchive/server.git
 cd server
-just dev    # Postgres + server + dashboard + web, with hot-reload
+just dev    # Postgres + server + dashboard, with hot-reload
 ```
 
 Server tests: `cd server && just test`. Lint and type check: `just lint`.
@@ -192,11 +192,8 @@ Dashboard: `just dashboard dev`, `just dashboard test`.
 │   └── dashboard/           # Next.js management dashboard (operator UI)
 ├── packages/
 │   └── osa-widgets/         # MCP Apps interactive UI bundles
-├── web/                     # Next.js public archive site (deposit/search/record)
 └── deploy/                  # Docker Compose orchestration
 ```
-
-> The `web/` public site is currently out of date. It builds under `just dev` here, but is **not** started by `osa start`. It sits behind a `web` Compose profile there, so the default self-host stack is server + dashboard.
 
 ## Demos
 
