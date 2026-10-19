@@ -34,19 +34,3 @@ services:
       timeout: 5s
       start_period: 30s
       retries: 3
-
-  web:
-    build:
-      context: ../web
-      dockerfile: Dockerfile
-      target: deps
-    volumes:
-      - ../web:/app
-      - /app/node_modules
-      - /app/.next
-    environment:
-      API_URL: http://server:8000
-    ports:
-      - "3000:3000"
-    entrypoint: []
-    command: ["pnpm", "dev"]

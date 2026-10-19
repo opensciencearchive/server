@@ -68,21 +68,6 @@ services:
       start_period: 5s
     restart: unless-stopped
 
-  web:
-    build:
-      context: ../web
-      dockerfile: Dockerfile
-      args:
-        API_URL: http://server:8000
-    environment:
-      API_URL: http://server:8000
-    ports:
-      - "${WEB_PORT:-8080}:3000"
-    depends_on:
-      server:
-        condition: service_healthy
-    restart: unless-stopped
-
   # Self-hostable management dashboard (issue #173). Node BFF: it verifies the
   # dashboard credential, mints a SUPERADMIN archive token signed with the
   # SHARED JWT_SECRET, and proxies authenticated reads to the server.
