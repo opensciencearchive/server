@@ -10,7 +10,7 @@ is the restart *trigger*; durable domain state is the restart *position*). The
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import ClassVar, assert_never
+from typing import Any, ClassVar, assert_never
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from osa.domain.deposition.model.convention import Convention
@@ -23,6 +23,7 @@ from osa.domain.ingest.event.events import (
     IngesterBatchReady,
     NextBatchRequested,
 )
+from osa.domain.ingest.model.continuation import BatchWindow, Continuation
 from osa.domain.ingest.model.ingest_run import Applied, IngestRun, IngestStatus, RunClosed
 from osa.domain.ingest.model.ingester_record import IngesterRecord
 from osa.domain.ingest.port.storage import IngestStoragePort
@@ -33,6 +34,7 @@ from osa.domain.shared.error import NotFoundError, PermanentError, TransientErro
 from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.failure import (
     AbortRun,
+    FailureKind,
     FailurePolicy,
     GiveUp,
     PriorAttempts,
@@ -252,6 +254,8 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
                 files_dir=files_dir,
                 work_dir=work_dir,
             )
+            continuation = Continuation(before=session, after=output.session)
+            await self._guard_progress(event, continuation, output.records)
         except RuntimeFailure as failure:
             # The runner reports facts; the policy decides; we execute the verb.
             # Ingester Jobs have no memory-bump lever, so PriorAttempts carries
@@ -337,11 +341,13 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
             )
         )
         log.info(
-            "[{short_id}] batch {batch_index}: pulled {record_count} records (has_more={has_more})",
+            "[{short_id}] batch {batch_index}: pulled {record_count} records "
+            "(has_more={has_more}, session={session})",
             short_id=event.ingest_run_id[:8],
             batch_index=batch_index,
             record_count=len(output.records),
             has_more=has_more,
+            session=continuation.fingerprint,
             ingest_run_id=event.ingest_run_id,
         )
         if has_more:
@@ -359,6 +365,50 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
         # batch is emitted exactly once and the ingest skip guard is armed with it.
         await self.uow.commit()
         return False
+
+    async def _guard_progress(
+        self,
+        event: NextBatchRequested,
+        continuation: Continuation,
+        records: list[dict[str, Any]],
+    ) -> None:
+        """Raise ``NO_PROGRESS`` when this batch provably repeats the previous one (#227).
+
+        Continuation comes from the session alone, so an ingester that hands
+        back the state it was given will be handed it again: with the same
+        session and the same limit, the next pull is byte-identical and the run
+        cannot advance. The window check confirms it against the previous
+        batch's persisted records, so an ingester whose session is a constant
+        marker but whose records do advance (a draining queue) is left alone.
+
+        Raised as a :class:`RuntimeFailure` so the #152 path decides the blast
+        radius: the policy maps ``NO_PROGRESS`` to ``AbortRun``, and the caller's
+        existing handler records the reason on the run. Runs before anything
+        durable is written, so a stalled batch is neither counted nor enqueued.
+        """
+        # Batch 0 has no predecessor to compare against. Reachable when a crash
+        # between write_session and mark_batch_ingested re-drives the first batch
+        # with a session already on disk; batch 1 catches a genuine stall anyway.
+        if event.batch_index < 1 or not continuation.unchanged:
+            return
+
+        window = BatchWindow.of(IngesterRecord.from_dicts(records))
+        previous = BatchWindow.of(
+            IngesterRecord.from_dicts(
+                await self.ingest_storage.read_records(event.ingest_run_id, event.batch_index - 1)
+            )
+        )
+        if not window.repeats(previous):
+            return
+
+        raise RuntimeFailure(
+            FailureKind.NO_PROGRESS,
+            f"ingester returned the same continuation state it was given "
+            f"(session {continuation.fingerprint}) and re-emitted the same "
+            f"{len(window.source_ids)} upstream ids, so the next pull would be "
+            f"identical. Continuation comes from ctx.set_session(...): advance the "
+            f"state you pass it, and stop setting it on the final batch.",
+        )
 
     async def _hooks_recorded(self, event: NextBatchRequested, hooks: list[HookName]) -> bool:
         """True iff every hook's deterministic run row exists (hooks concluded).

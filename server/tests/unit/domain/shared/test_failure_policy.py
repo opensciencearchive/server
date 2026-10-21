@@ -50,6 +50,27 @@ class TestEnvironmentalFailuresAbortTheRun:
         assert isinstance(decision, AbortRun)
 
 
+class TestNonProgressAbortsTheRun:
+    """A stalled ingester is a contract violation, not an environment fault (#227).
+
+    Every further batch would repeat the one that stalled, so the blast radius
+    is the whole run — not the batch. A GiveUp here would leave the loop running.
+    """
+
+    def test_no_progress_aborts_run(self) -> None:
+        failure = RuntimeFailure(
+            FailureKind.NO_PROGRESS,
+            "ingester returned the same continuation state it was given",
+        )
+
+        decision = _policy().decide(failure, FRESH)
+
+        assert decision == AbortRun(
+            reason="ingester returned the same continuation state it was given",
+            kind=FailureKind.NO_PROGRESS,
+        )
+
+
 class TestOomIsRemediatedThenGivenUp:
     """OOM retries with more memory until the bump budget is spent — no
     'permanent error secretly intercepted' any more."""

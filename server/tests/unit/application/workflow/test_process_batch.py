@@ -48,6 +48,7 @@ from osa.domain.validation.model.hook_result import HookExecution, HookStatus
 from osa.domain.validation.model.hook_run import HookRun, HookRunId, HookRunStatus
 
 _T0 = datetime(2026, 1, 1, tzinfo=UTC)
+_UNSET = object()
 
 
 # ── Recording test doubles ───────────────────────────────────────────────────
@@ -222,6 +223,10 @@ def _make_handler(
     hooks_done: bool = False,
     has_capacity: bool = True,
     records=None,  # noqa: ANN001
+    session_before: dict | None = None,
+    output_session=_UNSET,  # noqa: ANN001
+    ingester_records=None,  # noqa: ANN001
+    stored_records: dict[int, list] | None = None,
 ) -> ProcessBatch:
     run = run if run is not None else _make_run()
     if executions is None:
@@ -258,16 +263,32 @@ def _make_handler(
     if runner_failure is not None:
         ingester_runner.run.side_effect = runner_failure
     else:
+        pulled = (
+            ingester_records
+            if ingester_records is not None
+            else [{"source_id": "rec-1", "metadata": {}}]
+        )
         output = IngesterOutput(
-            records=[{"source_id": "rec-1", "metadata": {}}],
-            session={"cursor": "next"} if has_more else None,
+            records=pulled,
+            session=(
+                ({"cursor": "next"} if has_more else None)
+                if output_session is _UNSET
+                else output_session
+            ),
             files_dir=Path("/tmp/files"),
         )
         ingester_runner.run.side_effect = _logged(timeline, "ingest_run", output)
 
     ingest_storage = AsyncMock()
-    ingest_storage.read_session.return_value = None
-    ingest_storage.read_records.return_value = records
+    ingest_storage.read_session.return_value = session_before
+    if stored_records is None:
+        ingest_storage.read_records.return_value = records
+    else:
+
+        async def _read_records(_run_id, batch_index):  # noqa: ANN001, ANN202
+            return stored_records.get(batch_index, records)
+
+        ingest_storage.read_records.side_effect = _read_records
     ingest_storage.write_hook_log.return_value = "/data/log"
     # Sync locator methods return Paths (not coroutines) so path arithmetic works.
     ingest_storage.batch_work_dir = MagicMock(return_value=Path("/tmp/work"))
@@ -517,6 +538,128 @@ class TestIngestLimitEarlyExit:
         handler.ingest_service.close_sourcing.assert_awaited_once_with("run-1")
         handler.ingester_runner.run.assert_not_called()
         handler.hook_service.run_hooks_for_batch.assert_not_called()
+
+
+class TestNonProgressGuard:
+    """An ingester that re-emits its window without advancing dooms the run (#227).
+
+    Continuation comes from ``ctx.set_session``, so handing back the state you
+    were given guarantees the next pull is identical. Before #227 nothing
+    detected that: the reported run executed 921 batches over several hours,
+    re-pulling the same 1,000 records and publishing 0 each time.
+    """
+
+    @staticmethod
+    def _stalling(**overrides) -> ProcessBatch:  # noqa: ANN003
+        """A batch 1 that hands back batch 0's session and batch 0's window."""
+        session = {"offset": 1000, "total": 7600}
+        kwargs = dict(
+            session_before=dict(session),
+            output_session=dict(session),
+            ingester_records=[{"source_id": "rec-1", "metadata": {}}],
+            stored_records={0: [{"source_id": "rec-1", "metadata": {}}]},
+        )
+        kwargs.update(overrides)
+        return _make_handler(**kwargs)
+
+    @pytest.mark.asyncio
+    async def test_repeated_window_with_unchanged_session_aborts_the_run(self) -> None:
+        handler = self._stalling()
+
+        await handler.handle(_make_event(batch_index=1))
+
+        kwargs = handler.ingest_service.abort_run.await_args.kwargs
+        assert kwargs["kind"] == FailureKind.NO_PROGRESS
+
+    @pytest.mark.asyncio
+    async def test_abort_reason_names_the_cause_and_the_remedy(self) -> None:
+        handler = self._stalling()
+
+        await handler.handle(_make_event(batch_index=1))
+
+        reason = handler.ingest_service.abort_run.await_args.kwargs["reason"]
+        assert "ctx.set_session" in reason
+
+    @pytest.mark.asyncio
+    async def test_stalled_batch_enqueues_nothing(self) -> None:
+        handler = self._stalling()
+
+        await handler.handle(_make_event(batch_index=1))
+
+        # The loop is the bug: a stalled batch must not request another.
+        assert not any(isinstance(e, NextBatchRequested) for e in _emitted(handler))
+        assert not any(isinstance(e, IngesterBatchReady) for e in _emitted(handler))
+
+    @pytest.mark.asyncio
+    async def test_stalled_batch_is_not_counted_or_persisted(self) -> None:
+        handler = self._stalling()
+
+        await handler.handle(_make_event(batch_index=1))
+
+        handler.ingest_service.mark_batch_ingested.assert_not_awaited()
+        handler.ingest_storage.write_records.assert_not_awaited()
+        handler.ingest_storage.write_session.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_stalled_batch_runs_no_hooks_and_publishes_nothing(self) -> None:
+        handler = self._stalling()
+
+        await handler.handle(_make_event(batch_index=1))
+
+        handler.hook_service.run_hooks_for_batch.assert_not_called()
+        handler.record_service.bulk_publish.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_advancing_session_continues(self) -> None:
+        handler = self._stalling(
+            session_before={"offset": 1000},
+            output_session={"offset": 2000},
+        )
+
+        await handler.handle(_make_event(batch_index=1))
+
+        handler.ingest_service.abort_run.assert_not_awaited()
+        assert any(isinstance(e, NextBatchRequested) for e in _emitted(handler))
+
+    @pytest.mark.asyncio
+    async def test_unchanged_session_with_new_records_continues(self) -> None:
+        # A draining queue keeps a constant session marker and still advances;
+        # the window is what distinguishes it from a loop.
+        handler = self._stalling(
+            ingester_records=[{"source_id": "rec-2", "metadata": {}}],
+        )
+
+        await handler.handle(_make_event(batch_index=1))
+
+        handler.ingest_service.abort_run.assert_not_awaited()
+        assert any(isinstance(e, NextBatchRequested) for e in _emitted(handler))
+
+    @pytest.mark.asyncio
+    async def test_first_batch_never_stalls(self) -> None:
+        handler = _make_handler(session_before=None, output_session={"offset": 1000})
+
+        await handler.handle(_make_event(batch_index=0))
+
+        handler.ingest_service.abort_run.assert_not_awaited()
+        handler.ingest_storage.read_records.assert_any_await("run-1", 0)
+
+    @pytest.mark.asyncio
+    async def test_final_batch_without_session_completes(self) -> None:
+        handler = _make_handler(session_before={"offset": 7000}, output_session=None)
+
+        await handler.handle(_make_event(batch_index=7))
+
+        handler.ingest_service.abort_run.assert_not_awaited()
+        assert not any(isinstance(e, NextBatchRequested) for e in _emitted(handler))
+
+    @pytest.mark.asyncio
+    async def test_empty_pull_with_unchanged_session_is_not_a_stall(self) -> None:
+        # Nothing pulled ends the run through has_more; it is not a loop.
+        handler = self._stalling(ingester_records=[], stored_records={0: []})
+
+        await handler.handle(_make_event(batch_index=1))
+
+        handler.ingest_service.abort_run.assert_not_awaited()
 
 
 class TestMarkBatchIngestedRunClosed:
