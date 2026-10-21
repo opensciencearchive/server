@@ -227,3 +227,59 @@ class TestBatchFailureAccounting:
         assert completed is True
         assert run.status == IngestStatus.COMPLETED
         assert run.completed_at == now
+
+
+class TestRecordLimitArithmetic:
+    """The run limit counts records actually sourced, not batches times batch_size.
+
+    The old estimate assumed every batch filled, and batches routinely don't:
+    the SDK entrypoint silently skips records whose files exceed max_file_mb,
+    and the last batch of a limited run is capped short. So the estimate ran
+    ahead of reality and the run stopped early — `--limit 250` could yield 170
+    records with nothing in the log to explain the shortfall (#227).
+    """
+
+    def test_records_sourced_defaults_to_zero(self) -> None:
+        assert _make_run().records_sourced == 0
+
+    def test_unlimited_run_always_asks_for_a_full_batch(self) -> None:
+        run = _make_run(batch_size=100, limit=None, records_sourced=5000)
+        assert run.next_batch_limit() == 100
+
+    def test_limit_caps_the_final_batch(self) -> None:
+        run = _make_run(batch_size=100, limit=250, records_sourced=200)
+        assert run.next_batch_limit() == 50
+
+    def test_underfilled_batches_do_not_shrink_the_next_batch(self) -> None:
+        # Three batches of 60 against a 250 limit: 180 sourced, so the next
+        # batch may still be a full 70. The batch-count estimate would have
+        # said 300 sourced and stopped the run.
+        run = _make_run(batch_size=100, limit=250, batches_ingested=3, records_sourced=180)
+        assert run.next_batch_limit() == 70
+
+    def test_limit_not_reached_while_underfilled(self) -> None:
+        run = _make_run(batch_size=100, limit=250, batches_ingested=3, records_sourced=180)
+        assert run.limit_reached is False
+
+    def test_limit_reached_on_exact_count(self) -> None:
+        run = _make_run(batch_size=100, limit=250, records_sourced=250)
+        assert run.limit_reached is True
+
+    def test_limit_reached_when_overshot(self) -> None:
+        run = _make_run(batch_size=100, limit=250, records_sourced=260)
+        assert run.limit_reached is True
+
+    def test_unlimited_run_never_reaches_its_limit(self) -> None:
+        assert _make_run(limit=None, records_sourced=10**6).limit_reached is False
+
+    def test_limit_met_after_counts_the_batch_in_hand(self) -> None:
+        run = _make_run(batch_size=100, limit=250, records_sourced=180)
+        assert run.limit_met_after(70) is True
+        assert run.limit_met_after(60) is False
+
+    def test_unlimited_run_is_never_met(self) -> None:
+        assert _make_run(limit=None, records_sourced=0).limit_met_after(10**6) is False
+
+    def test_exhausted_limit_asks_for_nothing(self) -> None:
+        run = _make_run(batch_size=100, limit=250, records_sourced=250)
+        assert run.next_batch_limit() == 0

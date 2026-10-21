@@ -118,6 +118,7 @@ def _make_run(
     *,
     batches_ingested: int = 0,
     limit: int | None = None,
+    records_sourced: int = 0,
 ) -> IngestRun:
     return IngestRun(
         id=IngestRunId("run-1"),
@@ -127,6 +128,7 @@ def _make_run(
         batch_size=100,
         batches_ingested=batches_ingested,
         limit=limit,
+        records_sourced=records_sourced,
         started_at=_T0,
     )
 
@@ -529,8 +531,8 @@ class TestIngestSkip:
 class TestIngestLimitEarlyExit:
     @pytest.mark.asyncio
     async def test_limit_met_finishes_ingestion_and_stops(self) -> None:
-        # batches_ingested * batch_size already meets the limit.
-        run = _make_run(batches_ingested=1, limit=100)
+        # The records actually sourced already meet the limit.
+        run = _make_run(batches_ingested=1, limit=100, records_sourced=100)
         handler = _make_handler(run=run)
 
         await handler.handle(_make_event(batch_index=1))
@@ -538,6 +540,68 @@ class TestIngestLimitEarlyExit:
         handler.ingest_service.close_sourcing.assert_awaited_once_with("run-1")
         handler.ingester_runner.run.assert_not_called()
         handler.hook_service.run_hooks_for_batch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_underfilled_batches_do_not_end_a_limited_run_early(self) -> None:
+        """Three batches of 60 against a 250 limit must keep sourcing (#227).
+
+        The old estimate read batches_ingested * batch_size = 300 and closed
+        sourcing at 180 records actually pulled — a silent shortfall. Batches
+        underfill routinely: the SDK skips records over max_file_mb.
+        """
+        run = _make_run(batches_ingested=3, limit=250, records_sourced=180)
+        handler = _make_handler(run=run)
+
+        await handler.handle(_make_event(batch_index=3))
+
+        handler.ingest_service.close_sourcing.assert_not_awaited()
+        handler.ingester_runner.run.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_remaining_limit_caps_the_batch_it_asks_for(self) -> None:
+        run = _make_run(batches_ingested=3, limit=250, records_sourced=180)
+        handler = _make_handler(run=run)
+
+        await handler.handle(_make_event(batch_index=3))
+
+        inputs = handler.ingester_runner.run.call_args.kwargs["inputs"]
+        assert inputs.limit == 70
+
+    @pytest.mark.asyncio
+    async def test_batch_count_is_reported_with_the_records_it_sourced(self) -> None:
+        run = _make_run(batches_ingested=3, limit=250, records_sourced=180)
+        handler = _make_handler(
+            run=run,
+            ingester_records=[{"source_id": f"rec-{i}", "metadata": {}} for i in range(70)],
+        )
+
+        await handler.handle(_make_event(batch_index=3))
+
+        kwargs = handler.ingest_service.mark_batch_ingested.await_args.kwargs
+        assert kwargs["record_count"] == 70
+
+    @pytest.mark.asyncio
+    async def test_has_more_closes_when_the_pulled_records_meet_the_limit(self) -> None:
+        run = _make_run(batches_ingested=3, limit=250, records_sourced=180)
+        handler = _make_handler(
+            run=run,
+            ingester_records=[{"source_id": f"rec-{i}", "metadata": {}} for i in range(70)],
+        )
+
+        await handler.handle(_make_event(batch_index=3))
+
+        ready = next(e for e in _emitted(handler) if isinstance(e, IngesterBatchReady))
+        assert ready.has_more is False
+        assert not any(isinstance(e, NextBatchRequested) for e in _emitted(handler))
+
+    @pytest.mark.asyncio
+    async def test_unlimited_run_asks_for_a_full_batch(self) -> None:
+        handler = _make_handler(run=_make_run(batches_ingested=9, records_sourced=137))
+
+        await handler.handle(_make_event(batch_index=9))
+
+        inputs = handler.ingester_runner.run.call_args.kwargs["inputs"]
+        assert inputs.limit == 100
 
 
 class TestNonProgressGuard:
@@ -1026,9 +1090,9 @@ class TestFinalAndLimitedBatches:
     @pytest.mark.asyncio
     async def test_limit_reached_exactly_stops_chaining(self) -> None:
         # The ingester returns records + a session (would normally chain), but
-        # completing THIS batch reaches the run's limit exactly, so has_more is
+        # the records in hand reach the run's limit exactly, so has_more is
         # forced False: ingestion is latched finished and no next batch requested.
-        handler = _make_handler(run=_make_run(batches_ingested=0, limit=100))
+        handler = _make_handler(run=_make_run(batches_ingested=0, limit=1))
 
         await handler.handle(_make_event(batch_index=0))
 
@@ -1042,7 +1106,7 @@ class TestFinalAndLimitedBatches:
         # A redelivered request for a batch whose limit is already met: sourcing
         # is closed and the handler exits before touching the ingester or any
         # downstream stage.
-        run = _make_run(batches_ingested=1, limit=100)
+        run = _make_run(batches_ingested=1, limit=100, records_sourced=100)
         handler = _make_handler(run=run)
 
         await handler.handle(_make_event(batch_index=1))

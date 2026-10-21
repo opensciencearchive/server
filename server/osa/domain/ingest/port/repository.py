@@ -50,14 +50,21 @@ class IngestRunRepository(Port, Protocol):
 
     @abstractmethod
     async def mark_batch_ingested(
-        self, id: IngestRunId, batch_index: int, *, ingestion_finished: bool
+        self,
+        id: IngestRunId,
+        batch_index: int,
+        *,
+        ingestion_finished: bool,
+        record_count: int,
     ) -> RunUpdate:
-        """Idempotently record that batch ``batch_index`` was sourced (#160).
+        """Idempotently record that batch ``batch_index`` sourced ``record_count`` records.
 
         Sets ``batches_ingested = max(batches_ingested, batch_index + 1)`` and
         latches ``ingestion_finished = ingestion_finished OR :flag``, so a
         duplicate delivery (same index) is a harmless no-op and a counter that
-        already ran ahead is never rolled back. Guarded to non-terminal runs:
+        already ran ahead is never rolled back (#160). ``records_sourced`` rides
+        the same advance guard, so it tracks the records actually pulled without
+        double-counting a redelivery (#227). Guarded to non-terminal runs:
         ``Applied`` (with the run), ``RunClosed`` when already terminal;
         raises ``NotFoundError`` if the run is missing.
         """

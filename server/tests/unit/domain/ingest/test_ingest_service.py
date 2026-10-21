@@ -221,11 +221,13 @@ class TestMarkBatchIngested:
         expected = Applied(run=MagicMock())
         service.ingest_repo.mark_batch_ingested.return_value = expected
 
-        result = await service.mark_batch_ingested(IngestRunId("run-1"), 3, ingestion_finished=True)
+        result = await service.mark_batch_ingested(
+            IngestRunId("run-1"), 3, ingestion_finished=True, record_count=42
+        )
 
         assert result is expected
         service.ingest_repo.mark_batch_ingested.assert_awaited_once_with(
-            "run-1", 3, ingestion_finished=True
+            "run-1", 3, ingestion_finished=True, record_count=42
         )
 
     @pytest.mark.asyncio
@@ -236,7 +238,7 @@ class TestMarkBatchIngested:
         service.ingest_repo.mark_batch_ingested.return_value = RunClosed()
 
         result = await service.mark_batch_ingested(
-            IngestRunId("run-1"), 0, ingestion_finished=False
+            IngestRunId("run-1"), 0, ingestion_finished=False, record_count=0
         )
 
         assert isinstance(result, RunClosed)

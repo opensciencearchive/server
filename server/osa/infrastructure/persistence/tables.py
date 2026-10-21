@@ -422,6 +422,8 @@ ingest_runs_table = Table(
     Column("published_count", Integer, nullable=False, server_default=text("0")),
     Column("batch_size", Integer, nullable=False, server_default=text("1000")),
     Column("record_limit", Integer, nullable=True),
+    # Records the ingester actually handed over — what the run limit counts (#227).
+    Column("records_sourced", Integer, nullable=False, server_default=text("0")),
     Column("batches_failed", Integer, nullable=False, server_default=text("0")),
     Column("started_at", DateTime(timezone=True), nullable=False),
     Column("completed_at", DateTime(timezone=True), nullable=True),

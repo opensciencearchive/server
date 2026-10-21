@@ -216,21 +216,19 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
         batch_index = event.batch_index
         session = await self.ingest_storage.read_session(event.ingest_run_id)
 
-        effective_batch_limit = run.batch_size
-        if run.limit is not None:
-            ingested_so_far = run.batches_ingested * run.batch_size
-            remaining = run.limit - ingested_so_far
-            if remaining <= 0:
-                log.warn(
-                    "Ignoring redelivered NextBatchRequested — limit already met "
-                    "(batches_ingested={batches_ingested}, limit={limit})",
-                    batches_ingested=run.batches_ingested,
-                    limit=run.limit,
-                    ingest_run_id=event.ingest_run_id,
-                )
-                await self.ingest_service.close_sourcing(event.ingest_run_id)
-                return True
-            effective_batch_limit = min(run.batch_size, remaining)
+        # The limit counts records actually sourced, never batches × batch_size:
+        # underfilled batches made that estimate run ahead and end the run early (#227).
+        if run.limit_reached:
+            log.warn(
+                "Ignoring redelivered NextBatchRequested — limit already met "
+                "(records_sourced={records_sourced}, limit={limit})",
+                records_sourced=run.records_sourced,
+                limit=run.limit,
+                ingest_run_id=event.ingest_run_id,
+            )
+            await self.ingest_service.close_sourcing(event.ingest_run_id)
+            return True
+        effective_batch_limit = run.next_batch_limit()
 
         inputs = IngesterInputs(
             convention_id=convention.id,
@@ -313,14 +311,15 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
             await self.ingest_storage.write_session(event.ingest_run_id, output.session)
 
         has_more = output.session is not None and len(output.records) > 0
-        if has_more and run.limit is not None:
-            total_sourced = (run.batches_ingested + 1) * run.batch_size
-            if total_sourced >= run.limit:
-                has_more = False
+        if has_more and run.limit_met_after(len(output.records)):
+            has_more = False
 
         # Idempotent counter advance keyed on THIS batch index (redelivery-safe).
         match await self.ingest_service.mark_batch_ingested(
-            event.ingest_run_id, batch_index, ingestion_finished=not has_more
+            event.ingest_run_id,
+            batch_index,
+            ingestion_finished=not has_more,
+            record_count=len(output.records),
         ):
             case RunClosed():
                 log.warn(

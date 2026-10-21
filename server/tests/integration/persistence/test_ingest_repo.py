@@ -192,11 +192,15 @@ class TestMarkBatchIngested:
         run.batches_ingested = 0
         await repo.save(run)
 
-        result = await repo.mark_batch_ingested("ing-mb1", 0, ingestion_finished=False)
+        result = await repo.mark_batch_ingested(
+            "ing-mb1", 0, ingestion_finished=False, record_count=60
+        )
 
         assert isinstance(result, Applied)
         assert result.run.batches_ingested == 1
         assert result.run.ingestion_finished is False
+        # The records actually pulled, not batches × batch_size (#227).
+        assert result.run.records_sourced == 60
 
     async def test_idempotent_on_repeat_with_same_index(self, pg_session: AsyncSession, release_id):
         repo = PostgresIngestRunRepository(pg_session)
@@ -204,14 +208,21 @@ class TestMarkBatchIngested:
         run.batches_ingested = 0
         await repo.save(run)
 
-        first = await repo.mark_batch_ingested("ing-mb2", 3, ingestion_finished=False)
-        second = await repo.mark_batch_ingested("ing-mb2", 3, ingestion_finished=False)
+        first = await repo.mark_batch_ingested(
+            "ing-mb2", 3, ingestion_finished=False, record_count=60
+        )
+        second = await repo.mark_batch_ingested(
+            "ing-mb2", 3, ingestion_finished=False, record_count=60
+        )
 
         assert isinstance(first, Applied)
         assert isinstance(second, Applied)
         # GREATEST(4, 4) = 4 — the duplicate delivery does not double-count.
         assert first.run.batches_ingested == 4
         assert second.run.batches_ingested == 4
+        # records_sourced rides the same advance predicate, so neither does it (#227).
+        assert first.run.records_sourced == 60
+        assert second.run.records_sourced == 60
 
     async def test_never_rolls_back_a_counter_that_ran_ahead(
         self, pg_session: AsyncSession, release_id
@@ -222,10 +233,15 @@ class TestMarkBatchIngested:
         run.batches_ingested = 5
         await repo.save(run)
 
-        result = await repo.mark_batch_ingested("ing-mb3", 1, ingestion_finished=False)
+        result = await repo.mark_batch_ingested(
+            "ing-mb3", 1, ingestion_finished=False, record_count=60
+        )
 
         assert isinstance(result, Applied)
         assert result.run.batches_ingested == 5  # GREATEST(5, 2) = 5
+        # The late delivery's records are not counted either — the run already
+        # counted that batch when it first advanced past it.
+        assert result.run.records_sourced == 0
 
     async def test_ingestion_finished_latches_true(self, pg_session: AsyncSession, release_id):
         repo = PostgresIngestRunRepository(pg_session)
@@ -233,12 +249,16 @@ class TestMarkBatchIngested:
         run.batches_ingested = 0
         await repo.save(run)
 
-        finished = await repo.mark_batch_ingested("ing-mb4", 0, ingestion_finished=True)
+        finished = await repo.mark_batch_ingested(
+            "ing-mb4", 0, ingestion_finished=True, record_count=1
+        )
         assert isinstance(finished, Applied)
         assert finished.run.ingestion_finished is True
 
         # A later call with the flag False must NOT reset the latch.
-        again = await repo.mark_batch_ingested("ing-mb4", 1, ingestion_finished=False)
+        again = await repo.mark_batch_ingested(
+            "ing-mb4", 1, ingestion_finished=False, record_count=1
+        )
         assert isinstance(again, Applied)
         assert again.run.ingestion_finished is True
 
@@ -252,7 +272,9 @@ class TestMarkBatchIngested:
             completed_at=datetime.now(UTC),
         )
 
-        result = await repo.mark_batch_ingested("ing-mb5", 9, ingestion_finished=True)
+        result = await repo.mark_batch_ingested(
+            "ing-mb5", 9, ingestion_finished=True, record_count=1
+        )
 
         assert isinstance(result, RunClosed)
         fetched = await repo.get(IngestRunId("ing-mb5"))
@@ -262,7 +284,9 @@ class TestMarkBatchIngested:
     async def test_missing_run_raises(self, pg_session: AsyncSession, release_id):
         repo = PostgresIngestRunRepository(pg_session)
         with pytest.raises(NotFoundError):
-            await repo.mark_batch_ingested("does-not-exist", 0, ingestion_finished=False)
+            await repo.mark_batch_ingested(
+                "does-not-exist", 0, ingestion_finished=False, record_count=0
+            )
 
 
 @pytest.mark.asyncio

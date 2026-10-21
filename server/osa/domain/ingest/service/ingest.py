@@ -135,11 +135,19 @@ class IngestService(Service):
         return run
 
     async def mark_batch_ingested(
-        self, ingest_run_id: IngestRunId, batch_index: int, *, ingestion_finished: bool
+        self,
+        ingest_run_id: IngestRunId,
+        batch_index: int,
+        *,
+        ingestion_finished: bool,
+        record_count: int,
     ) -> RunUpdate:
-        """Idempotently record that ``batch_index`` was sourced (#160)."""
+        """Idempotently record that ``batch_index`` sourced ``record_count`` records (#160)."""
         return await self.ingest_repo.mark_batch_ingested(
-            ingest_run_id, batch_index, ingestion_finished=ingestion_finished
+            ingest_run_id,
+            batch_index,
+            ingestion_finished=ingestion_finished,
+            record_count=record_count,
         )
 
     async def close_sourcing(self, ingest_run_id: IngestRunId) -> RunUpdate:

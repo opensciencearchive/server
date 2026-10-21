@@ -49,6 +49,12 @@ class IngestRun(Aggregate):
     batches_failed: int = 0
     batch_size: int = 1000
     limit: int | None = None  # Max total records (None = unlimited)
+    # Records the ingester actually handed over, across every sourced batch.
+    # The run limit counts these, not batches × batch_size: batches underfill
+    # routinely (the SDK skips records over max_file_mb, and the last batch of
+    # a limited run is capped short), so the batch-count estimate ran ahead of
+    # reality and ended limited runs early (#227).
+    records_sourced: int = 0
     started_at: datetime
     completed_at: datetime | None = None
     # Why the run failed (or why ingestion stopped early), queryable via
@@ -87,6 +93,32 @@ class IngestRun(Aggregate):
         """
         self.batches_completed += 1
         self.published_count += published_count
+
+    # ── Record-limit arithmetic ──────────────────────────────────────────────
+
+    @property
+    def limit_reached(self) -> bool:
+        """True when the run has sourced every record it was asked for."""
+        return self.limit is not None and self.records_sourced >= self.limit
+
+    def next_batch_limit(self) -> int:
+        """How many records to ask the next pull for.
+
+        A full ``batch_size``, capped by whatever the run limit still leaves.
+        Zero once the limit is met — callers check :attr:`limit_reached` first
+        and stop sourcing.
+        """
+        if self.limit is None:
+            return self.batch_size
+        return max(0, min(self.batch_size, self.limit - self.records_sourced))
+
+    def limit_met_after(self, record_count: int) -> bool:
+        """True when counting ``record_count`` more records meets the run limit.
+
+        Used to close sourcing on the batch in hand rather than discovering it
+        on the next one.
+        """
+        return self.limit is not None and (self.records_sourced + record_count) >= self.limit
 
     @property
     def is_complete(self) -> bool:

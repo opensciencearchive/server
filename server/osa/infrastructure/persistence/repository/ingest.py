@@ -134,7 +134,7 @@ class PostgresIngestRunRepository(IngestRunRepository):
         return await self._applied_or_closed(result.mappings().first(), id)
 
     async def mark_batch_ingested(
-        self, id: str, batch_index: int, *, ingestion_finished: bool
+        self, id: str, batch_index: int, *, ingestion_finished: bool, record_count: int
     ) -> RunUpdate:
         """Idempotently advance batches_ingested to batch_index+1, non-terminal only (#160).
 
@@ -143,12 +143,18 @@ class PostgresIngestRunRepository(IngestRunRepository):
         ran ahead — is a no-op. ``ingestion_finished`` latches True and is never
         reset (omitted from the UPDATE when the flag is False, mirroring
         ``increment_batches_ingested``).
+
+        ``records_sourced`` accumulates under the *same* advance predicate, so
+        the record count lands exactly when the batch is newly counted and a
+        redelivery adds nothing (#227).
         """
         t = ingest_runs_table
+        advances = t.c.batches_ingested < batch_index + 1
         values = {
-            "batches_ingested": case(
-                (t.c.batches_ingested < batch_index + 1, batch_index + 1),
-                else_=t.c.batches_ingested,
+            "batches_ingested": case((advances, batch_index + 1), else_=t.c.batches_ingested),
+            "records_sourced": case(
+                (advances, t.c.records_sourced + record_count),
+                else_=t.c.records_sourced,
             ),
         }
         if ingestion_finished:
@@ -264,6 +270,7 @@ def _row_to_ingest_run(row: dict) -> IngestRun:
         published_count=row["published_count"],
         batches_failed=row.get("batches_failed", 0),
         batch_size=row["batch_size"],
+        records_sourced=row["records_sourced"],
         limit=row.get("record_limit"),
         started_at=row["started_at"],
         completed_at=row.get("completed_at"),
