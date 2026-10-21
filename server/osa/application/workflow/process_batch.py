@@ -24,7 +24,7 @@ from osa.domain.ingest.event.events import (
     NextBatchRequested,
 )
 from osa.domain.ingest.model.continuation import BatchWindow, Continuation
-from osa.domain.ingest.model.ingest_run import Applied, IngestRun, IngestStatus, RunClosed
+from osa.domain.ingest.model.ingest_run import Applied, IngestRun, RunClosed
 from osa.domain.ingest.model.ingester_record import IngesterRecord
 from osa.domain.ingest.port.storage import IngestStoragePort
 from osa.domain.ingest.service.ingest import IngestService
@@ -119,9 +119,9 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
             # a container-sized retry budget (#160 decision 10).
             raise PermanentError(str(missing)) from missing
 
-        # A finished/aborted run pulls no more batches — drop redelivered events
-        # instead of sourcing work nobody will process (#152).
-        if run.status in (IngestStatus.COMPLETED, IngestStatus.FAILED):
+        # A finished, aborted or cancelled run pulls no more batches — drop
+        # redelivered events instead of sourcing work nobody will process (#152).
+        if run.status.is_terminal:
             log.warn(
                 "batch {batch_index} skipped — run is {status}",
                 batch_index=event.batch_index,

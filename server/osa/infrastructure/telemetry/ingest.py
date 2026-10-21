@@ -37,7 +37,7 @@ class OtelIngestInstrumentation(IngestInstrumentation):
         )
         self._runs = meter.create_counter(
             "osa_ingest_runs_total",
-            description="Count of ingest runs reaching a terminal status, by status and cause.",
+            description="Count of ingest runs reaching a terminal status (completed / failed / cancelled), by status and cause.",
         )
 
     def batch_completed(self, *, published_count: int) -> None:

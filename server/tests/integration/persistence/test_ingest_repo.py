@@ -290,6 +290,91 @@ class TestMarkBatchIngested:
 
 
 @pytest.mark.asyncio
+class TestCancel:
+    """The operator's stop lever, as one guarded UPDATE (#227)."""
+
+    async def test_cancels_a_running_run(self, pg_session: AsyncSession, release_id):
+        repo = PostgresIngestRunRepository(pg_session)
+        await repo.save(_make_run("ing-can1", release_id=release_id))
+
+        result = await repo.cancel(
+            "ing-can1", reason="cancelled by operator", completed_at=datetime.now(UTC)
+        )
+
+        assert isinstance(result, Applied)
+        assert result.run.status is IngestStatus.CANCELLED
+        assert result.run.ingestion_finished is True
+        assert result.run.failure_reason == "cancelled by operator"
+        # Terminal, but not a failure.
+        assert result.run.failure_kind is None
+
+    async def test_cancel_is_a_noop_on_a_terminal_run(self, pg_session: AsyncSession, release_id):
+        repo = PostgresIngestRunRepository(pg_session)
+        await repo.save(_make_run("ing-can2", release_id=release_id))
+        await repo.abort(
+            "ing-can2",
+            reason="bad image",
+            kind=FailureKind.IMAGE_PULL,
+            completed_at=datetime.now(UTC),
+        )
+
+        result = await repo.cancel(
+            "ing-can2", reason="cancelled by operator", completed_at=datetime.now(UTC)
+        )
+
+        assert isinstance(result, RunClosed)
+        fetched = await repo.get(IngestRunId("ing-can2"))
+        assert fetched is not None
+        assert fetched.status is IngestStatus.FAILED
+        assert fetched.failure_reason == "bad image"
+
+    async def test_cancel_twice_is_a_noop(self, pg_session: AsyncSession, release_id):
+        repo = PostgresIngestRunRepository(pg_session)
+        await repo.save(_make_run("ing-can3", release_id=release_id))
+
+        first = await repo.cancel(
+            "ing-can3", reason="cancelled by operator", completed_at=datetime.now(UTC)
+        )
+        second = await repo.cancel("ing-can3", reason="again", completed_at=datetime.now(UTC))
+
+        assert isinstance(first, Applied)
+        assert isinstance(second, RunClosed)
+
+    async def test_counters_are_noops_after_cancelling(self, pg_session: AsyncSession, release_id):
+        """CANCELLED really is terminal to the guarded counter updates.
+
+        An in-flight batch finishing after the cancel must not resurrect the
+        run or move its counters.
+        """
+        repo = PostgresIngestRunRepository(pg_session)
+        await repo.save(_make_run("ing-can4", release_id=release_id))
+        await repo.cancel(
+            "ing-can4", reason="cancelled by operator", completed_at=datetime.now(UTC)
+        )
+
+        completed = await repo.increment_completed("ing-can4", published_count=10)
+        ingested = await repo.mark_batch_ingested(
+            "ing-can4", 9, ingestion_finished=True, record_count=100
+        )
+
+        assert isinstance(completed, RunClosed)
+        assert isinstance(ingested, RunClosed)
+        fetched = await repo.get(IngestRunId("ing-can4"))
+        assert fetched is not None
+        assert fetched.status is IngestStatus.CANCELLED
+        assert fetched.published_count == 0
+
+    async def test_cancel_on_missing_run_raises(self, pg_session: AsyncSession, release_id):
+        repo = PostgresIngestRunRepository(pg_session)
+        with pytest.raises(NotFoundError):
+            await repo.cancel(
+                "does-not-exist",
+                reason="cancelled by operator",
+                completed_at=datetime.now(UTC),
+            )
+
+
+@pytest.mark.asyncio
 class TestReleaseSnapshot:
     """ingest_runs.release_id (#180 §1) round-trips against real PG.
 

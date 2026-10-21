@@ -18,13 +18,30 @@ class IngestStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"  # stopped at an operator's request (#227)
+
+    @property
+    def is_terminal(self) -> bool:
+        """True once the run is closed and will schedule no further batches.
+
+        The single definition of terminal: the batch-scheduling guard, the
+        repository's guarded counter updates and completion accounting all read
+        it, so adding a status cannot leave one of them behind.
+        """
+        return self in _TERMINAL
+
+
+_TERMINAL: frozenset[IngestStatus] = frozenset(
+    {IngestStatus.COMPLETED, IngestStatus.FAILED, IngestStatus.CANCELLED}
+)
 
 
 _VALID_TRANSITIONS: dict[IngestStatus, set[IngestStatus]] = {
-    IngestStatus.PENDING: {IngestStatus.RUNNING, IngestStatus.FAILED},
-    IngestStatus.RUNNING: {IngestStatus.COMPLETED, IngestStatus.FAILED},
+    IngestStatus.PENDING: {IngestStatus.RUNNING, IngestStatus.FAILED, IngestStatus.CANCELLED},
+    IngestStatus.RUNNING: {IngestStatus.COMPLETED, IngestStatus.FAILED, IngestStatus.CANCELLED},
     IngestStatus.COMPLETED: set(),
     IngestStatus.FAILED: set(),
+    IngestStatus.CANCELLED: set(),
 }
 
 
@@ -77,6 +94,18 @@ class IngestRun(Aggregate):
         self.completed_at = completed_at
         self.failure_reason = reason
         self.failure_kind = kind
+        self.ingestion_finished = True
+
+    def mark_cancelled(self, completed_at: datetime, *, reason: str) -> None:
+        """Stop the run at an operator's request; no further batches are scheduled.
+
+        Terminal but deliberately not a failure, so ``failure_kind`` stays
+        None — the reason rides ``failure_reason``, which is the run's
+        general "why did this stop" field.
+        """
+        self.transition_to(IngestStatus.CANCELLED)
+        self.completed_at = completed_at
+        self.failure_reason = reason
         self.ingestion_finished = True
 
     def mark_ingestion_finished(self) -> None:

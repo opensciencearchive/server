@@ -278,6 +278,41 @@ class IngestService(Service):
                     ingest_run_id=ingest_run_id,
                 )
 
+    async def cancel_ingestion(self, ingest_run_id: IngestRunId, *, reason: str) -> IngestRun:
+        """Stop a run at an operator's request (#227).
+
+        Terminalizes the run so the batch-scheduling guard drops every
+        subsequent ``NextBatchRequested``. A batch already parked on its
+        containers runs to completion; its counter updates then land as
+        ``RunClosed`` no-ops, so nothing is corrupted — only that one batch's
+        container time is spent. Killing live containers needs run → container
+        handles that don't exist yet.
+
+        Raises ``ConflictError`` if the run has already finished, failed or
+        been cancelled: reporting a successful cancel there would be a lie.
+        """
+        match await self.ingest_repo.cancel(
+            ingest_run_id,
+            reason=reason,
+            completed_at=datetime.now(UTC),
+        ):
+            case RunClosed():
+                raise ConflictError(
+                    f"Ingest run {ingest_run_id} is already finished",
+                    code="ingest_not_cancellable",
+                )
+            case Applied(run):
+                # Terminal metric for the cancel path — the run reaches
+                # CANCELLED exactly once here (a second cancel is RunClosed).
+                self.instrumentation.run_finished(status=run.status, kind=None)
+                log.info(
+                    "[{short_id}] run CANCELLED: {reason}",
+                    short_id=str(ingest_run_id)[:8],
+                    reason=reason,
+                    ingest_run_id=ingest_run_id,
+                )
+                return run
+
     async def _check_completion(self, ingest_run: IngestRun) -> None:
         """Transition to COMPLETED and emit IngestCompleted if all batches are accounted for."""
         if not ingest_run.check_completion(datetime.now(UTC)):

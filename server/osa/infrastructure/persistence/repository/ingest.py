@@ -24,7 +24,9 @@ logger = logging.getLogger(__name__)
 
 # Counter/state mutations only apply while a run is non-terminal — a stale batch
 # that finishes after abort_run/completion must not mutate the closed run (#152).
-_NON_TERMINAL = (IngestStatus.PENDING.value, IngestStatus.RUNNING.value)
+# Derived from the status itself, so a new status can never be missed by a
+# guarded UPDATE here (#227).
+_NON_TERMINAL = tuple(s.value for s in IngestStatus if not s.is_terminal)
 
 
 class PostgresIngestRunRepository(IngestRunRepository):
@@ -82,11 +84,7 @@ class PostgresIngestRunRepository(IngestRunRepository):
         stmt = (
             select(ingest_runs_table)
             .where(ingest_runs_table.c.convention_id == convention_id)
-            .where(
-                ingest_runs_table.c.status.in_(
-                    [IngestStatus.PENDING.value, IngestStatus.RUNNING.value]
-                )
-            )
+            .where(ingest_runs_table.c.status.in_(_NON_TERMINAL))
             .limit(1)
         )
         result = await self._session.execute(stmt)
@@ -227,6 +225,32 @@ class PostgresIngestRunRepository(IngestRunRepository):
                 status=IngestStatus.FAILED.value,
                 failure_reason=reason,
                 failure_kind=kind.value,
+                ingestion_finished=True,
+                completed_at=completed_at,
+            )
+            .returning(*t.c)
+        )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return await self._applied_or_closed(result.mappings().first(), id)
+
+    async def cancel(self, id: str, *, reason: str, completed_at: datetime) -> RunUpdate:
+        """Cancel a non-terminal run in one guarded UPDATE (#227).
+
+        Mirrors :meth:`abort`, but leaves ``failure_kind`` NULL: a cancellation
+        is terminal without being a failure. ``RunClosed`` when the run had
+        already finished — the caller surfaces that as a conflict rather than
+        reporting a cancel that did nothing.
+        """
+        t = ingest_runs_table
+        stmt = (
+            update(t)
+            .where(t.c.id == id)
+            .where(t.c.status.in_(_NON_TERMINAL))
+            .values(
+                status=IngestStatus.CANCELLED.value,
+                failure_reason=reason,
+                failure_kind=None,
                 ingestion_finished=True,
                 completed_at=completed_at,
             )

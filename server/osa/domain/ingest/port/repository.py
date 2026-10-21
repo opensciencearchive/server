@@ -107,6 +107,18 @@ class IngestRunRepository(Port, Protocol):
         ...
 
     @abstractmethod
+    async def cancel(self, id: IngestRunId, *, reason: str, completed_at: datetime) -> RunUpdate:
+        """Atomically cancel a run at an operator's request, if not already terminal.
+
+        Sets status=CANCELLED, ``failure_reason`` (the reason, not a failure —
+        ``failure_kind`` stays NULL), ``ingestion_finished`` and
+        ``completed_at`` in one guarded UPDATE. Returns ``Applied`` (with the
+        updated run), or ``RunClosed`` when the run had already finished,
+        failed or been cancelled (#227).
+        """
+        ...
+
+    @abstractmethod
     async def record_failure(
         self, id: IngestRunId, *, reason: str, kind: FailureKind | None
     ) -> None:

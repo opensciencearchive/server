@@ -283,3 +283,85 @@ class TestRecordLimitArithmetic:
     def test_exhausted_limit_asks_for_nothing(self) -> None:
         run = _make_run(batch_size=100, limit=250, records_sourced=250)
         assert run.next_batch_limit() == 0
+
+
+class TestCancellation:
+    """An operator can stop a run; cancelling is terminal and not a failure (#227).
+
+    Before this there was no way to stop a runaway run — GET was the only verb
+    on /ingestions/{id}, and stopping the server was the only lever.
+    """
+
+    def test_running_to_cancelled(self) -> None:
+        run = _make_run(status=IngestStatus.RUNNING)
+        run.mark_cancelled(datetime.now(UTC), reason="cancelled by operator")
+        assert run.status == IngestStatus.CANCELLED
+
+    def test_pending_to_cancelled(self) -> None:
+        run = _make_run(status=IngestStatus.PENDING)
+        run.mark_cancelled(datetime.now(UTC), reason="cancelled by operator")
+        assert run.status == IngestStatus.CANCELLED
+
+    def test_cancelling_records_the_reason_but_no_failure_kind(self) -> None:
+        run = _make_run(status=IngestStatus.RUNNING)
+        run.mark_cancelled(datetime.now(UTC), reason="cancelled by operator")
+        assert run.failure_reason == "cancelled by operator"
+        assert run.failure_kind is None
+
+    def test_cancelling_latches_ingestion_finished(self) -> None:
+        run = _make_run(status=IngestStatus.RUNNING)
+        run.mark_cancelled(datetime.now(UTC), reason="cancelled by operator")
+        assert run.ingestion_finished is True
+
+    def test_cancelling_stamps_completed_at(self) -> None:
+        at = datetime.now(UTC)
+        run = _make_run(status=IngestStatus.RUNNING)
+        run.mark_cancelled(at, reason="cancelled by operator")
+        assert run.completed_at == at
+
+    def test_cancelled_to_running_rejected(self) -> None:
+        run = _make_run(status=IngestStatus.CANCELLED)
+        with pytest.raises(InvalidStateError):
+            run.mark_running()
+
+    def test_cancelled_cannot_be_cancelled_again(self) -> None:
+        run = _make_run(status=IngestStatus.CANCELLED)
+        with pytest.raises(InvalidStateError):
+            run.mark_cancelled(datetime.now(UTC), reason="again")
+
+    def test_completed_cannot_be_cancelled(self) -> None:
+        run = _make_run(status=IngestStatus.COMPLETED)
+        with pytest.raises(InvalidStateError):
+            run.mark_cancelled(datetime.now(UTC), reason="too late")
+
+    def test_check_completion_cannot_resurrect_a_cancelled_run(self) -> None:
+        # An in-flight batch finishing after the cancel must not flip it green.
+        run = _make_run(
+            status=IngestStatus.CANCELLED,
+            ingestion_finished=True,
+            batches_ingested=1,
+            batches_completed=1,
+        )
+        assert run.check_completion(datetime.now(UTC)) is False
+        assert run.status == IngestStatus.CANCELLED
+
+
+class TestTerminalStatuses:
+    """One definition of terminal, so a new status can't be missed by a guard."""
+
+    def test_terminal_statuses(self) -> None:
+        assert IngestStatus.COMPLETED.is_terminal is True
+        assert IngestStatus.FAILED.is_terminal is True
+        assert IngestStatus.CANCELLED.is_terminal is True
+
+    def test_non_terminal_statuses(self) -> None:
+        assert IngestStatus.PENDING.is_terminal is False
+        assert IngestStatus.RUNNING.is_terminal is False
+
+    def test_every_terminal_status_is_a_dead_end(self) -> None:
+        for status in IngestStatus:
+            run = _make_run(status=status)
+            if not status.is_terminal:
+                continue
+            with pytest.raises(InvalidStateError):
+                run.transition_to(IngestStatus.RUNNING)

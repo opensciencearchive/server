@@ -985,8 +985,14 @@ class TestBackpressure:
 
 class TestRunGuards:
     @pytest.mark.asyncio
-    async def test_terminal_run_returns_early(self) -> None:
-        handler = _make_handler(run=_make_run(status=IngestStatus.FAILED))
+    @pytest.mark.parametrize(
+        "status",
+        [IngestStatus.FAILED, IngestStatus.COMPLETED, IngestStatus.CANCELLED],
+    )
+    async def test_terminal_run_returns_early(self, status: IngestStatus) -> None:
+        # Cancelling is how an operator stops a runaway run (#227): the guard is
+        # what makes it take effect, by dropping every queued batch request.
+        handler = _make_handler(run=_make_run(status=status))
 
         await handler.handle(_make_event())
 

@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from osa.config import Config
 from osa.domain.deposition.service.convention import ConventionService
+from osa.domain.ingest.command.cancel_ingestion import CancelIngestionHandler
 from osa.domain.ingest.command.start_ingest import StartIngestHandler
 from osa.domain.ingest.port.instrumentation import IngestInstrumentation
 from osa.domain.ingest.query.get_ingestion import GetIngestionHandler
@@ -26,7 +27,7 @@ from osa.util.paths import OSAPaths
 
 
 class IngestProvider(Provider):
-    """Provides IngestService, IngestRunRepository, StorageLayout, and StartIngestHandler."""
+    """Provides IngestService, IngestRunRepository, StorageLayout, and the ingest handlers."""
 
     @provide(scope=Scope.APP)
     def get_storage_layout(self, paths: OSAPaths) -> StorageLayout:
@@ -78,5 +79,6 @@ class IngestProvider(Provider):
         )
 
     start_ingest_handler = provide(StartIngestHandler, scope=Scope.UOW)
+    cancel_ingestion_handler = provide(CancelIngestionHandler, scope=Scope.UOW)
     get_ingestion_handler = provide(GetIngestionHandler, scope=Scope.UOW)
     list_ingestions_handler = provide(ListIngestionsHandler, scope=Scope.UOW)

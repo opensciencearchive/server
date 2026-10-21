@@ -588,3 +588,84 @@ class TestStartIngestSnapshotsRelease:
         with pytest.raises(NotFoundError):
             await service.start_ingest("test-conv")
         service.ingest_repo.save.assert_not_awaited()
+
+
+class TestCancelIngestion:
+    """cancel_ingestion — the operator's stop lever (#227).
+
+    GET was the only verb on /ingestions/{id}, so a runaway run could only be
+    stopped by stopping the server. Cancelling terminalizes the run, and the
+    batch-scheduling guard then drops every subsequent delivery.
+    """
+
+    @staticmethod
+    def _cancelled_run():  # noqa: ANN205
+        from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId
+
+        return IngestRun(
+            id=IngestRunId("run-1"),
+            convention_id="test-conv",
+            release_id=IngesterReleaseId(uuid4()),
+            status=IngestStatus.CANCELLED,
+            failure_reason="cancelled by operator",
+            ingestion_finished=True,
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+        )
+
+    @pytest.mark.asyncio
+    async def test_cancels_via_atomic_repo_update(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+
+        service = _make_service()
+        service.ingest_repo.cancel.return_value = Applied(run=self._cancelled_run())
+
+        await service.cancel_ingestion(IngestRunId("run-1"), reason="cancelled by operator")
+
+        assert service.ingest_repo.cancel.await_args.args[0] == "run-1"
+        assert service.ingest_repo.cancel.await_args.kwargs["reason"] == "cancelled by operator"
+
+    @pytest.mark.asyncio
+    async def test_returns_the_cancelled_run(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+
+        service = _make_service()
+        service.ingest_repo.cancel.return_value = Applied(run=self._cancelled_run())
+
+        run = await service.cancel_ingestion(IngestRunId("run-1"), reason="cancelled by operator")
+
+        assert run.status is IngestStatus.CANCELLED
+
+    @pytest.mark.asyncio
+    async def test_emits_the_terminal_metric_as_cancelled(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+
+        service = _make_service()
+        service.ingest_repo.cancel.return_value = Applied(run=self._cancelled_run())
+
+        await service.cancel_ingestion(IngestRunId("run-1"), reason="cancelled by operator")
+
+        assert service.instrumentation.runs_finished == [(IngestStatus.CANCELLED, None)]
+
+    @pytest.mark.asyncio
+    async def test_already_terminal_run_conflicts(self) -> None:
+        # Reporting a successful cancel of a finished run would be a lie.
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+
+        service = _make_service()
+        service.ingest_repo.cancel.return_value = RunClosed()
+
+        with pytest.raises(ConflictError):
+            await service.cancel_ingestion(IngestRunId("run-1"), reason="cancelled by operator")
+
+    @pytest.mark.asyncio
+    async def test_already_terminal_run_emits_no_metric(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+
+        service = _make_service()
+        service.ingest_repo.cancel.return_value = RunClosed()
+
+        with pytest.raises(ConflictError):
+            await service.cancel_ingestion(IngestRunId("run-1"), reason="cancelled by operator")
+
+        assert service.instrumentation.runs_finished == []
