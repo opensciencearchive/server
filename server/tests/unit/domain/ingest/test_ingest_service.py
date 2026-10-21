@@ -157,30 +157,15 @@ class TestStartIngest:
 
 
 class TestEnsureRunning:
-    """ensure_running — transition a PENDING run to RUNNING; no-op otherwise."""
+    """ensure_running — one guarded UPDATE that cannot resurrect a closed run.
+
+    The transition used to be read-then-save: a cancel that committed between
+    the read and the save was silently overwritten with RUNNING, and the run
+    kept pulling batches after a successful cancel response (#227).
+    """
 
     @pytest.mark.asyncio
-    async def test_pending_run_marked_running_and_saved(self) -> None:
-        from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId
-
-        service = _make_service()
-        run = IngestRun(
-            id=IngestRunId("run-1"),
-            convention_id="test-conv",
-            release_id=IngesterReleaseId(uuid4()),
-            status=IngestStatus.PENDING,
-            started_at=datetime.now(UTC),
-        )
-        service.ingest_repo.get.return_value = run
-
-        result = await service.ensure_running(IngestRunId("run-1"))
-
-        assert result is run
-        assert run.status == IngestStatus.RUNNING
-        service.ingest_repo.save.assert_awaited_once_with(run)
-
-    @pytest.mark.asyncio
-    async def test_running_run_is_noop(self) -> None:
+    async def test_delegates_to_the_guarded_start_update(self) -> None:
         from osa.domain.ingest.model.ingest_run import IngestRun, IngestRunId
 
         service = _make_service()
@@ -191,20 +176,33 @@ class TestEnsureRunning:
             status=IngestStatus.RUNNING,
             started_at=datetime.now(UTC),
         )
-        service.ingest_repo.get.return_value = run
+        service.ingest_repo.start.return_value = Applied(run)
 
         result = await service.ensure_running(IngestRunId("run-1"))
 
-        assert result is run
-        assert run.status == IngestStatus.RUNNING
+        assert result == Applied(run)
+        service.ingest_repo.start.assert_awaited_once_with(IngestRunId("run-1"))
+        # No aggregate save: the UPDATE is the transition, so there is no
+        # read-modify-write window for a cancel to be lost in.
         service.ingest_repo.save.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_raises_not_found_for_missing_run(self) -> None:
+    async def test_reports_run_closed_for_a_terminalized_run(self) -> None:
         from osa.domain.ingest.model.ingest_run import IngestRunId
 
         service = _make_service()
-        service.ingest_repo.get.return_value = None
+        service.ingest_repo.start.return_value = RunClosed()
+
+        result = await service.ensure_running(IngestRunId("run-1"))
+
+        assert result == RunClosed()
+
+    @pytest.mark.asyncio
+    async def test_propagates_not_found_for_missing_run(self) -> None:
+        from osa.domain.ingest.model.ingest_run import IngestRunId
+
+        service = _make_service()
+        service.ingest_repo.start.side_effect = NotFoundError("gone")
 
         with pytest.raises(NotFoundError):
             await service.ensure_running(IngestRunId("run-1"))

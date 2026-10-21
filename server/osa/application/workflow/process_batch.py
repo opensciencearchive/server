@@ -206,8 +206,19 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
         nothing durable is written before the commit that releases the tx, and
         the container simply re-runs on redelivery.
         """
-        # Rebind ``run`` to the refreshed aggregate the service returns.
-        run = await self.ingest_service.ensure_running(event.ingest_run_id)
+        # Rebind ``run`` to the refreshed aggregate the guarded start returns.
+        # RunClosed means a cancel landed between the skip guard above and this
+        # transition — source nothing rather than resurrect the run (#227).
+        match await self.ingest_service.ensure_running(event.ingest_run_id):
+            case RunClosed():
+                log.warn(
+                    "batch {batch_index} skipped — run terminalized before it started",
+                    batch_index=event.batch_index,
+                    ingest_run_id=event.ingest_run_id,
+                )
+                return True
+            case Applied(started):
+                run = started
 
         if convention.ingester is None:
             missing = NotFoundError(f"No ingester for convention {run.convention_id}")
@@ -307,7 +318,10 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
             return True
 
         await self.ingest_storage.write_records(event.ingest_run_id, batch_index, output.records)
-        if output.session:
+        # `is not None`, not truthiness: an ingester that sets an empty session
+        # has still set one, and dropping it would hand the next batch the
+        # previous session instead — invisible to the guard, and a loop (#227).
+        if output.session is not None:
             await self.ingest_storage.write_session(event.ingest_run_id, output.session)
 
         has_more = output.session is not None and len(output.records) > 0

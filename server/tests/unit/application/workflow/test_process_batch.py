@@ -318,7 +318,7 @@ def _make_handler(
 
     ingest_service = AsyncMock()
     ingest_service.get_ingestion.return_value = run
-    ingest_service.ensure_running.return_value = run
+    ingest_service.ensure_running.return_value = Applied(run)
     ingest_service.mark_batch_ingested.return_value = Applied(run)
     ingest_service.close_sourcing.return_value = Applied(run)
     ingest_service.complete_batch.side_effect = _logged(timeline, "complete", None)
@@ -724,6 +724,92 @@ class TestNonProgressGuard:
         await handler.handle(_make_event(batch_index=1))
 
         handler.ingest_service.abort_run.assert_not_awaited()
+
+
+class TestSessionRoundTripsThroughStorage:
+    """The session an ingester sets is exactly what the next batch is handed (#227).
+
+    The hole: persisting only a *truthy* session dropped the falsy-but-set
+    ``{}``, so the next batch was handed the previous session instead, the
+    guard never saw an unchanged session, and the run looped forever. These
+    drive consecutive batches through storage that actually remembers, rather
+    than injecting ``session_before`` by hand.
+    """
+
+    @staticmethod
+    def _threaded(handler: ProcessBatch) -> dict:
+        """Replace the storage double with one that remembers what it was told."""
+        sessions: list[dict | None] = [None]
+        written: dict[int, list] = {}
+
+        async def write_session(_run_id, session):  # noqa: ANN001, ANN202
+            sessions[0] = session
+
+        async def read_session(_run_id):  # noqa: ANN001, ANN202
+            return sessions[0]
+
+        async def write_records(_run_id, batch_index, records):  # noqa: ANN001, ANN202
+            written[batch_index] = records
+
+        async def read_records(_run_id, batch_index):  # noqa: ANN001, ANN202
+            return written.get(batch_index, [])
+
+        handler.ingest_storage.write_session.side_effect = write_session
+        handler.ingest_storage.read_session.side_effect = read_session
+        handler.ingest_storage.write_records.side_effect = write_records
+        handler.ingest_storage.read_records.side_effect = read_records
+        return {"sessions": sessions, "records": written}
+
+    @pytest.mark.asyncio
+    async def test_an_empty_session_is_still_persisted(self) -> None:
+        handler = _make_handler(output_session={})
+        state = self._threaded(handler)
+
+        await handler.handle(_make_event(batch_index=0))
+
+        assert state["sessions"][0] == {}
+
+    @pytest.mark.asyncio
+    async def test_an_empty_session_repeated_aborts_on_the_next_batch(self) -> None:
+        # The ingester sets `{}` every batch and re-emits the same record: the
+        # next pull is identical, so batch 1 must be the end of it.
+        handler = _make_handler(output_session={})
+        self._threaded(handler)
+
+        await handler.handle(_make_event(batch_index=0))
+        await handler.handle(_make_event(batch_index=1))
+
+        kwargs = handler.ingest_service.abort_run.await_args.kwargs
+        assert kwargs["kind"] == FailureKind.NO_PROGRESS
+
+    @pytest.mark.asyncio
+    async def test_an_advancing_session_survives_the_round_trip(self) -> None:
+        handler = _make_handler(output_session={"offset": 100})
+        state = self._threaded(handler)
+
+        await handler.handle(_make_event(batch_index=0))
+
+        assert state["sessions"][0] == {"offset": 100}
+        handler.ingest_service.abort_run.assert_not_awaited()
+
+
+class TestRunTerminalizedBeforeSourcing:
+    """A run cancelled between the skip guard and the start transition sources nothing.
+
+    ``ensure_running`` is a guarded update, so it reports ``RunClosed`` when a
+    cancel landed in that window instead of resurrecting the run as RUNNING.
+    """
+
+    @pytest.mark.asyncio
+    async def test_run_closed_stops_before_the_container(self) -> None:
+        handler = _make_handler()
+        handler.ingest_service.ensure_running.return_value = RunClosed()
+
+        await handler.handle(_make_event())
+
+        handler.ingester_runner.run.assert_not_called()
+        assert not any(isinstance(e, NextBatchRequested) for e in _emitted(handler))
+        handler.ingest_service.mark_batch_ingested.assert_not_awaited()
 
 
 class TestMarkBatchIngestedRunClosed:

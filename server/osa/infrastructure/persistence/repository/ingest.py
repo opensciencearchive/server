@@ -48,6 +48,7 @@ class PostgresIngestRunRepository(IngestRunRepository):
             "published_count": ingest_run.published_count,
             "batches_failed": ingest_run.batches_failed,
             "batch_size": ingest_run.batch_size,
+            "records_sourced": ingest_run.records_sourced,
             "record_limit": ingest_run.limit,
             "started_at": ingest_run.started_at,
             "completed_at": ingest_run.completed_at,
@@ -64,6 +65,33 @@ class PostgresIngestRunRepository(IngestRunRepository):
         )
         await self._session.execute(stmt)
         await self._session.flush()
+
+    async def start(self, id: str) -> RunUpdate:
+        """Move a PENDING run to RUNNING in one guarded UPDATE (#227).
+
+        Guarded like every other mutation here, because the transition races an
+        operator cancel: read-then-:meth:`save` would overwrite a cancel that
+        committed in between, clearing its reason and letting batches keep
+        running after a successful cancel response. A terminal run is left
+        untouched (``RunClosed``); an already-RUNNING run is reported
+        ``Applied`` unchanged, since batch 0 can be redelivered.
+        """
+        t = ingest_runs_table
+        stmt = (
+            update(t)
+            .where(t.c.id == id)
+            .where(t.c.status.in_(_NON_TERMINAL))
+            .values(
+                status=case(
+                    (t.c.status == IngestStatus.PENDING.value, IngestStatus.RUNNING.value),
+                    else_=t.c.status,
+                )
+            )
+            .returning(*t.c)
+        )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return await self._applied_or_closed(result.mappings().first(), id)
 
     async def get(self, id: str) -> IngestRun | None:
         stmt = select(ingest_runs_table).where(ingest_runs_table.c.id == id)

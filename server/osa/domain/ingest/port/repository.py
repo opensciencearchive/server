@@ -23,6 +23,17 @@ class IngestRunRepository(Port, Protocol):
         ...
 
     @abstractmethod
+    async def start(self, id: IngestRunId) -> RunUpdate:
+        """Move a PENDING run to RUNNING in one guarded, idempotent UPDATE.
+
+        Guarded because the transition races an operator cancel: ``RunClosed``
+        when the run was terminalized first, so a cancel is never overwritten
+        with RUNNING (#227). An already-RUNNING run is ``Applied`` unchanged;
+        raises ``NotFoundError`` if the run is missing.
+        """
+        ...
+
+    @abstractmethod
     async def get(self, id: IngestRunId) -> IngestRun | None:
         """Get an ingest run by ID."""
         ...
