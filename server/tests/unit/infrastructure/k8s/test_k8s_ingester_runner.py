@@ -230,7 +230,7 @@ class TestSourceJobSpec:
             ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
-            inputs=IngesterInputs(convention_id=_CONV_SLUG, limit=100, offset=50),
+            inputs=IngesterInputs(convention_id=_CONV_SLUG, limit=100),
         )
         env = spec.spec.template.spec.containers[0].env
         env_dict = {e.name: e.value for e in env}
@@ -238,23 +238,26 @@ class TestSourceJobSpec:
         assert env_dict["OSA_OUT"] == "/osa/out"
         assert env_dict["OSA_FILES"] == "/osa/files"
         assert env_dict["OSA_LIMIT"] == "100"
-        assert env_dict["OSA_OFFSET"] == "50"
 
-    def test_since_env_var(self):
-        from datetime import datetime, UTC
+    def test_no_position_or_watermark_env_vars(self):
+        """OSA_OFFSET and OSA_SINCE are gone — session is the only continuation (#227).
 
+        Both were declared end to end and never populated, so an ingester that
+        paginated on either looped or silently truncated. Nothing may emit them
+        again without the server actually tracking the value.
+        """
         runner = _make_runner()
         ingester = _make_ingester()
-        since = datetime(2026, 1, 1, tzinfo=UTC)
         spec = runner._build_job_spec(
             ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
-            inputs=IngesterInputs(convention_id=_CONV_SLUG, since=since),
+            inputs=IngesterInputs(convention_id=_CONV_SLUG, limit=100),
         )
         env = spec.spec.template.spec.containers[0].env
         env_dict = {e.name: e.value for e in env}
-        assert "OSA_SINCE" in env_dict
+        assert "OSA_OFFSET" not in env_dict
+        assert "OSA_SINCE" not in env_dict
 
     def test_ingester_role_label(self):
         runner = _make_runner()

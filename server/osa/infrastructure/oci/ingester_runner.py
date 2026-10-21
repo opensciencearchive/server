@@ -129,12 +129,8 @@ class OciIngesterRunner(IngesterRunner):
                 "OSA_OUT=/osa/out",
                 "OSA_FILES=/osa/files",
             ]
-            if inputs.since is not None:
-                env.append(f"OSA_SINCE={inputs.since.isoformat()}")
             if inputs.limit is not None:
                 env.append(f"OSA_LIMIT={inputs.limit}")
-            if inputs.offset:
-                env.append(f"OSA_OFFSET={inputs.offset}")
 
             binds = [
                 f"{self._host_path(staging_dir)}:/osa/in:ro",
