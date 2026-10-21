@@ -324,6 +324,11 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
         if output.session is not None:
             await self.ingest_storage.write_session(event.ingest_run_id, output.session)
 
+        # A session AND records: an empty batch ends the run even if it set a
+        # session. Deliberate, and the non-progress guard depends on it — an
+        # empty window can never "repeat" (see BatchWindow.repeats), so a
+        # session-setting ingester that returns nothing forever is stopped here
+        # or nowhere (#227).
         has_more = output.session is not None and len(output.records) > 0
         if has_more and run.limit_met_after(len(output.records)):
             has_more = False

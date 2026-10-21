@@ -82,7 +82,9 @@ class OciIngesterRunner(IngesterRunner):
                 config = {**(ingester.config or {}), **(inputs.config or {})}
                 (staging_dir / "config.json").write_text(json.dumps(config))
 
-            if inputs.session:
+            # `is not None`, not truthiness: an empty session is a session, and
+            # staging no session.json reads as "first batch" to the ingester (#227).
+            if inputs.session is not None:
                 (staging_dir / "session.json").write_text(json.dumps(inputs.session))
 
             start_time = time.monotonic()

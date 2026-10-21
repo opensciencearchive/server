@@ -48,6 +48,10 @@ class PostgresIngestRunRepository(IngestRunRepository):
             "published_count": ingest_run.published_count,
             "batches_failed": ingest_run.batches_failed,
             "batch_size": ingest_run.batch_size,
+            # Every column _row_to_ingest_run reads has to be written here too,
+            # or a save/load round-trip silently drops it. records_sourced was
+            # read-only for exactly that reason, and the run limit counts off
+            # it (#227) — asymmetry here becomes a wrong limit later.
             "records_sourced": ingest_run.records_sourced,
             "record_limit": ingest_run.limit,
             "started_at": ingest_run.started_at,

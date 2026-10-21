@@ -109,7 +109,9 @@ class K8sIngesterRunner(IngesterRunner):
             config = {**(ingester.config or {}), **(inputs.config or {})}
             await self._s3.put_object(f"{input_prefix}/config.json", json.dumps(config))
 
-        if inputs.session:
+        # `is not None`, not truthiness: an empty session is a session, and
+        # staging no session.json reads as "first batch" to the ingester (#227).
+        if inputs.session is not None:
             await self._s3.put_object(f"{input_prefix}/session.json", json.dumps(inputs.session))
 
         return await self._run_job(ingester, inputs, work_dir, files_dir)

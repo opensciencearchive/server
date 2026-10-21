@@ -73,6 +73,14 @@ class BatchWindow:
         """True when this batch re-emitted exactly the previous batch's window.
 
         An empty window never repeats: a batch that pulled nothing ends the run
-        through ``has_more``, which is progress, not a stall.
+        through ``has_more``, so treating two empty batches as a stall would
+        fail a legitimate final batch instead.
+
+        That makes the two halves load-bearing for each other. This guard
+        cannot catch an ingester that returns empty pages forever while setting
+        a session, because there is no non-empty window to repeat — which is
+        why ``has_more`` requires records as well as a session. Loosen one and
+        the #227 loop reopens through the gap; they change together or not at
+        all.
         """
         return bool(self.source_ids) and self.source_ids == previous.source_ids
