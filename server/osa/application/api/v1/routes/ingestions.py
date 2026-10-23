@@ -3,6 +3,11 @@
 from dishka.integrations.fastapi import DishkaRoute, FromDishka
 from fastapi import APIRouter
 
+from osa.domain.ingest.command.cancel_ingestion import (
+    CancelIngestion,
+    CancelIngestionHandler,
+    IngestRunCancelled,
+)
 from osa.domain.ingest.command.start_ingest import (
     IngestRunCreated,
     StartIngest,
@@ -45,3 +50,18 @@ async def get_ingestion(
     handler: FromDishka[GetIngestionHandler],
 ) -> IngestRunDetail:
     return await handler.run(GetIngestion(ingest_run_id=IngestRunId(ingest_run_id)))
+
+
+@router.post("/{ingest_run_id}/cancel", response_model=IngestRunCancelled)
+async def cancel_ingestion(
+    ingest_run_id: str,
+    handler: FromDishka[CancelIngestionHandler],
+) -> IngestRunCancelled:
+    """Stop a running ingestion; 409 if it has already finished.
+
+    POST rather than DELETE: the run is not deleted, so its counters and
+    failure reason stay queryable. Cancelling stops batch *scheduling* — a
+    batch already parked on its containers runs to completion, and its counter
+    updates then land as deliberate no-ops.
+    """
+    return await handler.run(CancelIngestion(ingest_run_id=IngestRunId(ingest_run_id)))

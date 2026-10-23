@@ -30,6 +30,10 @@ class IngestRunDetail(Result):
     batches_completed: int
     batches_failed: int
     published_count: int
+    # Records the ingester handed over — what ``limit`` counts (#227). Reading
+    # it beside published_count is how an operator sees a run sourcing without
+    # publishing, which is what a stalled ingester looks like from outside.
+    records_sourced: int
     batch_size: int
     limit: int | None
     started_at: datetime
@@ -58,6 +62,7 @@ class GetIngestionHandler(QueryHandler[GetIngestion, IngestRunDetail]):
             batches_completed=ingest_run.batches_completed,
             batches_failed=ingest_run.batches_failed,
             published_count=ingest_run.published_count,
+            records_sourced=ingest_run.records_sourced,
             batch_size=ingest_run.batch_size,
             limit=ingest_run.limit,
             started_at=ingest_run.started_at,

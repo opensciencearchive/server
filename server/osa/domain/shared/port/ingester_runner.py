@@ -7,7 +7,6 @@ domain and infrastructure runners depend on this contract.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -17,15 +16,21 @@ from osa.domain.shared.model.srn import ConventionSlug
 
 @dataclass(frozen=True)
 class IngesterInputs:
-    """Inputs for an ingester container run."""
+    """Inputs for an ingester container run.
+
+    Every field here is populated by the orchestrator. ``session`` is the only
+    continuation mechanism: the server hands back whatever the previous batch
+    set via ``ctx.set_session``, and a batch that sets none ends the run. The
+    position-style ``offset`` and watermark-style ``since`` that used to sit
+    beside it were advertised end to end and never populated, so an ingester
+    paginating on either looped or silently truncated (#227).
+    """
 
     convention_id: ConventionSlug
     ingest_run_id: str = ""
     batch_index: int = 0
     config: dict[str, Any] | None = None
-    since: datetime | None = None
     limit: int | None = None
-    offset: int = 0
     session: dict[str, Any] | None = None
 
 

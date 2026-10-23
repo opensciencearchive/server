@@ -39,7 +39,7 @@ class K8sIngesterRunner(IngesterRunner):
     - Writable rootfs (no readOnlyRootFilesystem)
     - Three volume mounts: input (ro), output (rw), files (rw)
     - Higher resource defaults (3600s, 4g)
-    - Source-specific env vars (OSA_FILES, OSA_SINCE, etc.)
+    - Ingester-specific env vars (OSA_FILES, OSA_LIMIT)
     """
 
     def __init__(self, api_client: ApiClient, config: K8sConfig, s3: S3Client) -> None:
@@ -109,7 +109,9 @@ class K8sIngesterRunner(IngesterRunner):
             config = {**(ingester.config or {}), **(inputs.config or {})}
             await self._s3.put_object(f"{input_prefix}/config.json", json.dumps(config))
 
-        if inputs.session:
+        # `is not None`, not truthiness: an empty session is a session, and
+        # staging no session.json reads as "first batch" to the ingester (#227).
+        if inputs.session is not None:
             await self._s3.put_object(f"{input_prefix}/session.json", json.dumps(inputs.session))
 
         return await self._run_job(ingester, inputs, work_dir, files_dir)
@@ -289,12 +291,8 @@ class K8sIngesterRunner(IngesterRunner):
             V1EnvVar(name="OSA_FILES", value="/osa/files"),
         ]
         if inputs:
-            if inputs.since is not None:
-                env.append(V1EnvVar(name="OSA_SINCE", value=inputs.since.isoformat()))
             if inputs.limit is not None:
                 env.append(V1EnvVar(name="OSA_LIMIT", value=str(inputs.limit)))
-            if inputs.offset:
-                env.append(V1EnvVar(name="OSA_OFFSET", value=str(inputs.offset)))
 
         mounts = [
             V1VolumeMount(

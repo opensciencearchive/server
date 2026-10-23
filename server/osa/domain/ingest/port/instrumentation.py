@@ -30,5 +30,5 @@ class IngestInstrumentation(Port, Protocol):
 
     @abstractmethod
     def run_finished(self, *, status: IngestStatus, kind: FailureKind | None) -> None:
-        """Record an ingest run reaching a terminal status (completed / failed)."""
+        """Record an ingest run reaching a terminal status (completed / failed / cancelled)."""
         ...

@@ -17,6 +17,10 @@ from osa.domain.auth.model.identity import Anonymous
 from osa.domain.auth.model.principal import Principal
 from osa.domain.auth.model.role import Role
 from osa.domain.auth.model.value import ProviderIdentity, UserId
+from osa.domain.ingest.command.cancel_ingestion import (
+    CancelIngestion,
+    CancelIngestionHandler,
+)
 from osa.domain.ingest.command.start_ingest import StartIngest, StartIngestHandler
 from osa.domain.shared.authorization.gate import requires_scope
 from osa.domain.shared.error import AuthorizationError
@@ -89,4 +93,56 @@ class TestStartIngestAuth:
         handler = StartIngestHandler(principal=Anonymous(), service=_service())
         with pytest.raises(AuthorizationError) as exc:
             await handler.run(StartIngest(convention_id="cultivarium"))
+        assert exc.value.code == "missing_token"
+
+
+def _cancelling_service() -> AsyncMock:
+    from datetime import datetime, timezone
+
+    from osa.domain.ingest.model.ingest_run import IngestStatus
+
+    run = _ingest_run()
+    run.status = IngestStatus.CANCELLED
+    run.failure_reason = "cancelled by operator"
+    run.completed_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    service = AsyncMock()
+    service.cancel_ingestion.return_value = run
+    return service
+
+
+class TestCancelIngestionAuth:
+    """Stopping a run is the same blast radius as starting one (#227)."""
+
+    def test_cancel_requires_ingestions_write(self) -> None:
+        assert CancelIngestionHandler.__auth__ == requires_scope("ingestions:write")
+
+    async def test_allows_matching_scope(self) -> None:
+        handler = CancelIngestionHandler(
+            principal=_principal(scopes=frozenset({"ingestions:write"})),
+            service=_cancelling_service(),
+        )
+        result = await handler.run(CancelIngestion(ingest_run_id="ing_1"))
+        assert result.status == "cancelled"
+
+    async def test_allows_admin_without_scope(self) -> None:
+        handler = CancelIngestionHandler(
+            principal=_principal(roles=frozenset({Role.ADMIN})),
+            service=_cancelling_service(),
+        )
+        result = await handler.run(CancelIngestion(ingest_run_id="ing_1"))
+        assert result.id == "ing_1"
+
+    async def test_denies_read_scope(self) -> None:
+        handler = CancelIngestionHandler(
+            principal=_principal(scopes=frozenset({"ingestions:read"})),
+            service=_cancelling_service(),
+        )
+        with pytest.raises(AuthorizationError) as exc:
+            await handler.run(CancelIngestion(ingest_run_id="ing_1"))
+        assert exc.value.code == "access_denied"
+
+    async def test_denies_anonymous(self) -> None:
+        handler = CancelIngestionHandler(principal=Anonymous(), service=_cancelling_service())
+        with pytest.raises(AuthorizationError) as exc:
+            await handler.run(CancelIngestion(ingest_run_id="ing_1"))
         assert exc.value.code == "missing_token"

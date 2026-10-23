@@ -10,7 +10,7 @@ is the restart *trigger*; durable domain state is the restart *position*). The
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import ClassVar, assert_never
+from typing import Any, ClassVar, assert_never
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from osa.domain.deposition.model.convention import Convention
@@ -23,7 +23,8 @@ from osa.domain.ingest.event.events import (
     IngesterBatchReady,
     NextBatchRequested,
 )
-from osa.domain.ingest.model.ingest_run import Applied, IngestRun, IngestStatus, RunClosed
+from osa.domain.ingest.model.continuation import BatchWindow, Continuation
+from osa.domain.ingest.model.ingest_run import Applied, IngestRun, RunClosed
 from osa.domain.ingest.model.ingester_record import IngesterRecord
 from osa.domain.ingest.port.storage import IngestStoragePort
 from osa.domain.ingest.service.ingest import IngestService
@@ -33,6 +34,7 @@ from osa.domain.shared.error import NotFoundError, PermanentError, TransientErro
 from osa.domain.shared.event import EventHandler, EventId
 from osa.domain.shared.failure import (
     AbortRun,
+    FailureKind,
     FailurePolicy,
     GiveUp,
     PriorAttempts,
@@ -117,9 +119,9 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
             # a container-sized retry budget (#160 decision 10).
             raise PermanentError(str(missing)) from missing
 
-        # A finished/aborted run pulls no more batches — drop redelivered events
-        # instead of sourcing work nobody will process (#152).
-        if run.status in (IngestStatus.COMPLETED, IngestStatus.FAILED):
+        # A finished, aborted or cancelled run pulls no more batches — drop
+        # redelivered events instead of sourcing work nobody will process (#152).
+        if run.status.is_terminal:
             log.warn(
                 "batch {batch_index} skipped — run is {status}",
                 batch_index=event.batch_index,
@@ -204,8 +206,19 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
         nothing durable is written before the commit that releases the tx, and
         the container simply re-runs on redelivery.
         """
-        # Rebind ``run`` to the refreshed aggregate the service returns.
-        run = await self.ingest_service.ensure_running(event.ingest_run_id)
+        # Rebind ``run`` to the refreshed aggregate the guarded start returns.
+        # RunClosed means a cancel landed between the skip guard above and this
+        # transition — source nothing rather than resurrect the run (#227).
+        match await self.ingest_service.ensure_running(event.ingest_run_id):
+            case RunClosed():
+                log.warn(
+                    "batch {batch_index} skipped — run terminalized before it started",
+                    batch_index=event.batch_index,
+                    ingest_run_id=event.ingest_run_id,
+                )
+                return True
+            case Applied(started):
+                run = started
 
         if convention.ingester is None:
             missing = NotFoundError(f"No ingester for convention {run.convention_id}")
@@ -214,21 +227,19 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
         batch_index = event.batch_index
         session = await self.ingest_storage.read_session(event.ingest_run_id)
 
-        effective_batch_limit = run.batch_size
-        if run.limit is not None:
-            ingested_so_far = run.batches_ingested * run.batch_size
-            remaining = run.limit - ingested_so_far
-            if remaining <= 0:
-                log.warn(
-                    "Ignoring redelivered NextBatchRequested — limit already met "
-                    "(batches_ingested={batches_ingested}, limit={limit})",
-                    batches_ingested=run.batches_ingested,
-                    limit=run.limit,
-                    ingest_run_id=event.ingest_run_id,
-                )
-                await self.ingest_service.close_sourcing(event.ingest_run_id)
-                return True
-            effective_batch_limit = min(run.batch_size, remaining)
+        # The limit counts records actually sourced, never batches × batch_size:
+        # underfilled batches made that estimate run ahead and end the run early (#227).
+        if run.limit_reached:
+            log.warn(
+                "Ignoring redelivered NextBatchRequested — limit already met "
+                "(records_sourced={records_sourced}, limit={limit})",
+                records_sourced=run.records_sourced,
+                limit=run.limit,
+                ingest_run_id=event.ingest_run_id,
+            )
+            await self.ingest_service.close_sourcing(event.ingest_run_id)
+            return True
+        effective_batch_limit = run.next_batch_limit()
 
         inputs = IngesterInputs(
             convention_id=convention.id,
@@ -252,6 +263,8 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
                 files_dir=files_dir,
                 work_dir=work_dir,
             )
+            continuation = Continuation(before=session, after=output.session)
+            await self._guard_progress(event, continuation, output.records)
         except RuntimeFailure as failure:
             # The runner reports facts; the policy decides; we execute the verb.
             # Ingester Jobs have no memory-bump lever, so PriorAttempts carries
@@ -305,18 +318,27 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
             return True
 
         await self.ingest_storage.write_records(event.ingest_run_id, batch_index, output.records)
-        if output.session:
+        # `is not None`, not truthiness: an ingester that sets an empty session
+        # has still set one, and dropping it would hand the next batch the
+        # previous session instead — invisible to the guard, and a loop (#227).
+        if output.session is not None:
             await self.ingest_storage.write_session(event.ingest_run_id, output.session)
 
+        # A session AND records: an empty batch ends the run even if it set a
+        # session. Deliberate, and the non-progress guard depends on it — an
+        # empty window can never "repeat" (see BatchWindow.repeats), so a
+        # session-setting ingester that returns nothing forever is stopped here
+        # or nowhere (#227).
         has_more = output.session is not None and len(output.records) > 0
-        if has_more and run.limit is not None:
-            total_sourced = (run.batches_ingested + 1) * run.batch_size
-            if total_sourced >= run.limit:
-                has_more = False
+        if has_more and run.limit_met_after(len(output.records)):
+            has_more = False
 
         # Idempotent counter advance keyed on THIS batch index (redelivery-safe).
         match await self.ingest_service.mark_batch_ingested(
-            event.ingest_run_id, batch_index, ingestion_finished=not has_more
+            event.ingest_run_id,
+            batch_index,
+            ingestion_finished=not has_more,
+            record_count=len(output.records),
         ):
             case RunClosed():
                 log.warn(
@@ -337,11 +359,13 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
             )
         )
         log.info(
-            "[{short_id}] batch {batch_index}: pulled {record_count} records (has_more={has_more})",
+            "[{short_id}] batch {batch_index}: pulled {record_count} records "
+            "(has_more={has_more}, session={session})",
             short_id=event.ingest_run_id[:8],
             batch_index=batch_index,
             record_count=len(output.records),
             has_more=has_more,
+            session=continuation.fingerprint,
             ingest_run_id=event.ingest_run_id,
         )
         if has_more:
@@ -359,6 +383,50 @@ class ProcessBatch(EventHandler[NextBatchRequested]):
         # batch is emitted exactly once and the ingest skip guard is armed with it.
         await self.uow.commit()
         return False
+
+    async def _guard_progress(
+        self,
+        event: NextBatchRequested,
+        continuation: Continuation,
+        records: list[dict[str, Any]],
+    ) -> None:
+        """Raise ``NO_PROGRESS`` when this batch provably repeats the previous one (#227).
+
+        Continuation comes from the session alone, so an ingester that hands
+        back the state it was given will be handed it again: with the same
+        session and the same limit, the next pull is byte-identical and the run
+        cannot advance. The window check confirms it against the previous
+        batch's persisted records, so an ingester whose session is a constant
+        marker but whose records do advance (a draining queue) is left alone.
+
+        Raised as a :class:`RuntimeFailure` so the #152 path decides the blast
+        radius: the policy maps ``NO_PROGRESS`` to ``AbortRun``, and the caller's
+        existing handler records the reason on the run. Runs before anything
+        durable is written, so a stalled batch is neither counted nor enqueued.
+        """
+        # Batch 0 has no predecessor to compare against. Reachable when a crash
+        # between write_session and mark_batch_ingested re-drives the first batch
+        # with a session already on disk; batch 1 catches a genuine stall anyway.
+        if event.batch_index < 1 or not continuation.unchanged:
+            return
+
+        window = BatchWindow.of(IngesterRecord.from_dicts(records))
+        previous = BatchWindow.of(
+            IngesterRecord.from_dicts(
+                await self.ingest_storage.read_records(event.ingest_run_id, event.batch_index - 1)
+            )
+        )
+        if not window.repeats(previous):
+            return
+
+        raise RuntimeFailure(
+            FailureKind.NO_PROGRESS,
+            f"ingester returned the same continuation state it was given "
+            f"(session {continuation.fingerprint}) and re-emitted the same "
+            f"{len(window.source_ids)} upstream ids, so the next pull would be "
+            f"identical. Continuation comes from ctx.set_session(...): advance the "
+            f"state you pass it, and stop setting it on the final batch.",
+        )
 
     async def _hooks_recorded(self, event: NextBatchRequested, hooks: list[HookName]) -> bool:
         """True iff every hook's deterministic run row exists (hooks concluded).

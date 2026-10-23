@@ -192,11 +192,15 @@ class TestMarkBatchIngested:
         run.batches_ingested = 0
         await repo.save(run)
 
-        result = await repo.mark_batch_ingested("ing-mb1", 0, ingestion_finished=False)
+        result = await repo.mark_batch_ingested(
+            "ing-mb1", 0, ingestion_finished=False, record_count=60
+        )
 
         assert isinstance(result, Applied)
         assert result.run.batches_ingested == 1
         assert result.run.ingestion_finished is False
+        # The records actually pulled, not batches × batch_size (#227).
+        assert result.run.records_sourced == 60
 
     async def test_idempotent_on_repeat_with_same_index(self, pg_session: AsyncSession, release_id):
         repo = PostgresIngestRunRepository(pg_session)
@@ -204,14 +208,21 @@ class TestMarkBatchIngested:
         run.batches_ingested = 0
         await repo.save(run)
 
-        first = await repo.mark_batch_ingested("ing-mb2", 3, ingestion_finished=False)
-        second = await repo.mark_batch_ingested("ing-mb2", 3, ingestion_finished=False)
+        first = await repo.mark_batch_ingested(
+            "ing-mb2", 3, ingestion_finished=False, record_count=60
+        )
+        second = await repo.mark_batch_ingested(
+            "ing-mb2", 3, ingestion_finished=False, record_count=60
+        )
 
         assert isinstance(first, Applied)
         assert isinstance(second, Applied)
         # GREATEST(4, 4) = 4 — the duplicate delivery does not double-count.
         assert first.run.batches_ingested == 4
         assert second.run.batches_ingested == 4
+        # records_sourced rides the same advance predicate, so neither does it (#227).
+        assert first.run.records_sourced == 60
+        assert second.run.records_sourced == 60
 
     async def test_never_rolls_back_a_counter_that_ran_ahead(
         self, pg_session: AsyncSession, release_id
@@ -222,10 +233,15 @@ class TestMarkBatchIngested:
         run.batches_ingested = 5
         await repo.save(run)
 
-        result = await repo.mark_batch_ingested("ing-mb3", 1, ingestion_finished=False)
+        result = await repo.mark_batch_ingested(
+            "ing-mb3", 1, ingestion_finished=False, record_count=60
+        )
 
         assert isinstance(result, Applied)
         assert result.run.batches_ingested == 5  # GREATEST(5, 2) = 5
+        # The late delivery's records are not counted either — the run already
+        # counted that batch when it first advanced past it.
+        assert result.run.records_sourced == 0
 
     async def test_ingestion_finished_latches_true(self, pg_session: AsyncSession, release_id):
         repo = PostgresIngestRunRepository(pg_session)
@@ -233,12 +249,16 @@ class TestMarkBatchIngested:
         run.batches_ingested = 0
         await repo.save(run)
 
-        finished = await repo.mark_batch_ingested("ing-mb4", 0, ingestion_finished=True)
+        finished = await repo.mark_batch_ingested(
+            "ing-mb4", 0, ingestion_finished=True, record_count=1
+        )
         assert isinstance(finished, Applied)
         assert finished.run.ingestion_finished is True
 
         # A later call with the flag False must NOT reset the latch.
-        again = await repo.mark_batch_ingested("ing-mb4", 1, ingestion_finished=False)
+        again = await repo.mark_batch_ingested(
+            "ing-mb4", 1, ingestion_finished=False, record_count=1
+        )
         assert isinstance(again, Applied)
         assert again.run.ingestion_finished is True
 
@@ -252,7 +272,9 @@ class TestMarkBatchIngested:
             completed_at=datetime.now(UTC),
         )
 
-        result = await repo.mark_batch_ingested("ing-mb5", 9, ingestion_finished=True)
+        result = await repo.mark_batch_ingested(
+            "ing-mb5", 9, ingestion_finished=True, record_count=1
+        )
 
         assert isinstance(result, RunClosed)
         fetched = await repo.get(IngestRunId("ing-mb5"))
@@ -262,7 +284,94 @@ class TestMarkBatchIngested:
     async def test_missing_run_raises(self, pg_session: AsyncSession, release_id):
         repo = PostgresIngestRunRepository(pg_session)
         with pytest.raises(NotFoundError):
-            await repo.mark_batch_ingested("does-not-exist", 0, ingestion_finished=False)
+            await repo.mark_batch_ingested(
+                "does-not-exist", 0, ingestion_finished=False, record_count=0
+            )
+
+
+@pytest.mark.asyncio
+class TestCancel:
+    """The operator's stop lever, as one guarded UPDATE (#227)."""
+
+    async def test_cancels_a_running_run(self, pg_session: AsyncSession, release_id):
+        repo = PostgresIngestRunRepository(pg_session)
+        await repo.save(_make_run("ing-can1", release_id=release_id))
+
+        result = await repo.cancel(
+            "ing-can1", reason="cancelled by operator", completed_at=datetime.now(UTC)
+        )
+
+        assert isinstance(result, Applied)
+        assert result.run.status is IngestStatus.CANCELLED
+        assert result.run.ingestion_finished is True
+        assert result.run.failure_reason == "cancelled by operator"
+        # Terminal, but not a failure.
+        assert result.run.failure_kind is None
+
+    async def test_cancel_is_a_noop_on_a_terminal_run(self, pg_session: AsyncSession, release_id):
+        repo = PostgresIngestRunRepository(pg_session)
+        await repo.save(_make_run("ing-can2", release_id=release_id))
+        await repo.abort(
+            "ing-can2",
+            reason="bad image",
+            kind=FailureKind.IMAGE_PULL,
+            completed_at=datetime.now(UTC),
+        )
+
+        result = await repo.cancel(
+            "ing-can2", reason="cancelled by operator", completed_at=datetime.now(UTC)
+        )
+
+        assert isinstance(result, RunClosed)
+        fetched = await repo.get(IngestRunId("ing-can2"))
+        assert fetched is not None
+        assert fetched.status is IngestStatus.FAILED
+        assert fetched.failure_reason == "bad image"
+
+    async def test_cancel_twice_is_a_noop(self, pg_session: AsyncSession, release_id):
+        repo = PostgresIngestRunRepository(pg_session)
+        await repo.save(_make_run("ing-can3", release_id=release_id))
+
+        first = await repo.cancel(
+            "ing-can3", reason="cancelled by operator", completed_at=datetime.now(UTC)
+        )
+        second = await repo.cancel("ing-can3", reason="again", completed_at=datetime.now(UTC))
+
+        assert isinstance(first, Applied)
+        assert isinstance(second, RunClosed)
+
+    async def test_counters_are_noops_after_cancelling(self, pg_session: AsyncSession, release_id):
+        """CANCELLED really is terminal to the guarded counter updates.
+
+        An in-flight batch finishing after the cancel must not resurrect the
+        run or move its counters.
+        """
+        repo = PostgresIngestRunRepository(pg_session)
+        await repo.save(_make_run("ing-can4", release_id=release_id))
+        await repo.cancel(
+            "ing-can4", reason="cancelled by operator", completed_at=datetime.now(UTC)
+        )
+
+        completed = await repo.increment_completed("ing-can4", published_count=10)
+        ingested = await repo.mark_batch_ingested(
+            "ing-can4", 9, ingestion_finished=True, record_count=100
+        )
+
+        assert isinstance(completed, RunClosed)
+        assert isinstance(ingested, RunClosed)
+        fetched = await repo.get(IngestRunId("ing-can4"))
+        assert fetched is not None
+        assert fetched.status is IngestStatus.CANCELLED
+        assert fetched.published_count == 0
+
+    async def test_cancel_on_missing_run_raises(self, pg_session: AsyncSession, release_id):
+        repo = PostgresIngestRunRepository(pg_session)
+        with pytest.raises(NotFoundError):
+            await repo.cancel(
+                "does-not-exist",
+                reason="cancelled by operator",
+                completed_at=datetime.now(UTC),
+            )
 
 
 @pytest.mark.asyncio
@@ -279,3 +388,76 @@ class TestReleaseSnapshot:
         loaded = await repo.get("ing-rel")
         assert loaded is not None
         assert loaded.release_id == release_id
+
+
+@pytest.mark.asyncio
+class TestStart:
+    """start — the PENDING → RUNNING transition, guarded like every other mutation (#227).
+
+    It used to be a read-then-``save``: an operator cancel that committed
+    between the worker's read and its save was overwritten with RUNNING, the
+    reason was cleared, and batches kept running after a 200 cancel response.
+    """
+
+    async def test_pending_run_becomes_running(self, pg_session: AsyncSession, release_id):
+        repo = PostgresIngestRunRepository(pg_session)
+        await repo.save(_make_run("ing-start", IngestStatus.PENDING, release_id=release_id))
+
+        result = await repo.start(IngestRunId("ing-start"))
+
+        assert isinstance(result, Applied)
+        assert result.run.status is IngestStatus.RUNNING
+
+    async def test_already_running_is_an_idempotent_no_op(
+        self, pg_session: AsyncSession, release_id
+    ):
+        # Batch 0 can be redelivered, so starting twice must not be an error.
+        repo = PostgresIngestRunRepository(pg_session)
+        await repo.save(_make_run("ing-start-2", IngestStatus.RUNNING, release_id=release_id))
+
+        result = await repo.start(IngestRunId("ing-start-2"))
+
+        assert isinstance(result, Applied)
+        assert result.run.status is IngestStatus.RUNNING
+
+    async def test_cancelled_run_is_not_resurrected(self, pg_session: AsyncSession, release_id):
+        repo = PostgresIngestRunRepository(pg_session)
+        await repo.save(_make_run("ing-start-3", IngestStatus.PENDING, release_id=release_id))
+        await repo.cancel(
+            "ing-start-3", reason="cancelled by operator", completed_at=datetime.now(UTC)
+        )
+
+        result = await repo.start(IngestRunId("ing-start-3"))
+
+        assert isinstance(result, RunClosed)
+        fetched = await repo.get(IngestRunId("ing-start-3"))
+        assert fetched is not None
+        assert fetched.status is IngestStatus.CANCELLED
+        assert fetched.failure_reason == "cancelled by operator"
+        assert fetched.ingestion_finished is True
+
+    async def test_missing_run_raises(self, pg_session: AsyncSession):
+        repo = PostgresIngestRunRepository(pg_session)
+
+        with pytest.raises(NotFoundError):
+            await repo.start(IngestRunId("nope"))
+
+
+@pytest.mark.asyncio
+class TestSaveRoundTrip:
+    async def test_records_sourced_survives_save_and_load(
+        self, pg_session: AsyncSession, release_id
+    ):
+        # The limit is counted off records_sourced, so a save that silently
+        # dropped it would make the run's own limit arithmetic wrong (#227).
+        repo = PostgresIngestRunRepository(pg_session)
+        run = _make_run("ing-rs", release_id=release_id)
+        run.records_sourced = 137
+        run.limit = 500
+
+        await repo.save(run)
+
+        fetched = await repo.get(IngestRunId("ing-rs"))
+        assert fetched is not None
+        assert fetched.records_sourced == 137
+        assert fetched.limit == 500

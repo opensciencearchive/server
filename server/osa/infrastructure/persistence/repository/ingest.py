@@ -24,7 +24,9 @@ logger = logging.getLogger(__name__)
 
 # Counter/state mutations only apply while a run is non-terminal — a stale batch
 # that finishes after abort_run/completion must not mutate the closed run (#152).
-_NON_TERMINAL = (IngestStatus.PENDING.value, IngestStatus.RUNNING.value)
+# Derived from the status itself, so a new status can never be missed by a
+# guarded UPDATE here (#227).
+_NON_TERMINAL = tuple(s.value for s in IngestStatus if not s.is_terminal)
 
 
 class PostgresIngestRunRepository(IngestRunRepository):
@@ -46,6 +48,11 @@ class PostgresIngestRunRepository(IngestRunRepository):
             "published_count": ingest_run.published_count,
             "batches_failed": ingest_run.batches_failed,
             "batch_size": ingest_run.batch_size,
+            # Every column _row_to_ingest_run reads has to be written here too,
+            # or a save/load round-trip silently drops it. records_sourced was
+            # read-only for exactly that reason, and the run limit counts off
+            # it (#227) — asymmetry here becomes a wrong limit later.
+            "records_sourced": ingest_run.records_sourced,
             "record_limit": ingest_run.limit,
             "started_at": ingest_run.started_at,
             "completed_at": ingest_run.completed_at,
@@ -62,6 +69,33 @@ class PostgresIngestRunRepository(IngestRunRepository):
         )
         await self._session.execute(stmt)
         await self._session.flush()
+
+    async def start(self, id: str) -> RunUpdate:
+        """Move a PENDING run to RUNNING in one guarded UPDATE (#227).
+
+        Guarded like every other mutation here, because the transition races an
+        operator cancel: read-then-:meth:`save` would overwrite a cancel that
+        committed in between, clearing its reason and letting batches keep
+        running after a successful cancel response. A terminal run is left
+        untouched (``RunClosed``); an already-RUNNING run is reported
+        ``Applied`` unchanged, since batch 0 can be redelivered.
+        """
+        t = ingest_runs_table
+        stmt = (
+            update(t)
+            .where(t.c.id == id)
+            .where(t.c.status.in_(_NON_TERMINAL))
+            .values(
+                status=case(
+                    (t.c.status == IngestStatus.PENDING.value, IngestStatus.RUNNING.value),
+                    else_=t.c.status,
+                )
+            )
+            .returning(*t.c)
+        )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return await self._applied_or_closed(result.mappings().first(), id)
 
     async def get(self, id: str) -> IngestRun | None:
         stmt = select(ingest_runs_table).where(ingest_runs_table.c.id == id)
@@ -82,11 +116,7 @@ class PostgresIngestRunRepository(IngestRunRepository):
         stmt = (
             select(ingest_runs_table)
             .where(ingest_runs_table.c.convention_id == convention_id)
-            .where(
-                ingest_runs_table.c.status.in_(
-                    [IngestStatus.PENDING.value, IngestStatus.RUNNING.value]
-                )
-            )
+            .where(ingest_runs_table.c.status.in_(_NON_TERMINAL))
             .limit(1)
         )
         result = await self._session.execute(stmt)
@@ -134,7 +164,7 @@ class PostgresIngestRunRepository(IngestRunRepository):
         return await self._applied_or_closed(result.mappings().first(), id)
 
     async def mark_batch_ingested(
-        self, id: str, batch_index: int, *, ingestion_finished: bool
+        self, id: str, batch_index: int, *, ingestion_finished: bool, record_count: int
     ) -> RunUpdate:
         """Idempotently advance batches_ingested to batch_index+1, non-terminal only (#160).
 
@@ -143,12 +173,18 @@ class PostgresIngestRunRepository(IngestRunRepository):
         ran ahead — is a no-op. ``ingestion_finished`` latches True and is never
         reset (omitted from the UPDATE when the flag is False, mirroring
         ``increment_batches_ingested``).
+
+        ``records_sourced`` accumulates under the *same* advance predicate, so
+        the record count lands exactly when the batch is newly counted and a
+        redelivery adds nothing (#227).
         """
         t = ingest_runs_table
+        advances = t.c.batches_ingested < batch_index + 1
         values = {
-            "batches_ingested": case(
-                (t.c.batches_ingested < batch_index + 1, batch_index + 1),
-                else_=t.c.batches_ingested,
+            "batches_ingested": case((advances, batch_index + 1), else_=t.c.batches_ingested),
+            "records_sourced": case(
+                (advances, t.c.records_sourced + record_count),
+                else_=t.c.records_sourced,
             ),
         }
         if ingestion_finished:
@@ -230,6 +266,32 @@ class PostgresIngestRunRepository(IngestRunRepository):
         await self._session.flush()
         return await self._applied_or_closed(result.mappings().first(), id)
 
+    async def cancel(self, id: str, *, reason: str, completed_at: datetime) -> RunUpdate:
+        """Cancel a non-terminal run in one guarded UPDATE (#227).
+
+        Mirrors :meth:`abort`, but leaves ``failure_kind`` NULL: a cancellation
+        is terminal without being a failure. ``RunClosed`` when the run had
+        already finished — the caller surfaces that as a conflict rather than
+        reporting a cancel that did nothing.
+        """
+        t = ingest_runs_table
+        stmt = (
+            update(t)
+            .where(t.c.id == id)
+            .where(t.c.status.in_(_NON_TERMINAL))
+            .values(
+                status=IngestStatus.CANCELLED.value,
+                failure_reason=reason,
+                failure_kind=None,
+                ingestion_finished=True,
+                completed_at=completed_at,
+            )
+            .returning(*t.c)
+        )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return await self._applied_or_closed(result.mappings().first(), id)
+
     async def record_failure(self, id: str, *, reason: str, kind: FailureKind | None) -> None:
         """Record why a run failed / ingestion stopped early, without touching status.
 
@@ -264,6 +326,7 @@ def _row_to_ingest_run(row: dict) -> IngestRun:
         published_count=row["published_count"],
         batches_failed=row.get("batches_failed", 0),
         batch_size=row["batch_size"],
+        records_sourced=row["records_sourced"],
         limit=row.get("record_limit"),
         started_at=row["started_at"],
         completed_at=row.get("completed_at"),

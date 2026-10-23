@@ -126,20 +126,31 @@ class IngestService(Service):
         """List ingest runs, most recently started first."""
         return await self.ingest_repo.list(limit=limit)
 
-    async def ensure_running(self, ingest_run_id: IngestRunId) -> IngestRun:
-        """Transition a PENDING run to RUNNING (idempotent), returning the run."""
-        run = await self.get_ingestion(ingest_run_id)
-        if run.status == IngestStatus.PENDING:
-            run.mark_running()
-            await self.ingest_repo.save(run)
-        return run
+    async def ensure_running(self, ingest_run_id: IngestRunId) -> RunUpdate:
+        """Transition a PENDING run to RUNNING, guarded and idempotent (#227).
+
+        One guarded UPDATE rather than read-modify-write: an operator cancel
+        that commits while a worker is starting the run would otherwise be
+        overwritten with RUNNING — a 200 cancel response, and batches carrying
+        on regardless. ``RunClosed`` means exactly that happened, and the caller
+        sources nothing.
+        """
+        return await self.ingest_repo.start(ingest_run_id)
 
     async def mark_batch_ingested(
-        self, ingest_run_id: IngestRunId, batch_index: int, *, ingestion_finished: bool
+        self,
+        ingest_run_id: IngestRunId,
+        batch_index: int,
+        *,
+        ingestion_finished: bool,
+        record_count: int,
     ) -> RunUpdate:
-        """Idempotently record that ``batch_index`` was sourced (#160)."""
+        """Idempotently record that ``batch_index`` sourced ``record_count`` records (#160)."""
         return await self.ingest_repo.mark_batch_ingested(
-            ingest_run_id, batch_index, ingestion_finished=ingestion_finished
+            ingest_run_id,
+            batch_index,
+            ingestion_finished=ingestion_finished,
+            record_count=record_count,
         )
 
     async def close_sourcing(self, ingest_run_id: IngestRunId) -> RunUpdate:
@@ -269,6 +280,41 @@ class IngestService(Service):
                     reason=reason,
                     ingest_run_id=ingest_run_id,
                 )
+
+    async def cancel_ingestion(self, ingest_run_id: IngestRunId, *, reason: str) -> IngestRun:
+        """Stop a run at an operator's request (#227).
+
+        Terminalizes the run so the batch-scheduling guard drops every
+        subsequent ``NextBatchRequested``. A batch already parked on its
+        containers runs to completion; its counter updates then land as
+        ``RunClosed`` no-ops, so nothing is corrupted — only that one batch's
+        container time is spent. Killing live containers needs run → container
+        handles that don't exist yet.
+
+        Raises ``ConflictError`` if the run has already finished, failed or
+        been cancelled: reporting a successful cancel there would be a lie.
+        """
+        match await self.ingest_repo.cancel(
+            ingest_run_id,
+            reason=reason,
+            completed_at=datetime.now(UTC),
+        ):
+            case RunClosed():
+                raise ConflictError(
+                    f"Ingest run {ingest_run_id} is already finished",
+                    code="ingest_not_cancellable",
+                )
+            case Applied(run):
+                # Terminal metric for the cancel path — the run reaches
+                # CANCELLED exactly once here (a second cancel is RunClosed).
+                self.instrumentation.run_finished(status=run.status, kind=None)
+                log.info(
+                    "[{short_id}] run CANCELLED: {reason}",
+                    short_id=str(ingest_run_id)[:8],
+                    reason=reason,
+                    ingest_run_id=ingest_run_id,
+                )
+                return run
 
     async def _check_completion(self, ingest_run: IngestRun) -> None:
         """Transition to COMPLETED and emit IngestCompleted if all batches are accounted for."""

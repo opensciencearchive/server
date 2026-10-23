@@ -21,7 +21,13 @@ const STATUS: Record<IngestionStatus, { label: string; tone: Tone }> = {
   running: { label: "Running", tone: "info" },
   completed: { label: "Completed", tone: "success" },
   failed: { label: "Failed", tone: "danger" },
+  // Terminal, but stopped on purpose — not a failure.
+  cancelled: { label: "Cancelled", tone: "neutral" },
 };
+
+// Statuses that carry a reason worth showing: `failure_reason` is the run's
+// general "why did this stop" field, so a cancel lands there too.
+const STOPPED = new Set<IngestionStatus>(["failed", "cancelled"]);
 
 function formatStarted(date: Date): string {
   return date.toLocaleString("en-GB", {
@@ -59,7 +65,7 @@ export function IngestionsPanel({ archiveId }: { archiveId: string }) {
                 <>
                   <span className={styles.srn}>{r.id}</span>
                   <span className={styles.recordTitle}>{r.convention}</span>
-                  {r.status === "failed" && r.failureReason && (
+                  {STOPPED.has(r.status) && r.failureReason && (
                     <span className={styles.failReason}>{r.failureReason}</span>
                   )}
                 </>

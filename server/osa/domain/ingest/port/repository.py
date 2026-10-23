@@ -23,6 +23,17 @@ class IngestRunRepository(Port, Protocol):
         ...
 
     @abstractmethod
+    async def start(self, id: IngestRunId) -> RunUpdate:
+        """Move a PENDING run to RUNNING in one guarded, idempotent UPDATE.
+
+        Guarded because the transition races an operator cancel: ``RunClosed``
+        when the run was terminalized first, so a cancel is never overwritten
+        with RUNNING (#227). An already-RUNNING run is ``Applied`` unchanged;
+        raises ``NotFoundError`` if the run is missing.
+        """
+        ...
+
+    @abstractmethod
     async def get(self, id: IngestRunId) -> IngestRun | None:
         """Get an ingest run by ID."""
         ...
@@ -50,14 +61,21 @@ class IngestRunRepository(Port, Protocol):
 
     @abstractmethod
     async def mark_batch_ingested(
-        self, id: IngestRunId, batch_index: int, *, ingestion_finished: bool
+        self,
+        id: IngestRunId,
+        batch_index: int,
+        *,
+        ingestion_finished: bool,
+        record_count: int,
     ) -> RunUpdate:
-        """Idempotently record that batch ``batch_index`` was sourced (#160).
+        """Idempotently record that batch ``batch_index`` sourced ``record_count`` records.
 
         Sets ``batches_ingested = max(batches_ingested, batch_index + 1)`` and
         latches ``ingestion_finished = ingestion_finished OR :flag``, so a
         duplicate delivery (same index) is a harmless no-op and a counter that
-        already ran ahead is never rolled back. Guarded to non-terminal runs:
+        already ran ahead is never rolled back (#160). ``records_sourced`` rides
+        the same advance guard, so it tracks the records actually pulled without
+        double-counting a redelivery (#227). Guarded to non-terminal runs:
         ``Applied`` (with the run), ``RunClosed`` when already terminal;
         raises ``NotFoundError`` if the run is missing.
         """
@@ -96,6 +114,18 @@ class IngestRunRepository(Port, Protocol):
         completed_at in one guarded UPDATE so concurrent batch workers can race
         to abort safely. Returns ``Applied`` (with the updated run), or
         ``RunClosed`` if the run was already COMPLETED/FAILED (idempotent no-op).
+        """
+        ...
+
+    @abstractmethod
+    async def cancel(self, id: IngestRunId, *, reason: str, completed_at: datetime) -> RunUpdate:
+        """Atomically cancel a run at an operator's request, if not already terminal.
+
+        Sets status=CANCELLED, ``failure_reason`` (the reason, not a failure —
+        ``failure_kind`` stays NULL), ``ingestion_finished`` and
+        ``completed_at`` in one guarded UPDATE. Returns ``Applied`` (with the
+        updated run), or ``RunClosed`` when the run had already finished,
+        failed or been cancelled (#227).
         """
         ...
 

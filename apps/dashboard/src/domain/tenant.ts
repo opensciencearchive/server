@@ -59,7 +59,12 @@ export interface TenantIngester {
   schedule: string | null;
 }
 
-export type IngestionStatus = "pending" | "running" | "completed" | "failed";
+export type IngestionStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 /** One ingest run. `pending`/`running` are still in-progress. */
 export interface IngestionRun {

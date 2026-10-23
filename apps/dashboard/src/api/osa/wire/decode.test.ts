@@ -224,6 +224,30 @@ describe("decodeIngestionRuns", () => {
     expect(out[1]!.failureReason).toBe("OOM on batch 3");
     expect(out[1]!.completedAt).toEqual(new Date("2026-07-24T11:09:00Z"));
   });
+
+  it("accepts a cancelled run and keeps its reason", () => {
+    // Server-side statuses are a closed enum here, so one unknown value throws
+    // and takes the whole panel down with it — not just the offending row.
+    const out = decodeIngestionRuns({
+      items: [
+        {
+          id: "ing_3",
+          convention_id: "c@1.0.0",
+          status: "cancelled",
+          ingestion_finished: true,
+          batches_ingested: 4,
+          batches_completed: 4,
+          batches_failed: 0,
+          published_count: 3600,
+          started_at: "2026-07-24T11:02:00Z",
+          completed_at: "2026-07-24T11:20:00Z",
+          failure_reason: "cancelled by operator",
+        },
+      ],
+    });
+    expect(out[0]!.status).toBe("cancelled");
+    expect(out[0]!.failureReason).toBe("cancelled by operator");
+  });
 });
 
 describe("decodeObservability", () => {

@@ -39,11 +39,15 @@ class FailureKind(StrEnum):
     UPSTREAM = "upstream"  # ingester non-zero exit — usually an upstream API failure
     HOOK_EXIT = "hook_exit"  # hook non-zero exit — deterministic code failure
     RUNTIME = "runtime"  # container runtime hiccup (docker error, eviction, K8s 5xx)
+    NO_PROGRESS = "no_progress"  # ingester re-emitted its window without advancing (#227)
     UNKNOWN = "unknown"
 
 
 class RuntimeFailure(OSAError):
-    """A runtime failure observation raised by a container runner.
+    """A runtime failure observation about a container run.
+
+    Raised by a container runner, or by the orchestrator when it observes a
+    contract violation in a runner's *output* (``NO_PROGRESS``, #227).
 
     Facts only — the cause and diagnostics of what happened. Disposition
     (retry / give up / abort) is decided by :class:`FailurePolicy`, never here.
@@ -180,6 +184,11 @@ class FailurePolicy:
                 )
             case FailureKind.TIMEOUT | FailureKind.UPSTREAM | FailureKind.RUNTIME:
                 return Retry()
+            case FailureKind.NO_PROGRESS:
+                # A contract violation, not an environment fault: the ingester's
+                # continuation state didn't advance, so every further batch
+                # would repeat the one that stalled (#227).
+                return AbortRun(reason=failure.detail, kind=failure.kind)
             case FailureKind.HOOK_EXIT:
                 # Deterministic code failure — a blind rerun would fail identically.
                 return GiveUp(

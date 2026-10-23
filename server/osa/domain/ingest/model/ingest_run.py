@@ -18,13 +18,30 @@ class IngestStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"  # stopped at an operator's request (#227)
+
+    @property
+    def is_terminal(self) -> bool:
+        """True once the run is closed and will schedule no further batches.
+
+        The single definition of terminal: the batch-scheduling guard, the
+        repository's guarded counter updates and completion accounting all read
+        it, so adding a status cannot leave one of them behind.
+        """
+        return self in _TERMINAL
+
+
+_TERMINAL: frozenset[IngestStatus] = frozenset(
+    {IngestStatus.COMPLETED, IngestStatus.FAILED, IngestStatus.CANCELLED}
+)
 
 
 _VALID_TRANSITIONS: dict[IngestStatus, set[IngestStatus]] = {
-    IngestStatus.PENDING: {IngestStatus.RUNNING, IngestStatus.FAILED},
-    IngestStatus.RUNNING: {IngestStatus.COMPLETED, IngestStatus.FAILED},
+    IngestStatus.PENDING: {IngestStatus.RUNNING, IngestStatus.FAILED, IngestStatus.CANCELLED},
+    IngestStatus.RUNNING: {IngestStatus.COMPLETED, IngestStatus.FAILED, IngestStatus.CANCELLED},
     IngestStatus.COMPLETED: set(),
     IngestStatus.FAILED: set(),
+    IngestStatus.CANCELLED: set(),
 }
 
 
@@ -49,6 +66,12 @@ class IngestRun(Aggregate):
     batches_failed: int = 0
     batch_size: int = 1000
     limit: int | None = None  # Max total records (None = unlimited)
+    # Records the ingester actually handed over, across every sourced batch.
+    # The run limit counts these, not batches × batch_size: batches underfill
+    # routinely (the SDK skips records over max_file_mb, and the last batch of
+    # a limited run is capped short), so the batch-count estimate ran ahead of
+    # reality and ended limited runs early (#227).
+    records_sourced: int = 0
     started_at: datetime
     completed_at: datetime | None = None
     # Why the run failed (or why ingestion stopped early), queryable via
@@ -73,6 +96,18 @@ class IngestRun(Aggregate):
         self.failure_kind = kind
         self.ingestion_finished = True
 
+    def mark_cancelled(self, completed_at: datetime, *, reason: str) -> None:
+        """Stop the run at an operator's request; no further batches are scheduled.
+
+        Terminal but deliberately not a failure, so ``failure_kind`` stays
+        None — the reason rides ``failure_reason``, which is the run's
+        general "why did this stop" field.
+        """
+        self.transition_to(IngestStatus.CANCELLED)
+        self.completed_at = completed_at
+        self.failure_reason = reason
+        self.ingestion_finished = True
+
     def mark_ingestion_finished(self) -> None:
         self.ingestion_finished = True
 
@@ -87,6 +122,32 @@ class IngestRun(Aggregate):
         """
         self.batches_completed += 1
         self.published_count += published_count
+
+    # ── Record-limit arithmetic ──────────────────────────────────────────────
+
+    @property
+    def limit_reached(self) -> bool:
+        """True when the run has sourced every record it was asked for."""
+        return self.limit is not None and self.records_sourced >= self.limit
+
+    def next_batch_limit(self) -> int:
+        """How many records to ask the next pull for.
+
+        A full ``batch_size``, capped by whatever the run limit still leaves.
+        Zero once the limit is met — callers check :attr:`limit_reached` first
+        and stop sourcing.
+        """
+        if self.limit is None:
+            return self.batch_size
+        return max(0, min(self.batch_size, self.limit - self.records_sourced))
+
+    def limit_met_after(self, record_count: int) -> bool:
+        """True when counting ``record_count`` more records meets the run limit.
+
+        Used to close sourcing on the batch in hand rather than discovering it
+        on the next one.
+        """
+        return self.limit is not None and (self.records_sourced + record_count) >= self.limit
 
     @property
     def is_complete(self) -> bool:

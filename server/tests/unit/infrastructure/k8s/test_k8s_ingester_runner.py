@@ -230,7 +230,7 @@ class TestSourceJobSpec:
             ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
-            inputs=IngesterInputs(convention_id=_CONV_SLUG, limit=100, offset=50),
+            inputs=IngesterInputs(convention_id=_CONV_SLUG, limit=100),
         )
         env = spec.spec.template.spec.containers[0].env
         env_dict = {e.name: e.value for e in env}
@@ -238,23 +238,26 @@ class TestSourceJobSpec:
         assert env_dict["OSA_OUT"] == "/osa/out"
         assert env_dict["OSA_FILES"] == "/osa/files"
         assert env_dict["OSA_LIMIT"] == "100"
-        assert env_dict["OSA_OFFSET"] == "50"
 
-    def test_since_env_var(self):
-        from datetime import datetime, UTC
+    def test_no_position_or_watermark_env_vars(self):
+        """OSA_OFFSET and OSA_SINCE are gone — session is the only continuation (#227).
 
+        Both were declared end to end and never populated, so an ingester that
+        paginated on either looped or silently truncated. Nothing may emit them
+        again without the server actually tracking the value.
+        """
         runner = _make_runner()
         ingester = _make_ingester()
-        since = datetime(2026, 1, 1, tzinfo=UTC)
         spec = runner._build_job_spec(
             ingester,
             work_dir=Path("/data/sources/localhost_conv1/staging/run1"),
             files_dir=Path("/data/sources/localhost_conv1/staging/run1/files"),
-            inputs=IngesterInputs(convention_id=_CONV_SLUG, since=since),
+            inputs=IngesterInputs(convention_id=_CONV_SLUG, limit=100),
         )
         env = spec.spec.template.spec.containers[0].env
         env_dict = {e.name: e.value for e in env}
-        assert "OSA_SINCE" in env_dict
+        assert "OSA_OFFSET" not in env_dict
+        assert "OSA_SINCE" not in env_dict
 
     def test_ingester_role_label(self):
         runner = _make_runner()
@@ -574,3 +577,42 @@ class TestConventionSrnFromInputs:
         spec = call_args[0][1]
         labels = spec.metadata.labels
         assert labels["osa.io/convention"] == "my-conv"
+
+
+class TestSessionStaging:
+    """Whatever the server holds as the session is what the ingester is handed (#227).
+
+    An empty session is a session: the server persists it and hands it back on
+    the next pull, so the runner must stage it. Skipping it on falsiness hands
+    the container no session.json at all, which an ingester reads as "first
+    batch, start from the beginning" — the loop, one layer down from the guard.
+    """
+
+    @pytest.mark.asyncio
+    async def test_empty_session_is_still_staged(self, tmp_path: Path):
+        config = _make_config(data_mount_path=str(tmp_path))
+        runner = K8sIngesterRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
+        runner._run_job = AsyncMock()
+        work_dir = tmp_path / "sources" / "conv" / "staging" / "run1"
+
+        inputs = IngesterInputs(convention_id=_CONV_SLUG, session={})
+        await runner.run(_make_ingester(), inputs, work_dir / "files", work_dir)
+
+        staged = {call.args[0]: call.args[1] for call in runner._s3.put_object.call_args_list}
+        session_keys = [key for key in staged if key.endswith("session.json")]
+        assert session_keys, "empty session was not staged for the container"
+        assert staged[session_keys[0]] == "{}"
+
+    @pytest.mark.asyncio
+    async def test_absent_session_stages_nothing(self, tmp_path: Path):
+        # No session at all (batch 0) must stay distinguishable from an empty one.
+        config = _make_config(data_mount_path=str(tmp_path))
+        runner = K8sIngesterRunner(api_client=MagicMock(), config=config, s3=_make_s3_mock())
+        runner._run_job = AsyncMock()
+        work_dir = tmp_path / "sources" / "conv" / "staging" / "run1"
+
+        inputs = IngesterInputs(convention_id=_CONV_SLUG, session=None)
+        await runner.run(_make_ingester(), inputs, work_dir / "files", work_dir)
+
+        staged = [call.args[0] for call in runner._s3.put_object.call_args_list]
+        assert not [key for key in staged if key.endswith("session.json")]

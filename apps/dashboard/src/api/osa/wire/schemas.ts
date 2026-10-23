@@ -112,7 +112,13 @@ export const wireIngestionRunList = z.object({
     z.object({
       id: z.string(),
       convention_id: z.string(),
-      status: z.enum(["pending", "running", "completed", "failed"]),
+      status: z.enum([
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+      ]),
       ingestion_finished: z.boolean(),
       batches_ingested: z.number(),
       batches_completed: z.number(),

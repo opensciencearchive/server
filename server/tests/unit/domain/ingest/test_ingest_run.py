@@ -227,3 +227,141 @@ class TestBatchFailureAccounting:
         assert completed is True
         assert run.status == IngestStatus.COMPLETED
         assert run.completed_at == now
+
+
+class TestRecordLimitArithmetic:
+    """The run limit counts records actually sourced, not batches times batch_size.
+
+    The old estimate assumed every batch filled, and batches routinely don't:
+    the SDK entrypoint silently skips records whose files exceed max_file_mb,
+    and the last batch of a limited run is capped short. So the estimate ran
+    ahead of reality and the run stopped early — `--limit 250` could yield 170
+    records with nothing in the log to explain the shortfall (#227).
+    """
+
+    def test_records_sourced_defaults_to_zero(self) -> None:
+        assert _make_run().records_sourced == 0
+
+    def test_unlimited_run_always_asks_for_a_full_batch(self) -> None:
+        run = _make_run(batch_size=100, limit=None, records_sourced=5000)
+        assert run.next_batch_limit() == 100
+
+    def test_limit_caps_the_final_batch(self) -> None:
+        run = _make_run(batch_size=100, limit=250, records_sourced=200)
+        assert run.next_batch_limit() == 50
+
+    def test_underfilled_batches_do_not_shrink_the_next_batch(self) -> None:
+        # Three batches of 60 against a 250 limit: 180 sourced, so the next
+        # batch may still be a full 70. The batch-count estimate would have
+        # said 300 sourced and stopped the run.
+        run = _make_run(batch_size=100, limit=250, batches_ingested=3, records_sourced=180)
+        assert run.next_batch_limit() == 70
+
+    def test_limit_not_reached_while_underfilled(self) -> None:
+        run = _make_run(batch_size=100, limit=250, batches_ingested=3, records_sourced=180)
+        assert run.limit_reached is False
+
+    def test_limit_reached_on_exact_count(self) -> None:
+        run = _make_run(batch_size=100, limit=250, records_sourced=250)
+        assert run.limit_reached is True
+
+    def test_limit_reached_when_overshot(self) -> None:
+        run = _make_run(batch_size=100, limit=250, records_sourced=260)
+        assert run.limit_reached is True
+
+    def test_unlimited_run_never_reaches_its_limit(self) -> None:
+        assert _make_run(limit=None, records_sourced=10**6).limit_reached is False
+
+    def test_limit_met_after_counts_the_batch_in_hand(self) -> None:
+        run = _make_run(batch_size=100, limit=250, records_sourced=180)
+        assert run.limit_met_after(70) is True
+        assert run.limit_met_after(60) is False
+
+    def test_unlimited_run_is_never_met(self) -> None:
+        assert _make_run(limit=None, records_sourced=0).limit_met_after(10**6) is False
+
+    def test_exhausted_limit_asks_for_nothing(self) -> None:
+        run = _make_run(batch_size=100, limit=250, records_sourced=250)
+        assert run.next_batch_limit() == 0
+
+
+class TestCancellation:
+    """An operator can stop a run; cancelling is terminal and not a failure (#227).
+
+    Before this there was no way to stop a runaway run — GET was the only verb
+    on /ingestions/{id}, and stopping the server was the only lever.
+    """
+
+    def test_running_to_cancelled(self) -> None:
+        run = _make_run(status=IngestStatus.RUNNING)
+        run.mark_cancelled(datetime.now(UTC), reason="cancelled by operator")
+        assert run.status == IngestStatus.CANCELLED
+
+    def test_pending_to_cancelled(self) -> None:
+        run = _make_run(status=IngestStatus.PENDING)
+        run.mark_cancelled(datetime.now(UTC), reason="cancelled by operator")
+        assert run.status == IngestStatus.CANCELLED
+
+    def test_cancelling_records_the_reason_but_no_failure_kind(self) -> None:
+        run = _make_run(status=IngestStatus.RUNNING)
+        run.mark_cancelled(datetime.now(UTC), reason="cancelled by operator")
+        assert run.failure_reason == "cancelled by operator"
+        assert run.failure_kind is None
+
+    def test_cancelling_latches_ingestion_finished(self) -> None:
+        run = _make_run(status=IngestStatus.RUNNING)
+        run.mark_cancelled(datetime.now(UTC), reason="cancelled by operator")
+        assert run.ingestion_finished is True
+
+    def test_cancelling_stamps_completed_at(self) -> None:
+        at = datetime.now(UTC)
+        run = _make_run(status=IngestStatus.RUNNING)
+        run.mark_cancelled(at, reason="cancelled by operator")
+        assert run.completed_at == at
+
+    def test_cancelled_to_running_rejected(self) -> None:
+        run = _make_run(status=IngestStatus.CANCELLED)
+        with pytest.raises(InvalidStateError):
+            run.mark_running()
+
+    def test_cancelled_cannot_be_cancelled_again(self) -> None:
+        run = _make_run(status=IngestStatus.CANCELLED)
+        with pytest.raises(InvalidStateError):
+            run.mark_cancelled(datetime.now(UTC), reason="again")
+
+    def test_completed_cannot_be_cancelled(self) -> None:
+        run = _make_run(status=IngestStatus.COMPLETED)
+        with pytest.raises(InvalidStateError):
+            run.mark_cancelled(datetime.now(UTC), reason="too late")
+
+    def test_check_completion_cannot_resurrect_a_cancelled_run(self) -> None:
+        # An in-flight batch finishing after the cancel must not flip it green.
+        run = _make_run(
+            status=IngestStatus.CANCELLED,
+            ingestion_finished=True,
+            batches_ingested=1,
+            batches_completed=1,
+        )
+        assert run.check_completion(datetime.now(UTC)) is False
+        assert run.status == IngestStatus.CANCELLED
+
+
+class TestTerminalStatuses:
+    """One definition of terminal, so a new status can't be missed by a guard."""
+
+    def test_terminal_statuses(self) -> None:
+        assert IngestStatus.COMPLETED.is_terminal is True
+        assert IngestStatus.FAILED.is_terminal is True
+        assert IngestStatus.CANCELLED.is_terminal is True
+
+    def test_non_terminal_statuses(self) -> None:
+        assert IngestStatus.PENDING.is_terminal is False
+        assert IngestStatus.RUNNING.is_terminal is False
+
+    def test_every_terminal_status_is_a_dead_end(self) -> None:
+        for status in IngestStatus:
+            run = _make_run(status=status)
+            if not status.is_terminal:
+                continue
+            with pytest.raises(InvalidStateError):
+                run.transition_to(IngestStatus.RUNNING)

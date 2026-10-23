@@ -48,6 +48,7 @@ from osa.domain.validation.model.hook_result import HookExecution, HookStatus
 from osa.domain.validation.model.hook_run import HookRun, HookRunId, HookRunStatus
 
 _T0 = datetime(2026, 1, 1, tzinfo=UTC)
+_UNSET = object()
 
 
 # ── Recording test doubles ───────────────────────────────────────────────────
@@ -117,6 +118,7 @@ def _make_run(
     *,
     batches_ingested: int = 0,
     limit: int | None = None,
+    records_sourced: int = 0,
 ) -> IngestRun:
     return IngestRun(
         id=IngestRunId("run-1"),
@@ -126,6 +128,7 @@ def _make_run(
         batch_size=100,
         batches_ingested=batches_ingested,
         limit=limit,
+        records_sourced=records_sourced,
         started_at=_T0,
     )
 
@@ -222,6 +225,10 @@ def _make_handler(
     hooks_done: bool = False,
     has_capacity: bool = True,
     records=None,  # noqa: ANN001
+    session_before: dict | None = None,
+    output_session=_UNSET,  # noqa: ANN001
+    ingester_records=None,  # noqa: ANN001
+    stored_records: dict[int, list] | None = None,
 ) -> ProcessBatch:
     run = run if run is not None else _make_run()
     if executions is None:
@@ -258,16 +265,32 @@ def _make_handler(
     if runner_failure is not None:
         ingester_runner.run.side_effect = runner_failure
     else:
+        pulled = (
+            ingester_records
+            if ingester_records is not None
+            else [{"source_id": "rec-1", "metadata": {}}]
+        )
         output = IngesterOutput(
-            records=[{"source_id": "rec-1", "metadata": {}}],
-            session={"cursor": "next"} if has_more else None,
+            records=pulled,
+            session=(
+                ({"cursor": "next"} if has_more else None)
+                if output_session is _UNSET
+                else output_session
+            ),
             files_dir=Path("/tmp/files"),
         )
         ingester_runner.run.side_effect = _logged(timeline, "ingest_run", output)
 
     ingest_storage = AsyncMock()
-    ingest_storage.read_session.return_value = None
-    ingest_storage.read_records.return_value = records
+    ingest_storage.read_session.return_value = session_before
+    if stored_records is None:
+        ingest_storage.read_records.return_value = records
+    else:
+
+        async def _read_records(_run_id, batch_index):  # noqa: ANN001, ANN202
+            return stored_records.get(batch_index, records)
+
+        ingest_storage.read_records.side_effect = _read_records
     ingest_storage.write_hook_log.return_value = "/data/log"
     # Sync locator methods return Paths (not coroutines) so path arithmetic works.
     ingest_storage.batch_work_dir = MagicMock(return_value=Path("/tmp/work"))
@@ -295,7 +318,7 @@ def _make_handler(
 
     ingest_service = AsyncMock()
     ingest_service.get_ingestion.return_value = run
-    ingest_service.ensure_running.return_value = run
+    ingest_service.ensure_running.return_value = Applied(run)
     ingest_service.mark_batch_ingested.return_value = Applied(run)
     ingest_service.close_sourcing.return_value = Applied(run)
     ingest_service.complete_batch.side_effect = _logged(timeline, "complete", None)
@@ -508,8 +531,8 @@ class TestIngestSkip:
 class TestIngestLimitEarlyExit:
     @pytest.mark.asyncio
     async def test_limit_met_finishes_ingestion_and_stops(self) -> None:
-        # batches_ingested * batch_size already meets the limit.
-        run = _make_run(batches_ingested=1, limit=100)
+        # The records actually sourced already meet the limit.
+        run = _make_run(batches_ingested=1, limit=100, records_sourced=100)
         handler = _make_handler(run=run)
 
         await handler.handle(_make_event(batch_index=1))
@@ -517,6 +540,276 @@ class TestIngestLimitEarlyExit:
         handler.ingest_service.close_sourcing.assert_awaited_once_with("run-1")
         handler.ingester_runner.run.assert_not_called()
         handler.hook_service.run_hooks_for_batch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_underfilled_batches_do_not_end_a_limited_run_early(self) -> None:
+        """Three batches of 60 against a 250 limit must keep sourcing (#227).
+
+        The old estimate read batches_ingested * batch_size = 300 and closed
+        sourcing at 180 records actually pulled — a silent shortfall. Batches
+        underfill routinely: the SDK skips records over max_file_mb.
+        """
+        run = _make_run(batches_ingested=3, limit=250, records_sourced=180)
+        handler = _make_handler(run=run)
+
+        await handler.handle(_make_event(batch_index=3))
+
+        handler.ingest_service.close_sourcing.assert_not_awaited()
+        handler.ingester_runner.run.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_remaining_limit_caps_the_batch_it_asks_for(self) -> None:
+        run = _make_run(batches_ingested=3, limit=250, records_sourced=180)
+        handler = _make_handler(run=run)
+
+        await handler.handle(_make_event(batch_index=3))
+
+        inputs = handler.ingester_runner.run.call_args.kwargs["inputs"]
+        assert inputs.limit == 70
+
+    @pytest.mark.asyncio
+    async def test_batch_count_is_reported_with_the_records_it_sourced(self) -> None:
+        run = _make_run(batches_ingested=3, limit=250, records_sourced=180)
+        handler = _make_handler(
+            run=run,
+            ingester_records=[{"source_id": f"rec-{i}", "metadata": {}} for i in range(70)],
+        )
+
+        await handler.handle(_make_event(batch_index=3))
+
+        kwargs = handler.ingest_service.mark_batch_ingested.await_args.kwargs
+        assert kwargs["record_count"] == 70
+
+    @pytest.mark.asyncio
+    async def test_has_more_closes_when_the_pulled_records_meet_the_limit(self) -> None:
+        run = _make_run(batches_ingested=3, limit=250, records_sourced=180)
+        handler = _make_handler(
+            run=run,
+            ingester_records=[{"source_id": f"rec-{i}", "metadata": {}} for i in range(70)],
+        )
+
+        await handler.handle(_make_event(batch_index=3))
+
+        ready = next(e for e in _emitted(handler) if isinstance(e, IngesterBatchReady))
+        assert ready.has_more is False
+        assert not any(isinstance(e, NextBatchRequested) for e in _emitted(handler))
+
+    @pytest.mark.asyncio
+    async def test_unlimited_run_asks_for_a_full_batch(self) -> None:
+        handler = _make_handler(run=_make_run(batches_ingested=9, records_sourced=137))
+
+        await handler.handle(_make_event(batch_index=9))
+
+        inputs = handler.ingester_runner.run.call_args.kwargs["inputs"]
+        assert inputs.limit == 100
+
+
+class TestNonProgressGuard:
+    """An ingester that re-emits its window without advancing dooms the run (#227).
+
+    Continuation comes from ``ctx.set_session``, so handing back the state you
+    were given guarantees the next pull is identical. Before #227 nothing
+    detected that: the reported run executed 921 batches over several hours,
+    re-pulling the same 1,000 records and publishing 0 each time.
+    """
+
+    @staticmethod
+    def _stalling(**overrides) -> ProcessBatch:  # noqa: ANN003
+        """A batch 1 that hands back batch 0's session and batch 0's window."""
+        session = {"offset": 1000, "total": 7600}
+        kwargs = dict(
+            session_before=dict(session),
+            output_session=dict(session),
+            ingester_records=[{"source_id": "rec-1", "metadata": {}}],
+            stored_records={0: [{"source_id": "rec-1", "metadata": {}}]},
+        )
+        kwargs.update(overrides)
+        return _make_handler(**kwargs)
+
+    @pytest.mark.asyncio
+    async def test_repeated_window_with_unchanged_session_aborts_the_run(self) -> None:
+        handler = self._stalling()
+
+        await handler.handle(_make_event(batch_index=1))
+
+        kwargs = handler.ingest_service.abort_run.await_args.kwargs
+        assert kwargs["kind"] == FailureKind.NO_PROGRESS
+
+    @pytest.mark.asyncio
+    async def test_abort_reason_names_the_cause_and_the_remedy(self) -> None:
+        handler = self._stalling()
+
+        await handler.handle(_make_event(batch_index=1))
+
+        reason = handler.ingest_service.abort_run.await_args.kwargs["reason"]
+        assert "ctx.set_session" in reason
+
+    @pytest.mark.asyncio
+    async def test_stalled_batch_enqueues_nothing(self) -> None:
+        handler = self._stalling()
+
+        await handler.handle(_make_event(batch_index=1))
+
+        # The loop is the bug: a stalled batch must not request another.
+        assert not any(isinstance(e, NextBatchRequested) for e in _emitted(handler))
+        assert not any(isinstance(e, IngesterBatchReady) for e in _emitted(handler))
+
+    @pytest.mark.asyncio
+    async def test_stalled_batch_is_not_counted_or_persisted(self) -> None:
+        handler = self._stalling()
+
+        await handler.handle(_make_event(batch_index=1))
+
+        handler.ingest_service.mark_batch_ingested.assert_not_awaited()
+        handler.ingest_storage.write_records.assert_not_awaited()
+        handler.ingest_storage.write_session.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_stalled_batch_runs_no_hooks_and_publishes_nothing(self) -> None:
+        handler = self._stalling()
+
+        await handler.handle(_make_event(batch_index=1))
+
+        handler.hook_service.run_hooks_for_batch.assert_not_called()
+        handler.record_service.bulk_publish.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_advancing_session_continues(self) -> None:
+        handler = self._stalling(
+            session_before={"offset": 1000},
+            output_session={"offset": 2000},
+        )
+
+        await handler.handle(_make_event(batch_index=1))
+
+        handler.ingest_service.abort_run.assert_not_awaited()
+        assert any(isinstance(e, NextBatchRequested) for e in _emitted(handler))
+
+    @pytest.mark.asyncio
+    async def test_unchanged_session_with_new_records_continues(self) -> None:
+        # A draining queue keeps a constant session marker and still advances;
+        # the window is what distinguishes it from a loop.
+        handler = self._stalling(
+            ingester_records=[{"source_id": "rec-2", "metadata": {}}],
+        )
+
+        await handler.handle(_make_event(batch_index=1))
+
+        handler.ingest_service.abort_run.assert_not_awaited()
+        assert any(isinstance(e, NextBatchRequested) for e in _emitted(handler))
+
+    @pytest.mark.asyncio
+    async def test_first_batch_never_stalls(self) -> None:
+        handler = _make_handler(session_before=None, output_session={"offset": 1000})
+
+        await handler.handle(_make_event(batch_index=0))
+
+        handler.ingest_service.abort_run.assert_not_awaited()
+        handler.ingest_storage.read_records.assert_any_await("run-1", 0)
+
+    @pytest.mark.asyncio
+    async def test_final_batch_without_session_completes(self) -> None:
+        handler = _make_handler(session_before={"offset": 7000}, output_session=None)
+
+        await handler.handle(_make_event(batch_index=7))
+
+        handler.ingest_service.abort_run.assert_not_awaited()
+        assert not any(isinstance(e, NextBatchRequested) for e in _emitted(handler))
+
+    @pytest.mark.asyncio
+    async def test_empty_pull_with_unchanged_session_is_not_a_stall(self) -> None:
+        # Nothing pulled ends the run through has_more; it is not a loop.
+        handler = self._stalling(ingester_records=[], stored_records={0: []})
+
+        await handler.handle(_make_event(batch_index=1))
+
+        handler.ingest_service.abort_run.assert_not_awaited()
+
+
+class TestSessionRoundTripsThroughStorage:
+    """The session an ingester sets is exactly what the next batch is handed (#227).
+
+    The hole: persisting only a *truthy* session dropped the falsy-but-set
+    ``{}``, so the next batch was handed the previous session instead, the
+    guard never saw an unchanged session, and the run looped forever. These
+    drive consecutive batches through storage that actually remembers, rather
+    than injecting ``session_before`` by hand.
+    """
+
+    @staticmethod
+    def _threaded(handler: ProcessBatch) -> dict:
+        """Replace the storage double with one that remembers what it was told."""
+        sessions: list[dict | None] = [None]
+        written: dict[int, list] = {}
+
+        async def write_session(_run_id, session):  # noqa: ANN001, ANN202
+            sessions[0] = session
+
+        async def read_session(_run_id):  # noqa: ANN001, ANN202
+            return sessions[0]
+
+        async def write_records(_run_id, batch_index, records):  # noqa: ANN001, ANN202
+            written[batch_index] = records
+
+        async def read_records(_run_id, batch_index):  # noqa: ANN001, ANN202
+            return written.get(batch_index, [])
+
+        handler.ingest_storage.write_session.side_effect = write_session
+        handler.ingest_storage.read_session.side_effect = read_session
+        handler.ingest_storage.write_records.side_effect = write_records
+        handler.ingest_storage.read_records.side_effect = read_records
+        return {"sessions": sessions, "records": written}
+
+    @pytest.mark.asyncio
+    async def test_an_empty_session_is_still_persisted(self) -> None:
+        handler = _make_handler(output_session={})
+        state = self._threaded(handler)
+
+        await handler.handle(_make_event(batch_index=0))
+
+        assert state["sessions"][0] == {}
+
+    @pytest.mark.asyncio
+    async def test_an_empty_session_repeated_aborts_on_the_next_batch(self) -> None:
+        # The ingester sets `{}` every batch and re-emits the same record: the
+        # next pull is identical, so batch 1 must be the end of it.
+        handler = _make_handler(output_session={})
+        self._threaded(handler)
+
+        await handler.handle(_make_event(batch_index=0))
+        await handler.handle(_make_event(batch_index=1))
+
+        kwargs = handler.ingest_service.abort_run.await_args.kwargs
+        assert kwargs["kind"] == FailureKind.NO_PROGRESS
+
+    @pytest.mark.asyncio
+    async def test_an_advancing_session_survives_the_round_trip(self) -> None:
+        handler = _make_handler(output_session={"offset": 100})
+        state = self._threaded(handler)
+
+        await handler.handle(_make_event(batch_index=0))
+
+        assert state["sessions"][0] == {"offset": 100}
+        handler.ingest_service.abort_run.assert_not_awaited()
+
+
+class TestRunTerminalizedBeforeSourcing:
+    """A run cancelled between the skip guard and the start transition sources nothing.
+
+    ``ensure_running`` is a guarded update, so it reports ``RunClosed`` when a
+    cancel landed in that window instead of resurrecting the run as RUNNING.
+    """
+
+    @pytest.mark.asyncio
+    async def test_run_closed_stops_before_the_container(self) -> None:
+        handler = _make_handler()
+        handler.ingest_service.ensure_running.return_value = RunClosed()
+
+        await handler.handle(_make_event())
+
+        handler.ingester_runner.run.assert_not_called()
+        assert not any(isinstance(e, NextBatchRequested) for e in _emitted(handler))
+        handler.ingest_service.mark_batch_ingested.assert_not_awaited()
 
 
 class TestMarkBatchIngestedRunClosed:
@@ -778,8 +1071,14 @@ class TestBackpressure:
 
 class TestRunGuards:
     @pytest.mark.asyncio
-    async def test_terminal_run_returns_early(self) -> None:
-        handler = _make_handler(run=_make_run(status=IngestStatus.FAILED))
+    @pytest.mark.parametrize(
+        "status",
+        [IngestStatus.FAILED, IngestStatus.COMPLETED, IngestStatus.CANCELLED],
+    )
+    async def test_terminal_run_returns_early(self, status: IngestStatus) -> None:
+        # Cancelling is how an operator stops a runaway run (#227): the guard is
+        # what makes it take effect, by dropping every queued batch request.
+        handler = _make_handler(run=_make_run(status=status))
 
         await handler.handle(_make_event())
 
@@ -883,9 +1182,9 @@ class TestFinalAndLimitedBatches:
     @pytest.mark.asyncio
     async def test_limit_reached_exactly_stops_chaining(self) -> None:
         # The ingester returns records + a session (would normally chain), but
-        # completing THIS batch reaches the run's limit exactly, so has_more is
+        # the records in hand reach the run's limit exactly, so has_more is
         # forced False: ingestion is latched finished and no next batch requested.
-        handler = _make_handler(run=_make_run(batches_ingested=0, limit=100))
+        handler = _make_handler(run=_make_run(batches_ingested=0, limit=1))
 
         await handler.handle(_make_event(batch_index=0))
 
@@ -899,7 +1198,7 @@ class TestFinalAndLimitedBatches:
         # A redelivered request for a batch whose limit is already met: sourcing
         # is closed and the handler exits before touching the ingester or any
         # downstream stage.
-        run = _make_run(batches_ingested=1, limit=100)
+        run = _make_run(batches_ingested=1, limit=100, records_sourced=100)
         handler = _make_handler(run=run)
 
         await handler.handle(_make_event(batch_index=1))

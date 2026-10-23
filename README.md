@@ -120,6 +120,7 @@ Then deploy and ingest:
 osa deploy                               # register it and build its hooks
 osa ingestion start --convention pockets # pull from upstream and publish records
 osa logs server -f                       # watch it run
+osa ingestion cancel --run <id>          # stop a run early
 ```
 
 `osa test` runs the whole thing end-to-end without touching your archive. The full SDK reference lives in the [`osa-py` README](https://github.com/opensciencearchive/osa-py).
